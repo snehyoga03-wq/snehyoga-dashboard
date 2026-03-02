@@ -1,0 +1,181 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Definition of the design system. All colors, gradients, fonts, etc should be defined here. 
+All colors MUST be HSL.
+*/
+
+@layer base {
+  :root {
+    --background: 30 30% 96%;
+    --foreground: 24 58% 15%;
+
+    --card: 0 0% 100%;
+    --card-foreground: 24 58% 15%;
+
+    --popover: 0 0% 100%;
+    --popover-foreground: 24 58% 15%;
+
+    --primary: 24 58% 23%;
+    --primary-foreground: 0 0% 100%;
+
+    --secondary: 32 40% 90%;
+    --secondary-foreground: 24 58% 15%;
+
+    --muted: 30 25% 94%;
+    --muted-foreground: 24 20% 45%;
+
+    --accent: 32 81% 54%;
+    --accent-foreground: 0 0% 100%;
+
+    --destructive: 0 84.2% 60.2%;
+    --destructive-foreground: 0 0% 100%;
+
+    --border: 32 30% 85%;
+    --input: 0 0% 95%;
+    --ring: 32 81% 54%;
+
+    --radius: 0.75rem;
+    
+    /* Custom tokens - Snehyoga brand colors */
+    --sneh-brown: 24 58% 23%;
+    --sneh-brown-light: 24 40% 40%;
+    --sneh-orange: 32 81% 54%;
+    --sneh-orange-light: 32 80% 85%;
+    --sneh-cream: 30 30% 96%;
+
+    --sidebar-background: 0 0% 98%;
+
+    --sidebar-foreground: 240 5.3% 26.1%;
+
+    --sidebar-primary: 240 5.9% 10%;
+
+    --sidebar-primary-foreground: 0 0% 98%;
+
+    --sidebar-accent: 240 4.8% 95.9%;
+
+    --sidebar-accent-foreground: 240 5.9% 10%;
+
+    --sidebar-border: 220 13% 91%;
+
+    --sidebar-ring: 32 81% 54%;
+  }
+
+  .dark {
+    --background: 24 30% 8%;
+    --foreground: 30 20% 95%;
+
+    --card: 24 30% 12%;
+    --card-foreground: 30 20% 95%;
+
+    --popover: 24 30% 12%;
+    --popover-foreground: 30 20% 95%;
+
+    --primary: 32 81% 54%;
+    --primary-foreground: 0 0% 100%;
+
+    --secondary: 24 25% 20%;
+    --secondary-foreground: 30 20% 95%;
+
+    --muted: 24 20% 18%;
+    --muted-foreground: 30 15% 60%;
+
+    --accent: 32 81% 50%;
+    --accent-foreground: 0 0% 100%;
+
+    --destructive: 0 62.8% 50%;
+    --destructive-foreground: 0 0% 100%;
+
+    --border: 24 20% 22%;
+    --input: 24 20% 18%;
+    --ring: 32 81% 54%;
+    
+    --sneh-brown: 32 81% 54%;
+    --sneh-brown-light: 24 40% 50%;
+    --sneh-orange: 32 81% 55%;
+    --sneh-orange-light: 32 50% 25%;
+    --sneh-cream: 24 30% 8%;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+
+  body {
+    @apply bg-background text-foreground;
+  }
+}
+/* 🔥 Gift Box Opening Animation */
+@keyframes boxOpen {
+  0% { transform: scale(1) rotate(0deg); }
+  20% { transform: scale(1.05) rotate(-3deg); }
+  40% { transform: scale(1.1) rotate(3deg); }
+  60% { transform: scale(1.15); }
+  80% { transform: scale(1.1); }
+  100% { transform: scale(1); }
+}
+
+.box-opening {
+  animation: boxOpen 0.6s ease-in-out forwards;
+  box-shadow: 0 0 20px rgba(255,215,0,0.8);
+}
+
+/* Gradient Button Styles */
+@keyframes shake {
+  0%, 100% { transform: translateX(0); }
+  10%, 30%, 50%, 70%, 90% { transform: translateX(-3px); }
+  20%, 40%, 60%, 80% { transform: translateX(3px); }
+}
+
+.shake:hover:not(:disabled) {
+  animation: shake 0.5s ease-in-out;
+}
+
+.gradient-bg {
+  background: linear-gradient(to right, #5D3A1A, #E8962E);
+  position: relative;
+  overflow: hidden;
+  z-index: 1;
+  box-shadow: 0 4px 15px 0 rgba(232, 150, 46, 0.4);
+}
+
+.gradient-bg::before {
+  content: '';
+  position: absolute;
+  top: -50%;
+  left: -50%;
+  width: 200%;
+  height: 200%;
+  background: radial-gradient(circle, rgba(255,255,255,0.3) 0%, rgba(255,255,255,0) 70%);
+  opacity: 0;
+  z-index: -1;
+  transition: opacity 0.4s ease, transform 0.4s ease;
+  transform: scale(0.5);
+  pointer-events: none;
+}
+
+.gradient-bg:hover:not(:disabled)::before {
+  opacity: 1;
+  transform: scale(1);
+}
+
+.pulse {
+  animation: pulse 2.5s infinite;
+}
+
+@keyframes pulse {
+  0% { box-shadow: 0 0 0 0 rgba(232, 150, 46, 0.7); }
+  70% { box-shadow: 0 0 0 15px rgba(232, 150, 46, 0); }
+  100% { box-shadow: 0 0 0 0 rgba(232, 150, 46, 0); }
+}
+
+.icon-transition {
+  transition: transform 0.3s ease;
+}
+
+.gradient-bg:hover:not(:disabled) .icon-transition {
+  transform: translateX(4px);
+}

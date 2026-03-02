@@ -1,0 +1,15 @@
+[build]
+  command = "pnpm run build"
+  publish = "dist"
+
+[build.environment]
+  # Allow installs even if pnpm-lock.yaml is out of sync with package.json
+  PNPM_FLAGS = "--no-frozen-lockfile"
+  # Ensure consistent Node version during build
+  NODE_VERSION = "22"
+
+# SPA redirect rule - serve index.html for all routes
+[[redirects]]
+  from = "/*"
+  to = "/index.html"
+  status = 200
