@@ -328,6 +328,108 @@ export type Database = {
         }
         Relationships: []
       }
+      message_queue: {
+        Row: {
+          id: string
+          phone: string
+          user_name: string | null
+          template_name: string
+          template_id: string | null
+          template_category: string | null
+          template_params: Json
+          batch_id: string
+          batch_label: string | null
+          status: string
+          retry_count: number
+          max_retries: number
+          last_error: string | null
+          created_at: string
+          updated_at: string
+          processed_at: string | null
+          delivered_at: string | null
+          next_retry_at: string | null
+        }
+        Insert: {
+          id?: string
+          phone: string
+          user_name?: string | null
+          template_name: string
+          template_id?: string | null
+          template_category?: string | null
+          template_params?: Json
+          batch_id: string
+          batch_label?: string | null
+          status?: string
+          retry_count?: number
+          max_retries?: number
+          last_error?: string | null
+          created_at?: string
+          updated_at?: string
+          processed_at?: string | null
+          delivered_at?: string | null
+          next_retry_at?: string | null
+        }
+        Update: {
+          id?: string
+          phone?: string
+          user_name?: string | null
+          template_name?: string
+          template_id?: string | null
+          template_category?: string | null
+          template_params?: Json
+          batch_id?: string
+          batch_label?: string | null
+          status?: string
+          retry_count?: number
+          max_retries?: number
+          last_error?: string | null
+          created_at?: string
+          updated_at?: string
+          processed_at?: string | null
+          delivered_at?: string | null
+          next_retry_at?: string | null
+        }
+        Relationships: []
+      }
+      message_batches: {
+        Row: {
+          id: string
+          label: string
+          template_name: string | null
+          total_messages: number
+          delivered_count: number
+          failed_count: number
+          status: string
+          created_at: string
+          completed_at: string | null
+          created_by: string | null
+        }
+        Insert: {
+          id?: string
+          label: string
+          template_name?: string | null
+          total_messages?: number
+          delivered_count?: number
+          failed_count?: number
+          status?: string
+          created_at?: string
+          completed_at?: string | null
+          created_by?: string | null
+        }
+        Update: {
+          id?: string
+          label?: string
+          template_name?: string | null
+          total_messages?: number
+          delivered_count?: number
+          failed_count?: number
+          status?: string
+          created_at?: string
+          completed_at?: string | null
+          created_by?: string | null
+        }
+        Relationships: []
+      }
     }
     Views: {
       [_ in never]: never
@@ -345,6 +447,16 @@ export type Database = {
       process_referral: {
         Args: { referral_code_input: string; referred_user_id: string }
         Returns: boolean
+      }
+      publish_messages: {
+        Args: {
+          p_batch_label: string
+          p_template_name: string
+          p_template_id: string
+          p_template_category: string
+          p_users: Json
+        }
+        Returns: string
       }
     }
     Enums: {

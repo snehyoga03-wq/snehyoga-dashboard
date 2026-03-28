@@ -64,7 +64,7 @@ Deno.serve(async (req) => {
           .insert({
             referrer_user_id: referrerData.user_id,
             referred_user_id: userId,
-            days_awarded: 7
+            days_awarded: 1
           })
 
         if (referralError) {
@@ -75,7 +75,7 @@ Deno.serve(async (req) => {
             .from('referral_codes')
             .update({
               total_referrals: (referrerData.total_referrals || 0) + 1,
-              total_days_earned: (referrerData.total_days_earned || 0) + 7
+              total_days_earned: (referrerData.total_days_earned || 0) + 1
             })
             .eq('user_id', referrerData.user_id)
 

@@ -68,7 +68,7 @@ export const Referral = () => {
 
         if (referrals) {
           const totalReferrals = referrals.length;
-          const daysEarned = totalReferrals * 7; // 1 referral = 7 days
+          const daysEarned = totalReferrals * 1; // 1 referral = 1 day
 
           // Check active friends (those who still have days_left > 0)
           const referredMobiles = referrals.map(r => r.referred_mobile);
@@ -122,7 +122,7 @@ export const Referral = () => {
   };
 
   const shareReferral = async () => {
-    const shareText = `🧘 Snehyoga सह मोफत योगा क्लासेस! माझ्या लिंकवरून जॉईन करा आणि 7 दिवस मोफत मिळवा: ${referralLink}`;
+    const shareText = `🧘 Snehyoga सह मोफत योगा क्लासेस! माझ्या लिंकवरून जॉईन करा आणि 1 दिवस मोफत मिळवा: ${referralLink}`;
 
     if (navigator.share) {
       try {
@@ -279,7 +279,7 @@ export const Referral = () => {
               <div>
                 <p className="font-medium">They join for free</p>
                 <p className="text-sm text-muted-foreground">
-                  When they sign up, they get 7 free days
+                  When they sign up, they get 1 free day
                 </p>
               </div>
             </div>
@@ -288,9 +288,9 @@ export const Referral = () => {
                 3
               </div>
               <div>
-                <p className="font-medium">You earn +7 days</p>
+                <p className="font-medium">You earn +1 day</p>
                 <p className="text-sm text-muted-foreground">
-                  For each friend who joins, you get 7 extra days
+                  For each friend who joins, you get 1 extra day
                 </p>
               </div>
             </div>

@@ -11,7 +11,8 @@ import {
     MessageCircle,
     BarChart3,
     ClipboardList,
-    Link2
+    Link2,
+    SendHorizonal
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -25,13 +26,14 @@ interface SidebarProps {
 }
 
 const menuItems = [
-    { id: 'dashboard', label: 'Dashboard', icon: BarChart3 }, // Added Dashboard/Analytics as first item
+    { id: 'dashboard', label: 'Dashboard', icon: BarChart3 },
     { id: 'users', label: 'User Management', icon: Users },
     { id: 'chats', label: 'Chats', icon: MessageCircle },
-    { id: 'reminders', label: 'Reminders', icon: Calendar }, // Added Pabbly Reminders
-    { id: 'followup', label: 'Leads Management', icon: ClipboardList }, // Renamed for professional look
+    { id: 'reminders', label: 'Reminders', icon: Calendar },
+    { id: 'message-queue', label: 'Message Queue', icon: SendHorizonal },
+    { id: 'followup', label: 'Leads Management', icon: ClipboardList },
     { id: 'session-links', label: 'Session Settings', icon: Link2 },
-    { id: 'others', label: 'Others', icon: Settings }, // For future expansion
+    { id: 'others', label: 'Others', icon: Settings },
 ];
 
 export function Sidebar({

@@ -10,7 +10,7 @@ import { formatPhone } from "@/lib/utils";
 // Validation schema
 const registrationSchema = z.object({
   name: z.string().min(2, "नाव किमान २ अक्षरांचे असावे"),
-  phone: z.string().regex(/^[6-9]\d{9}$/, "कृपया वैध भारतीय मोबाईल नंबर टाका"),
+  phone: z.string().regex(/^(\+91)?[6-9]\d{9}$/, "कृपया वैध भारतीय मोबाईल नंबर टाका"),
 });
 
 export const YogaHero = () => {
@@ -94,6 +94,7 @@ export const YogaHero = () => {
               name: formData.name,
               mobile_number: normalizedPhone,
               days_left: 1,
+              subscription_plan: "Free plan",
               referral_link: referralLink,
             }
           ])
@@ -192,35 +193,69 @@ export const YogaHero = () => {
   };
 
   return (
-    <section className="py-8 px-4 bg-gradient-to-b from-background to-secondary/20 min-h-screen flex flex-col justify-center">
-      <div className="max-w-md mx-auto text-center w-full">
+    <section className="py-8 px-4 bg-gradient-to-br from-[#faf9f6] via-orange-50/30 to-rose-50/30 min-h-screen flex flex-col justify-center relative overflow-hidden">
+      {/* Decorative background blobs */}
+      <div className="absolute top-0 right-0 w-64 h-64 bg-orange-200/20 rounded-full blur-3xl -z-0 pointer-events-none"></div>
+      <div className="absolute bottom-0 left-0 w-72 h-72 bg-rose-200/20 rounded-full blur-3xl -z-0 pointer-events-none"></div>
+
+      <div className="max-w-md mx-auto w-full relative z-10">
+        
+        {/* Logo and Welcome Message */}
+        <div className="mb-10 text-center space-y-4">
+          <div className="w-44 h-44 mx-auto bg-white rounded-full shadow-xl shadow-orange-500/10 p-1 flex items-center justify-center border border-orange-100/50 transform hover:scale-105 transition-transform duration-300">
+            <img 
+              src="/ICON-SNEHYOGA-1024x1024-removebg-preview.png" 
+              alt="Snehyoga Logo" 
+              className="w-full h-full object-contain hover:rotate-3 transition-transform duration-500"
+            />
+          </div>
+          <div className="space-y-1.5">
+            <h1 className="text-3xl font-black bg-clip-text text-transparent bg-gradient-to-r from-orange-600 to-amber-600 drop-shadow-sm">
+              स्नेहा योगा
+            </h1>
+            <p className="text-gray-600 font-semibold tracking-wide">
+              तुमच्या डॅशबोर्डवर स्वागत आहे
+            </p>
+          </div>
+        </div>
+
         {/* Registration Form - Isolated */}
-        <form onSubmit={handleSubmit} className="space-y-4 mb-8">
-          <Input
-            type="text"
-            placeholder="तुमचे नाव"
-            value={formData.name}
-            onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-            className="h-12 text-lg"
-            required
-          />
-          <Input
-            type="tel"
-            placeholder="WhatsApp नंबर"
-            value={formData.phone}
-            onChange={(e) => setFormData({ ...formData, phone: e.target.value })}
-            className="h-12 text-lg"
-            maxLength={10}
-            required
-          />
+        <form onSubmit={handleSubmit} className="space-y-5 mb-8 bg-white/80 backdrop-blur-xl p-8 rounded-3xl border border-white/60 shadow-[0_8px_30px_rgb(0,0,0,0.04)] shadow-orange-500/5">
+          <div className="space-y-4">
+            <div>
+              <label className="text-xs font-bold text-gray-500 uppercase tracking-wider ml-1 mb-1.5 block">तुमचे नाव</label>
+              <Input
+                type="text"
+                placeholder="उदा. स्नेहा पाटील"
+                value={formData.name}
+                onChange={(e) => setFormData({ ...formData, name: e.target.value })}
+                className="h-14 text-lg bg-white/50 border-gray-200/80 focus:border-orange-400 focus:ring-orange-400/20 rounded-xl transition-all shadow-sm"
+                required
+              />
+            </div>
+            <div>
+              <label className="text-xs font-bold text-gray-500 uppercase tracking-wider ml-1 mb-1.5 block">WhatsApp नंबर</label>
+              <Input
+                type="tel"
+                placeholder="उदा. 9876543210"
+                value={formData.phone}
+                onChange={(e) => setFormData({ ...formData, phone: e.target.value.replace(/[^\d+]/g, '') })}
+                onBlur={() => setFormData({ ...formData, phone: formatPhone(formData.phone) })}
+                className="h-14 text-lg bg-white/50 border-gray-200/80 focus:border-orange-400 focus:ring-orange-400/20 rounded-xl transition-all shadow-sm"
+                maxLength={13}
+                required
+              />
+            </div>
+          </div>
+
           <button
             type="submit"
             disabled={isLoading}
-            className="w-full h-12 text-lg font-semibold text-white gradient-bg rounded-lg shadow-lg hover:opacity-90 transition-opacity disabled:opacity-50"
+            className="w-full h-14 mt-4 text-lg font-bold text-white bg-gradient-to-r from-orange-500 to-amber-500 rounded-xl shadow-lg shadow-orange-500/30 hover:shadow-xl hover:shadow-orange-500/40 hover:-translate-y-0.5 transition-all duration-300 disabled:opacity-70 disabled:hover:translate-y-0"
           >
             {isLoading ? (
               <span className="flex items-center justify-center gap-2">
-                <svg className="animate-spin h-5 w-5" viewBox="0 0 24 24">
+                <svg className="animate-spin h-6 w-6" viewBox="0 0 24 24">
                   <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" />
                   <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
                 </svg>

@@ -13,6 +13,7 @@ import FollowUp from "./pages/FollowUp";
 import NotFound from "./pages/NotFound";
 import ReferralRedirect from "./pages/ReferralRedirect";
 import SessionRedirect from "./pages/SessionRedirect";
+import SAP from "./pages/SAP";
 
 const queryClient = new QueryClient();
 
@@ -39,6 +40,7 @@ const App = () => (
           <Route path="/followup" element={<MobileLayout><FollowUp /></MobileLayout>} />
           <Route path="/crm" element={<CRM />} />
           <Route path="/live" element={<SessionRedirect />} />
+          <Route path="/sap" element={<SAP />} />
           {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}
           <Route path="*" element={<MobileLayout><NotFound /></MobileLayout>} />
         </Routes>

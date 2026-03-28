@@ -1,5 +1,5 @@
 // Dashboard.jsx — Minimalist View
-import { Menu, User, Calendar, Copy, Share2, Gift, PlayCircle, PauseCircle } from "lucide-react";
+import { Menu, User, Calendar, Copy, Share2, Gift, PlayCircle, PauseCircle, Download, FileText } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   Sheet,
@@ -40,6 +40,7 @@ const Dashboard = () => {
   const [isResuming, setIsResuming] = useState(false);
   const [referralLink, setReferralLink] = useState("");
   const [referralStats, setReferralStats] = useState({ totalReferrals: 0, daysEarned: 0 });
+  const [subscriptionPlan, setSubscriptionPlan] = useState<string | null>(null);
 
   // Load user data
   // Load user data & Calculate Days Left
@@ -80,6 +81,7 @@ const Dashboard = () => {
         setBatchTiming(batch_timing);
         setDaysLeft(days_left ?? 0);
         setSubscriptionPaused(subscription_paused ?? false);
+        setSubscriptionPlan(subscription_plan);
         if (referral_link) setReferralLink(normalizeReferralLink(referral_link));
 
         // Fetch referral stats
@@ -91,7 +93,7 @@ const Dashboard = () => {
         if (referrals) {
           setReferralStats({
             totalReferrals: referrals.length,
-            daysEarned: referrals.length * 7
+            daysEarned: referrals.length * 1
           });
         }
 
@@ -134,28 +136,67 @@ const Dashboard = () => {
 
       {/* Left slide-out sheet for profile menu */}
       <Sheet open={isMenuOpen} onOpenChange={setIsMenuOpen}>
-        <SheetContent side="left" className="w-[300px] sm:w-[360px]">
-          <SheetHeader>
-            <SheetTitle className="flex items-center gap-3">
-              <div className="w-12 h-12 bg-primary/10 rounded-full flex items-center justify-center">
-                <User className="w-6 h-6 text-primary" />
+        <SheetContent side="left" className="w-[300px] sm:w-[360px] bg-[#faf9f6]/95 backdrop-blur-xl border-r-0 shadow-2xl overflow-y-auto">
+          <SheetHeader className="pb-6 border-b border-gray-200/50">
+            <SheetTitle className="flex items-center gap-4">
+              <div className="w-14 h-14 bg-gradient-to-br from-orange-100 to-amber-100 rounded-full flex items-center justify-center shadow-inner border border-orange-200/50">
+                <User className="w-7 h-7 text-orange-600" />
               </div>
               <div className="text-left">
-                <p className="font-semibold">{userName}</p>
-                <p className="text-sm text-muted-foreground">{userPhone}</p>
+                <p className="font-bold text-gray-900 text-lg leading-tight">{userName}</p>
+                <p className="text-sm text-gray-500 font-medium">{userPhone}</p>
               </div>
             </SheetTitle>
           </SheetHeader>
 
           <div className="mt-8 space-y-6">
+            {/* Plan Details Card */}
+            <div className="bg-white rounded-2xl p-5 shadow-sm border border-gray-100 transition-all hover:shadow-md">
+              <h3 className="font-bold text-gray-800 mb-5 flex items-center gap-2 text-base">
+                <div className="w-8 h-8 rounded-full bg-orange-50 flex items-center justify-center">
+                  <Calendar className="w-4 h-4 text-orange-500" />
+                </div>
+                Your Plan Details
+              </h3>
+              
+              <div className="space-y-4">
+                <div className="flex justify-between items-center pb-3 border-b border-gray-50">
+                  <span className="text-sm text-gray-500 font-medium">Current Plan</span>
+                  <span className="font-bold text-gray-900 bg-gradient-to-r from-orange-50 to-amber-50 px-3 py-1 rounded-full border border-orange-100/50 text-xs text-orange-700 shadow-sm">{subscriptionPlan || 'No Active Plan'}</span>
+                </div>
+                
+                <div className="flex justify-between items-center pb-3 border-b border-gray-50">
+                  <span className="text-sm text-gray-500 font-medium">Days Left</span>
+                  <span className={`font-bold ${daysLeft !== null && daysLeft < 5 ? 'text-red-500 bg-red-50' : 'text-gray-900 bg-gray-50'} px-3 py-1 rounded-full text-xs`}>
+                    {daysLeft !== null ? `${daysLeft} days` : "-"}
+                  </span>
+                </div>
+                
+                <div className="flex justify-between items-center pb-3 border-b border-gray-50">
+                  <span className="text-sm text-gray-500 font-medium">Batch Timing</span>
+                  <span className="font-bold text-blue-700 bg-blue-50 px-3 py-1 rounded-full text-xs">{batchTiming || 'Not Assigned'}</span>
+                </div>
+                
+                <div className="flex justify-between items-center">
+                  <span className="text-sm text-gray-500 font-medium">Status</span>
+                  <div className={`flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold ${subscriptionPaused ? 'bg-red-50 text-red-700 border border-red-100' : 'bg-green-50 text-green-700 border border-green-100'}`}>
+                    <div className={`w-1.5 h-1.5 rounded-full ${subscriptionPaused ? 'bg-red-500' : 'bg-green-500 animate-pulse'}`}></div>
+                    {subscriptionPaused ? 'Paused' : 'Active'}
+                  </div>
+                </div>
+              </div>
+            </div>
+
             {/* Logout */}
-            <Button
-              variant="destructive"
-              className="w-full"
-              onClick={handleLogout}
-            >
-              Logout
-            </Button>
+            <div className="pt-4">
+              <Button
+                variant="destructive"
+                className="w-full rounded-xl h-12 font-bold shadow-sm shadow-red-500/10 hover:shadow-md hover:shadow-red-500/20 transition-all hover:-translate-y-0.5"
+                onClick={handleLogout}
+              >
+                Logout securely
+              </Button>
+            </div>
           </div>
         </SheetContent>
       </Sheet>
@@ -325,7 +366,7 @@ const Dashboard = () => {
                 <Button
                   className="h-11 w-full bg-[#25D366] hover:bg-[#128C7E] text-white shadow-lg shadow-green-500/20 font-semibold rounded-xl"
                   onClick={() => {
-                    const shareText = `🧘 Snehyoga सह मोफत योगा क्लासेस! माझ्या लिंकवरून जॉईन करा आणि 7 दिवस मोफत मिळवा: ${referralLink}`;
+                    const shareText = `🧘 Snehyoga सह मोफत योगा क्लासेस! माझ्या लिंकवरून जॉईन करा आणि 1 दिवस मोफत मिळवा: ${referralLink}`;
                     window.open(`https://wa.me/?text=${encodeURIComponent(shareText)}`, '_blank');
                   }}
                 >
@@ -339,6 +380,31 @@ const Dashboard = () => {
                 </Button>
               </div>
 
+            </div>
+          </div>
+        </div>
+
+        {/* Diet Plan Section */}
+        <div className="relative overflow-hidden rounded-2xl border border-white/60 bg-white/80 backdrop-blur-xl shadow-lg shadow-gray-200/50 mb-6 group">
+          <div className="p-5 space-y-4">
+            <div className="flex items-center gap-2">
+              <div className="w-8 h-8 rounded-full bg-orange-50 flex items-center justify-center">
+                <FileText className="w-4 h-4 text-orange-500" />
+              </div>
+              <h3 className="font-bold text-gray-800 text-lg">Your Diet Plan</h3>
+            </div>
+            
+            <div className="rounded-xl border border-orange-100 bg-gradient-to-br from-orange-50 to-amber-50 p-5 shadow-inner">
+              <p className="text-gray-700 font-medium mb-4 text-sm text-center">
+                Download your comprehensive diet plan for a healthier lifestyle! 🥗✨
+              </p>
+              <Button
+                className="w-full h-12 bg-gradient-to-r from-orange-500 to-amber-500 hover:from-orange-600 hover:to-amber-600 text-white shadow-xl shadow-orange-500/30 rounded-full font-bold tracking-wide transition-all transform hover:-translate-y-1 hover:scale-[1.03] duration-300"
+                onClick={() => window.open('https://drive.google.com/file/d/1Nb5FbaUfILoTI-F21lAAW0eOu_p27tiP/view?usp=sharing', '_blank')}
+              >
+                <Download className="w-5 h-5 mr-2 animate-bounce" />
+                Download Diet Plan
+              </Button>
             </div>
           </div>
         </div>

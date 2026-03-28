@@ -17,7 +17,7 @@ interface UserDetailProps {
 }
 
 const BATCH_TIMINGS = ["5 AM", "6 AM", "7:30 AM", "5 PM", "6 PM", "9:00 PM"];
-const PLAN_OPTIONS = ["basic", "premium", "pro"];
+const PLAN_OPTIONS = ["Free plan", "1 month plan", "3 month plan", "6 months plan", "12 months plan"];
 
 export function UserDetail({ user, onBack, onUpdate }: UserDetailProps) {
     // General editing
@@ -27,7 +27,7 @@ export function UserDetail({ user, onBack, onUpdate }: UserDetailProps) {
 
     // Subscription editing
     const [isEditingSub, setIsEditingSub] = useState(false);
-    const [editPlan, setEditPlan] = useState(user.subscription_plan || 'basic');
+    const [editPlan, setEditPlan] = useState(user.subscription_plan || '1 month plan');
     const [editDaysLeft, setEditDaysLeft] = useState(user.days_left ?? 0);
     const [editBatch, setEditBatch] = useState(user.batch_timing || '5 AM');
 
@@ -104,7 +104,7 @@ export function UserDetail({ user, onBack, onUpdate }: UserDetailProps) {
     };
 
     const handleCancelSub = () => {
-        setEditPlan(user.subscription_plan || 'basic');
+        setEditPlan(user.subscription_plan || '1 month plan');
         setEditDaysLeft(user.days_left ?? 0);
         setEditBatch(user.batch_timing || '5 AM');
         setIsEditingSub(false);
@@ -242,10 +242,10 @@ export function UserDetail({ user, onBack, onUpdate }: UserDetailProps) {
                                         <p className="text-xs font-medium text-gray-500 uppercase tracking-wider mb-1">Subscription Plan</p>
                                         {isEditingSub ? (
                                             <select className="h-9 w-full max-w-[200px] rounded-md border border-blue-200 bg-white px-3 py-1 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-blue-400" value={editPlan} onChange={(e) => setEditPlan(e.target.value)}>
-                                                {PLAN_OPTIONS.map(p => <option key={p} value={p}>{p.charAt(0).toUpperCase() + p.slice(1)}</option>)}
+                                                {PLAN_OPTIONS.map(p => <option key={p} value={p}>{p}</option>)}
                                             </select>
                                         ) : (
-                                            <p className="text-sm font-semibold text-blue-900 capitalize">{user.subscription_plan || 'Basic'}</p>
+                                            <p className="text-sm font-semibold text-blue-900">{user.subscription_plan || '1 month plan'}</p>
                                         )}
                                     </div>
                                 </div>

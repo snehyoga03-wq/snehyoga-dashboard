@@ -15,9 +15,9 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 // Plan mapping: amount in paise → { days, plan name }
 // ---------------------------------------------------------------------------
 const PLAN_MAP: Record<number, { days: number; plan: string }> = {
-    240000: { days: 365, plan: "12 Months" }, // ₹2,400
-    180000: { days: 190, plan: "6 Months" },  // ₹1,800
-    39900: { days: 30, plan: "1 Month" },   // ₹399
+    240000: { days: 365, plan: "12 months plan" }, // ₹2,400
+    180000: { days: 180, plan: "6 months plan" },  // ₹1,800
+    39900: { days: 30, plan: "1 month plan" },   // ₹399
 };
 
 // ---------------------------------------------------------------------------

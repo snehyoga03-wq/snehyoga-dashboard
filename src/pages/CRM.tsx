@@ -20,7 +20,7 @@ import {
 } from "@/components/ui/table";
 import { useToast } from "@/hooks/use-toast";
 import { LogOut, Search, Edit2, Save, X, Download, Eye, FileText, MessageCircle, Send, Paperclip, Upload, Users, Link2, BarChart3, ClipboardList, Activity, Calendar } from "lucide-react";
-import { read, utils } from "xlsx";
+import { read, utils, writeFile } from "xlsx";
 import {
   Dialog,
   DialogContent,
@@ -30,6 +30,30 @@ import {
 import { motion, AnimatePresence } from "framer-motion";
 import { Sidebar } from "./crm/Sidebar";
 import { UserDetail } from "./crm/UserDetail";
+import { formatPhone } from "@/lib/utils";
+
+// Helper functions for formatting records
+const formatPhoneNumber = (phone: string) => {
+  if (!phone) return "";
+  const cleaned = String(phone).replace(/\D/g, ''); // keep only digits
+  if (cleaned.length === 10) {
+    return `91${cleaned}`;
+  }
+  return cleaned;
+};
+
+const getParamsForUser = (user: any, templateVarsStr: string) => {
+  if (!templateVarsStr) return [];
+  if (!templateVarsStr.trim()) return [];
+  return templateVarsStr.split(',').map(s => {
+    const key = s.trim();
+    if (key === 'name') return user.name || '';
+    if (key === 'mobile_number' || key === 'phone') return user.mobile_number || user.phone || '';
+    if (key === 'days_left') return String(user.days_left || 0);
+    if (key === 'batch_timing') return user.batch_timing || '';
+    return key; // literal string
+  });
+};
 
 // Interfaces
 interface UserRecord {
@@ -92,7 +116,7 @@ interface ChatMessage {
   attachment_type?: string;
 }
 
-type Section = 'users' | 'session-links' | 'analytics' | 'followup' | 'chats' | 'dashboard';
+type Section = 'users' | 'session-links' | 'analytics' | 'followup' | 'chats' | 'dashboard' | 'message-queue';
 
 const CRM = () => {
   const navigate = useNavigate();
@@ -113,10 +137,31 @@ const CRM = () => {
   const [isLoading, setIsLoading] = useState(false);
   const [searchTerm, setSearchTerm] = useState("");
   const [filterDays7, setFilterDays7] = useState(false);
+  const [filterPlan, setFilterPlan] = useState<string>("all");
+  const getDisplayPlan = (u: UserRecord) => {
+    if (u.subscription_plan) return u.subscription_plan;
+    if ((u.days_left || 0) <= 7) return "Free plan";
+    return "1 month plan";
+  };
+
+  const [dateFrom, setDateFrom] = useState("");
+  const [dateTo, setDateTo] = useState("");
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editDaysLeft, setEditDaysLeft] = useState(0);
   const [editingPlanId, setEditingPlanId] = useState<string | null>(null);
   const [editPlanValue, setEditPlanValue] = useState('basic');
+
+  // Add User specific state
+  const [showAddUserDialog, setShowAddUserDialog] = useState(false);
+  const [showBulkUploadDialog, setShowBulkUploadDialog] = useState(false);
+  const [showBulkPreviewDialog, setShowBulkPreviewDialog] = useState(false);
+  const [bulkPreviewUsers, setBulkPreviewUsers] = useState<any[]>([]);
+  const [isUploadingBulk, setIsUploadingBulk] = useState(false);
+  const [newUserName, setNewUserName] = useState("");
+  const [newUserNumber, setNewUserNumber] = useState("");
+  const [newUserPlan, setNewUserPlan] = useState("1 month plan");
+  const [newUserJoinDate, setNewUserJoinDate] = useState(new Date().toISOString().split('T')[0]);
+  const [isAddingUser, setIsAddingUser] = useState(false);
 
   // Session links
   const [sessionLink, setSessionLink] = useState("");
@@ -154,11 +199,38 @@ const CRM = () => {
   const [pabblyUrl, setPabblyUrl] = useState("");
   const [selectedBatchTime, setSelectedBatchTime] = useState("1 PM");
   const [isTriggering, setIsTriggering] = useState(false);
+  const [reminderLogs, setReminderLogs] = useState<any[]>([]);
+  const [logsLoading, setLogsLoading] = useState(false);
+
+  // Template settings
+  const [templateId, setTemplateId] = useState("");
+  const [templateName, setTemplateName] = useState("");
+  const [templateCategory, setTemplateCategory] = useState("");
+  const [templateStatus, setTemplateStatus] = useState("");
+  const [templateBody, setTemplateBody] = useState("");
+  const [templateVariables, setTemplateVariables] = useState("");
+  const [pabblyToken, setPabblyToken] = useState("");
+  const [fetchedTemplates, setFetchedTemplates] = useState<{id: string, name: string, category: string, status: string, body: string}[]>([]);
+  const [isFetchingTemplates, setIsFetchingTemplates] = useState(false);
+  
+  // Target Audience settings
+  const [targetAudience, setTargetAudience] = useState("batch"); // batch, all, active, inactive, custom
+  const [customUsers, setCustomUsers] = useState<{name: string, phone: string}[]>([]);
+  const [customUserName, setCustomUserName] = useState("");
+  const [customUserPhone, setCustomUserPhone] = useState("");
 
   // Constants
   const BATCH_TIMINGS = ["5 AM", "6 AM", "7:30 AM", "5 PM", "6 PM", "9:00 PM"];
 
-  type Section = 'users' | 'session-links' | 'analytics' | 'followup' | 'chats' | 'dashboard' | 'reminders';
+  type Section = 'users' | 'session-links' | 'analytics' | 'followup' | 'chats' | 'dashboard' | 'reminders' | 'message-queue';
+
+  // Message Queue (Pub/Sub)
+  const [messageBatches, setMessageBatches] = useState<any[]>([]);
+  const [queueStats, setQueueStats] = useState({ pending: 0, processing: 0, delivered: 0, failed: 0, dead_letter: 0 });
+  const [isLoadingQueue, setIsLoadingQueue] = useState(false);
+  const [selectedBatchMessages, setSelectedBatchMessages] = useState<any[]>([]);
+  const [showBatchDetailDialog, setShowBatchDetailDialog] = useState(false);
+  const [selectedBatchDetail, setSelectedBatchDetail] = useState<any>(null);
   useEffect(() => {
     const isAuth = sessionStorage.getItem("crm_admin_auth") === "true";
     if (isAuth) {
@@ -169,6 +241,132 @@ const CRM = () => {
       fetchSessionLink();
     }
   }, []);
+
+  // Fetch reminder logs when entering reminders section
+  useEffect(() => {
+    if (currentSection === 'reminders' && isAuthenticated) {
+      const fetchLogs = async () => {
+        setLogsLoading(true);
+        try {
+          const { data } = await supabase
+            .from('reminder_logs')
+            .select('*')
+            .order('created_at', { ascending: false })
+            .limit(50);
+          setReminderLogs(data || []);
+        } catch (e) {
+          console.error('Error fetching reminder logs:', e);
+        } finally {
+          setLogsLoading(false);
+        }
+      };
+      fetchLogs();
+    }
+  }, [currentSection, isAuthenticated]);
+
+  // Fetch message queue data when entering message-queue section
+  useEffect(() => {
+    if (currentSection === 'message-queue' && isAuthenticated) {
+      fetchMessageQueue();
+      fetchQueueStats();
+      // Auto-refresh every 10 seconds
+      const interval = setInterval(() => {
+        fetchMessageQueue();
+        fetchQueueStats();
+      }, 10000);
+      return () => clearInterval(interval);
+    }
+  }, [currentSection, isAuthenticated]);
+
+  const fetchMessageQueue = async () => {
+    setIsLoadingQueue(true);
+    try {
+      const { data } = await supabase
+        .from('message_batches')
+        .select('*')
+        .order('created_at', { ascending: false })
+        .limit(20);
+      setMessageBatches(data || []);
+    } catch (e) {
+      console.error('Error fetching message batches:', e);
+    } finally {
+      setIsLoadingQueue(false);
+    }
+  };
+
+  const fetchQueueStats = async () => {
+    try {
+      const statuses = ['pending', 'processing', 'delivered', 'failed', 'dead_letter'];
+      const counts: any = {};
+      for (const status of statuses) {
+        const { count } = await supabase
+          .from('message_queue')
+          .select('*', { count: 'exact', head: true })
+          .eq('status', status);
+        counts[status] = count || 0;
+      }
+      setQueueStats(counts);
+    } catch (e) {
+      console.error('Error fetching queue stats:', e);
+    }
+  };
+
+  const viewBatchDetails = async (batch: any) => {
+    setSelectedBatchDetail(batch);
+    try {
+      const { data } = await supabase
+        .from('message_queue')
+        .select('*')
+        .eq('batch_id', batch.id)
+        .order('created_at', { ascending: true });
+      setSelectedBatchMessages(data || []);
+      setShowBatchDetailDialog(true);
+    } catch (e) {
+      console.error('Error fetching batch messages:', e);
+    }
+  };
+
+  const retryFailedMessages = async (batchId: string) => {
+    try {
+      const { error } = await supabase
+        .from('message_queue')
+        .update({
+          status: 'pending',
+          next_retry_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+        })
+        .eq('batch_id', batchId)
+        .in('status', ['failed', 'dead_letter']);
+
+      if (error) throw error;
+
+      // Reset batch status
+      await supabase
+        .from('message_batches')
+        .update({ status: 'queued', completed_at: null })
+        .eq('id', batchId);
+
+      toast({ title: "Retry Queued", description: "Failed messages have been re-queued for processing." });
+      fetchMessageQueue();
+      fetchQueueStats();
+    } catch (e) {
+      toast({ title: "Error", description: "Failed to retry messages", variant: "destructive" });
+    }
+  };
+
+  const triggerQueueProcessing = async () => {
+    try {
+      const { data, error } = await supabase.functions.invoke('process-message-queue', {
+        body: {},
+      });
+      if (error) throw error;
+      toast({ title: "Queue Processing Triggered", description: `Processed: ${data?.processed || 0}, Delivered: ${data?.delivered || 0}, Failed: ${data?.failed || 0}` });
+      fetchMessageQueue();
+      fetchQueueStats();
+    } catch (e) {
+      toast({ title: "Error", description: "Failed to trigger queue processing", variant: "destructive" });
+    }
+  };
 
   const handleLogin = (e: React.FormEvent) => {
     e.preventDefault();
@@ -209,6 +407,156 @@ const CRM = () => {
       toast({ title: "Error", description: "Failed to fetch users", variant: "destructive" });
     } finally {
       setIsLoading(false);
+    }
+  };
+
+  const handleAddUser = async () => {
+    if (!newUserName || !newUserNumber) {
+      toast({ title: "Error", description: "Name and number are required", variant: "destructive" });
+      return;
+    }
+    setIsAddingUser(true);
+    try {
+      const normalizedPhone = formatPhone(newUserNumber);
+      
+      const cleanName = newUserName.toLowerCase().replace(/\s+/g, '');
+      const randomNumber = Math.floor(Math.random() * 100).toString().padStart(2, '0');
+      const referralCode = `sneh${cleanName}${randomNumber}`;
+      const referralLink = `${window.location.origin}/?ref=${referralCode}`;
+
+      const getDaysForPlan = (plan: string) => {
+        switch (plan) {
+          case "Free plan": return 1;
+          case "1 month plan": return 30;
+          case "3 month plan": return 90;
+          case "6 months plan": return 180;
+          case "12 months plan": return 365;
+          default: return 30;
+        }
+      };
+
+      const { error } = await supabase.from('main_data_registration').insert({
+        name: newUserName,
+        mobile_number: normalizedPhone,
+        subscription_plan: newUserPlan,
+        created_at: new Date(newUserJoinDate).toISOString(),
+        days_left: getDaysForPlan(newUserPlan),
+        subscription_paused: false,
+        batch_timing: "Unassigned",
+        referral_link: referralLink
+      });
+      if (error) throw error;
+      
+      toast({ title: "Success", description: "User added successfully" });
+      setShowAddUserDialog(false);
+      setNewUserName("");
+      setNewUserNumber("");
+      setNewUserPlan("1 month plan");
+      setNewUserJoinDate(new Date().toISOString().split('T')[0]);
+      fetchUsers();
+    } catch (error: any) {
+      toast({ title: "Error", description: error.message || "Failed to add user", variant: "destructive" });
+    } finally {
+      setIsAddingUser(false);
+    }
+  };
+
+  const handleDownloadSample = () => {
+    const ws = utils.json_to_sheet([
+      { name: "John Doe", mobile_number: "9876543210", subscription_plan: "1 month plan", days_left: 30, batch_timing: "6 AM" },
+      { name: "Jane Doe", mobile_number: "9123456780", subscription_plan: "3 month plan", days_left: 90, batch_timing: "7:30 AM" }
+    ]);
+    const wb = utils.book_new();
+    utils.book_append_sheet(wb, ws, "Sample Users");
+    writeFile(wb, "bulk_upload_sample.xlsx");
+  };
+
+  const handleExportUsers = () => {
+    const exportData = users.map(u => ({
+      name: u.name,
+      mobile_number: u.mobile_number,
+      subscription_plan: u.subscription_plan || 'N/A',
+      days_left: u.days_left || 0,
+      subscription_status: u.subscription_paused ? 'Paused' : 'Active',
+      batch_timing: u.batch_timing || 'Unassigned',
+      joined_date: new Date(u.created_at).toLocaleDateString(),
+      referral_link: u.referral_link || ''
+    }));
+
+    const ws = utils.json_to_sheet(exportData);
+    const wb = utils.book_new();
+    utils.book_append_sheet(wb, ws, "Users Data");
+    writeFile(wb, "users_export.xlsx");
+    toast({ title: "Export Started", description: "Your data is downloading." });
+  };
+
+  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = (evt) => {
+      const bstr = evt.target?.result;
+      const wb = read(bstr, { type: 'binary' });
+      const wsname = wb.SheetNames[0];
+      const ws = wb.Sheets[wsname];
+      const data = utils.sheet_to_json(ws);
+      
+      const formattedData = data.map((row: any) => ({
+        ...row,
+        mobile_number: formatPhone(String(row.mobile_number || row.phone || '')),
+        days_left: Number(row.days_left || 30)
+      }));
+
+      setBulkPreviewUsers(formattedData);
+      setShowBulkUploadDialog(false);
+      setShowBulkPreviewDialog(true);
+    };
+    reader.readAsBinaryString(file);
+    if (fileInputRef.current) fileInputRef.current.value = '';
+  };
+
+  const handleConfirmBulkUpload = async () => {
+    setIsUploadingBulk(true);
+    try {
+      const usersToInsert = bulkPreviewUsers.map(u => {
+        const userName = String(u.name || "Unknown");
+        const cleanName = userName.toLowerCase().replace(/\s+/g, '');
+        const randomNumber = Math.floor(Math.random() * 100).toString().padStart(2, '0');
+        const referralCode = `sneh${cleanName}${randomNumber}`;
+        const referralLink = `${window.location.origin}/?ref=${referralCode}`;
+
+        return {
+          name: userName,
+          mobile_number: String(u.mobile_number || ""),
+          subscription_plan: String(u.subscription_plan || '1 month plan'),
+          days_left: Number(u.days_left || 30),
+          batch_timing: String(u.batch_timing || 'Unassigned'),
+          created_at: new Date().toISOString(),
+          subscription_paused: false,
+          referral_link: referralLink
+        };
+      });
+
+      // Filter out invalid users
+      const validUsers = usersToInsert.filter(u => u.name && u.mobile_number);
+
+      if (validUsers.length === 0) {
+        toast({ title: "Error", description: "No valid users found in the file.", variant: "destructive" });
+        return;
+      }
+
+      const { error } = await supabase.from('main_data_registration').insert(validUsers);
+      if (error) throw error;
+
+      toast({ title: "Upload Successful ✅", description: `Successfully created ${validUsers.length} users!` });
+      setShowBulkPreviewDialog(false);
+      setBulkPreviewUsers([]);
+      fetchUsers();
+    } catch (error: any) {
+      toast({ title: "Upload Error", description: error.message || "Failed to upload users", variant: "destructive" });
+    } finally {
+      setIsUploadingBulk(false);
     }
   };
 
@@ -395,7 +743,22 @@ const CRM = () => {
   const filteredUsers = users.filter((u) => {
     const matchesSearch = u.name.toLowerCase().includes(searchTerm.toLowerCase()) || u.mobile_number.includes(searchTerm);
     const matchesDaysFilter = filterDays7 ? (u.days_left || 0) <= 7 : true;
-    return matchesSearch && matchesDaysFilter;
+    const normalizePlanStr = (p: string) => (p || 'Free plan').toLowerCase().replace(/ plans?/g, '').replace(/months?/g, 'month').trim();
+    const matchesPlan = filterPlan === "all" ? true : normalizePlanStr(getDisplayPlan(u)) === normalizePlanStr(filterPlan);
+
+    // Date range filter on created_at
+    let matchesDateRange = true;
+    if (dateFrom) {
+      matchesDateRange = matchesDateRange && new Date(u.created_at) >= new Date(dateFrom);
+    }
+    if (dateTo) {
+      // Include the entire "to" day by comparing against end-of-day
+      const toEnd = new Date(dateTo);
+      toEnd.setHours(23, 59, 59, 999);
+      matchesDateRange = matchesDateRange && new Date(u.created_at) <= toEnd;
+    }
+
+    return matchesSearch && matchesDaysFilter && matchesPlan && matchesDateRange;
   });
 
   // --- Render ---
@@ -599,6 +962,47 @@ const CRM = () => {
                         )}
                       </div>
                     </Card>
+
+                    {/* Users by Plan (Plan Wise Users) */}
+                    <Card className="border border-gray-100 shadow-sm">
+                      <div className="p-4 border-b border-gray-100 bg-gray-50/50 rounded-t-xl">
+                        <h3 className="font-semibold text-gray-800 flex items-center gap-2">
+                          <BarChart3 className="w-4 h-4 text-green-500" /> Users by Plan
+                        </h3>
+                      </div>
+                      <div className="p-5 space-y-4">
+                        {(() => {
+                          const planCounts = users.reduce((acc, user) => {
+                            if (user.subscription_paused || (user.days_left || 0) <= 0) return acc; // Only count active
+                            const plan = getDisplayPlan(user);
+                            acc[plan] = (acc[plan] || 0) + 1;
+                            return acc;
+                          }, {} as Record<string, number>);
+
+                          const activeTotal = users.filter(u => !u.subscription_paused && (u.days_left || 0) > 0).length;
+                          const sortedPlans = Object.entries(planCounts).sort((a, b) => b[1] - a[1]);
+
+                          if (sortedPlans.length === 0) {
+                            return <p className="text-center text-gray-500 text-sm">No active users with assigned plans.</p>;
+                          }
+
+                          return sortedPlans.map(([plan, count]) => (
+                            <div key={plan} className="space-y-1">
+                              <div className="flex justify-between text-sm">
+                                <span className="font-medium text-gray-700 capitalize">{plan}</span>
+                                <span className="text-gray-500 font-medium">{count} users</span>
+                              </div>
+                              <div className="h-2 w-full bg-gray-100 rounded-full overflow-hidden">
+                                <div
+                                  className="h-full bg-green-500 rounded-full"
+                                  style={{ width: `${Math.max((count / Math.max(activeTotal, 1)) * 100, 2)}%` }}
+                                />
+                              </div>
+                            </div>
+                          ));
+                        })()}
+                      </div>
+                    </Card>
                   </div>
 
                   {/* Right Column: Quick Actions & Charts */}
@@ -687,11 +1091,14 @@ const CRM = () => {
                     <p className="text-gray-500">Manage all registered users and subscriptions</p>
                   </div>
                   <div className="flex gap-2">
-                    <Button onClick={() => fileInputRef.current?.click()} variant="secondary" className="bg-white hover:bg-gray-100 border shadow-sm">
+                    <Button onClick={handleExportUsers} variant="secondary" className="bg-white hover:bg-gray-100 border shadow-sm">
+                      <Download className="w-4 h-4 mr-2 text-green-600" /> Export
+                    </Button>
+                    <Button onClick={() => setShowBulkUploadDialog(true)} variant="secondary" className="bg-white hover:bg-gray-100 border shadow-sm">
                       <Upload className="w-4 h-4 mr-2" /> Bulk Upload
                     </Button>
-                    <input type="file" ref={fileInputRef} className="hidden" accept=".xlsx, .xls" onChange={() => { }} /> {/* simplified handler for brevity in this view */}
-                    <Button className="bg-blue-600 hover:bg-blue-700 shadow-md shadow-blue-900/20">
+                    <input type="file" ref={fileInputRef} className="hidden" accept=".xlsx, .xls" onChange={handleFileUpload} />
+                    <Button onClick={() => setShowAddUserDialog(true)} className="bg-blue-600 hover:bg-blue-700 shadow-md shadow-blue-900/20">
                       <Users className="w-4 h-4 mr-2" /> Add User
                     </Button>
                   </div>
@@ -699,24 +1106,81 @@ const CRM = () => {
 
                 {/* Filters and Search */}
                 <Card className="border-none shadow-sm bg-white">
-                  <CardContent className="p-4 flex flex-col md:flex-row gap-4 items-center">
-                    <div className="relative flex-1 w-full">
-                      <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
-                      <Input
-                        placeholder="Search users by name or mobile..."
-                        className="pl-10 h-10 bg-gray-50 border-none focus:ring-1 focus:ring-blue-500"
-                        value={searchTerm}
-                        onChange={(e) => setSearchTerm(e.target.value)}
-                      />
+                  <CardContent className="p-4 flex flex-col gap-4">
+                    {/* Row 1: Search + Expiring Soon */}
+                    <div className="flex flex-col md:flex-row gap-4 items-center">
+                      <div className="relative flex-1 w-full">
+                        <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
+                        <Input
+                          placeholder="Search users by name or mobile..."
+                          className="pl-10 h-10 bg-gray-50 border-none focus:ring-1 focus:ring-blue-500"
+                          value={searchTerm}
+                          onChange={(e) => setSearchTerm(e.target.value)}
+                        />
+                      </div>
+                      <div className="w-full md:w-32 flex-shrink-0">
+                        <select
+                          className="flex h-10 w-full rounded-md border border-gray-200 bg-white px-3 py-2 text-sm focus-visible:outline-none focus:ring-1 focus:ring-blue-500"
+                          value={filterPlan}
+                          onChange={(e) => setFilterPlan(e.target.value)}
+                        >
+                          <option value="all">All Plans</option>
+                          <option value="Free plan">Free plan</option>
+                          <option value="1 month plan">1 month plan</option>
+                          <option value="3 month plan">3 month plan</option>
+                          <option value="6 months plan">6 months plan</option>
+                          <option value="12 months plan">12 months plan</option>
+                        </select>
+                      </div>
+                      <div className="flex gap-2">
+                        <Button
+                          variant={filterDays7 ? "default" : "outline"}
+                          onClick={() => setFilterDays7(!filterDays7)}
+                          className={filterDays7 ? "bg-red-100 text-red-700 hover:bg-red-200 border-red-200" : ""}
+                        >
+                          Expiring Soon (≤7 Days)
+                        </Button>
+                      </div>
                     </div>
-                    <div className="flex gap-2">
-                      <Button
-                        variant={filterDays7 ? "default" : "outline"}
-                        onClick={() => setFilterDays7(!filterDays7)}
-                        className={filterDays7 ? "bg-red-100 text-red-700 hover:bg-red-200 border-red-200" : ""}
-                      >
-                        Expiring Soon (≤7 Days)
-                      </Button>
+
+                    {/* Row 2: Date Range Filter */}
+                    <div className="flex flex-col md:flex-row gap-3 items-center">
+                      <div className="flex items-center gap-2 text-sm font-medium text-gray-600">
+                        <Calendar className="h-4 w-4 text-blue-500" />
+                        <span>Date Filter:</span>
+                      </div>
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <Input
+                          type="date"
+                          value={dateFrom}
+                          onChange={(e) => setDateFrom(e.target.value)}
+                          className="h-9 w-[160px] bg-gray-50 border-gray-200 text-sm"
+                          placeholder="From"
+                        />
+                        <span className="text-gray-400 text-sm">to</span>
+                        <Input
+                          type="date"
+                          value={dateTo}
+                          onChange={(e) => setDateTo(e.target.value)}
+                          className="h-9 w-[160px] bg-gray-50 border-gray-200 text-sm"
+                          placeholder="To"
+                        />
+                        {(dateFrom || dateTo) && (
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => { setDateFrom(""); setDateTo(""); }}
+                            className="text-gray-500 hover:text-red-600 h-8 px-2"
+                          >
+                            <X className="h-4 w-4 mr-1" /> Clear
+                          </Button>
+                        )}
+                      </div>
+                      {(dateFrom || dateTo) && (
+                        <span className="text-xs text-blue-600 bg-blue-50 px-2 py-1 rounded-full ml-auto">
+                          {filteredUsers.length} user{filteredUsers.length !== 1 ? 's' : ''} found
+                        </span>
+                      )}
                     </div>
                   </CardContent>
                 </Card>
@@ -760,7 +1224,7 @@ const CRM = () => {
                           </TableCell>
                           <TableCell onClick={(e) => e.stopPropagation()}>
                             {/* Edited inline for complexity, keeping simplified for read mode */}
-                            {user.subscription_plan || 'Basic'}
+                            {getDisplayPlan(user)}
                           </TableCell>
                           <TableCell>
                             <span className={`font-bold ${(user.days_left || 0) <= 7 ? "text-red-600" : "text-gray-700"}`}>
@@ -863,6 +1327,124 @@ const CRM = () => {
               <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="space-y-6">
                 <h1 className="text-2xl font-bold text-gray-900">Daily Reminders (Pabbly)</h1>
 
+                {/* ===== AUTO-REMINDER STATUS PANEL ===== */}
+                {(() => {
+                  const AUTO_SLOTS = ["5 AM", "6 AM", "8 AM", "5 PM", "6 PM", "7 PM"];
+
+                  // Get latest log for each time slot
+                  const getSlotStatus = (slot: string) => {
+                    const log = reminderLogs.find(l => l.batch_time === slot);
+                    return log || null;
+                  };
+
+                  return (
+                    <>
+                      {/* Time Slot Status Cards */}
+                      <Card className="shadow-sm border-gray-100">
+                        <CardHeader>
+                          <CardTitle className="flex items-center gap-2">
+                            <Activity className="w-5 h-5 text-blue-500" />
+                            Auto-Reminder Status (9145414083)
+                          </CardTitle>
+                        </CardHeader>
+                        <CardContent>
+                          <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
+                            {AUTO_SLOTS.map(slot => {
+                              const log = getSlotStatus(slot);
+                              const isPending = !log;
+                              const isSuccess = log?.status === 'success';
+
+                              return (
+                                <div
+                                  key={slot}
+                                  className={`rounded-xl p-4 text-center border transition-all ${isPending
+                                    ? 'bg-gray-50 border-gray-200'
+                                    : isSuccess
+                                      ? 'bg-green-50 border-green-200'
+                                      : 'bg-red-50 border-red-200'
+                                    }`}
+                                >
+                                  <div className="text-2xl mb-1">
+                                    {isPending ? '⏳' : isSuccess ? '✅' : '❌'}
+                                  </div>
+                                  <div className="font-bold text-gray-900 text-sm">{slot}</div>
+                                  <div className="text-xs text-gray-500 mt-1">
+                                    {isPending
+                                      ? 'No data yet'
+                                      : new Date(log.created_at).toLocaleDateString('en-IN', {
+                                        day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit'
+                                      })
+                                    }
+                                  </div>
+                                </div>
+                              );
+                            })}
+                          </div>
+                          <p className="text-xs text-gray-400 mt-3 text-center">
+                            These reminders are sent automatically via pg_cron → Supabase Edge Function → Pabbly webhook
+                          </p>
+                        </CardContent>
+                      </Card>
+
+                      {/* History Log */}
+                      <Card className="shadow-sm border-gray-100">
+                        <CardHeader>
+                          <CardTitle className="flex items-center gap-2">
+                            <FileText className="w-5 h-5 text-indigo-500" />
+                            Send History
+                          </CardTitle>
+                        </CardHeader>
+                        <CardContent>
+                          {logsLoading ? (
+                            <p className="text-center text-gray-400 py-4">Loading logs...</p>
+                          ) : reminderLogs.length === 0 ? (
+                            <p className="text-center text-gray-400 py-6">No reminder logs yet. Logs will appear here once the automated reminders start running.</p>
+                          ) : (
+                            <div className="overflow-x-auto">
+                              <Table>
+                                <TableHeader>
+                                  <TableRow className="hover:bg-transparent">
+                                    <TableHead>Time Slot</TableHead>
+                                    <TableHead>Phone</TableHead>
+                                    <TableHead>Status</TableHead>
+                                    <TableHead>Sent At</TableHead>
+                                    <TableHead>Error</TableHead>
+                                  </TableRow>
+                                </TableHeader>
+                                <TableBody>
+                                  {reminderLogs.slice(0, 20).map((log: any) => (
+                                    <TableRow key={log.id}>
+                                      <TableCell className="font-medium">{log.batch_time}</TableCell>
+                                      <TableCell className="text-gray-500">{log.phone}</TableCell>
+                                      <TableCell>
+                                        <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${log.status === 'success'
+                                          ? 'bg-green-100 text-green-800'
+                                          : 'bg-red-100 text-red-800'
+                                          }`}>
+                                          {log.status === 'success' ? '✅ Success' : '❌ Failed'}
+                                        </span>
+                                      </TableCell>
+                                      <TableCell className="text-gray-500 text-sm">
+                                        {new Date(log.created_at).toLocaleString('en-IN', {
+                                          day: 'numeric', month: 'short', year: 'numeric',
+                                          hour: '2-digit', minute: '2-digit'
+                                        })}
+                                      </TableCell>
+                                      <TableCell className="text-xs text-red-500 max-w-[200px] truncate">
+                                        {log.error_message || '—'}
+                                      </TableCell>
+                                    </TableRow>
+                                  ))}
+                                </TableBody>
+                              </Table>
+                            </div>
+                          )}
+                        </CardContent>
+                      </Card>
+                    </>
+                  );
+                })()}
+
                 {/* Configuration */}
                 <Card className="shadow-sm border-gray-100">
                   <CardHeader><CardTitle>Configuration</CardTitle></CardHeader>
@@ -899,9 +1481,15 @@ const CRM = () => {
 
                           try {
                             const payload = {
+                              template_id: templateId,
+                              template_name: templateName,
+                              category: templateCategory,
+                              status: templateStatus,
                               batch_time: "TEST_DEMO",
-                              count: 1,
-                              users: [{ name: "Demo User", phone: testMobile, days_left: 30 }]
+                              users: [{ 
+                                phone: formatPhoneNumber(testMobile), 
+                                params: getParamsForUser({ name: "Demo User", phone: testMobile, days_left: 30, batch_timing: "6 AM" }, templateVariables) 
+                              }]
                             };
 
                             await fetch(pabblyUrl, {
@@ -919,73 +1507,430 @@ const CRM = () => {
                   </CardContent>
                 </Card>
 
+                {/* Template Management */}
+                <Card className="shadow-sm border-gray-100">
+                  <CardHeader><CardTitle>Message Template Settings</CardTitle></CardHeader>
+                  <CardContent className="space-y-4">
+                    <div className="space-y-2">
+                      <label className="text-sm font-medium">API Token (Fetch from Pabbly/WhatsApp)</label>
+                      <div className="flex gap-2">
+                        <Input 
+                          type="password"
+                          placeholder="Enter your API Token..." 
+                          value={pabblyToken} 
+                          onChange={(e) => setPabblyToken(e.target.value)} 
+                        />
+                        <Button 
+                          variant="secondary"
+                          disabled={isFetchingTemplates || !pabblyToken}
+                          onClick={() => {
+                            setIsFetchingTemplates(true);
+                            // Mocking fetch since actual template API depends on specific WhatsApp provider behind Pabbly
+                            setTimeout(() => {
+                              setFetchedTemplates([
+                                { id: "tpl_12345", name: "daily_reminder_hello", category: "MARKETING", status: "APPROVED", body: "Hi {{1}}, tomorrow is your yoga class! You have {{2}} days left." },
+                                { id: "tpl_67890", name: "subscription_alert_soon", category: "UTILITY", status: "APPROVED", body: "Hello {{1}}, your subscription expires in {{2}} days. Renew now!" }
+                              ]);
+                              setIsFetchingTemplates(false);
+                              toast({ title: "Connected", description: "Successfully fetched templates via API." });
+                            }, 1500);
+                          }}
+                        >
+                          {isFetchingTemplates ? "Fetching..." : "Connect & Fetch"}
+                        </Button>
+                      </div>
+                    </div>
+
+                    {fetchedTemplates.length > 0 && (
+                      <div className="space-y-2 pt-2">
+                        <label className="text-sm font-medium text-green-700">Select Extracted Template</label>
+                        <select 
+                          className="flex h-10 w-full rounded-md border border-input bg-green-50 px-3 py-2 text-sm"
+                          onChange={(e) => {
+                            const t = fetchedTemplates.find(x => x.name === e.target.value);
+                            if (t) {
+                              setTemplateId(t.id);
+                              setTemplateName(t.name);
+                              setTemplateCategory(t.category);
+                              setTemplateStatus(t.status);
+                              setTemplateBody(t.body);
+                              toast({ title: "Template Applied", description: `Loaded ${t.name}` });
+                            }
+                          }}
+                        >
+                          <option value="">-- Choose a template to apply --</option>
+                          {fetchedTemplates.map(t => <option key={t.name} value={t.name}>{t.name}</option>)}
+                        </select>
+                      </div>
+                    )}
+
+                    <div className="pt-4 border-t space-y-4">
+                      <div>
+                        <h4 className="font-medium text-sm text-gray-900">Template Details</h4>
+                        <p className="text-xs text-gray-500">Define the template to use. This data will go to your Pabbly Webhook payload.</p>
+                      </div>
+                      <div className="grid grid-cols-2 gap-4">
+                        <div className="space-y-2">
+                           <label className="text-xs font-semibold uppercase text-gray-500 tracking-wider">Template ID</label>
+                           <Input placeholder="e.g. tpl_12345" value={templateId} onChange={e => setTemplateId(e.target.value)} />
+                        </div>
+                        <div className="space-y-2">
+                           <label className="text-xs font-semibold uppercase text-gray-500 tracking-wider">Template Name</label>
+                           <Input placeholder="e.g. daily_reminder_1" value={templateName} onChange={e => setTemplateName(e.target.value)} />
+                        </div>
+                        <div className="space-y-2">
+                           <label className="text-xs font-semibold uppercase text-gray-500 tracking-wider">Category</label>
+                           <Input placeholder="e.g. MARKETING" value={templateCategory} onChange={e => setTemplateCategory(e.target.value)} />
+                        </div>
+                        <div className="space-y-2">
+                           <label className="text-xs font-semibold uppercase text-gray-500 tracking-wider">Status</label>
+                           <Input placeholder="e.g. APPROVED" value={templateStatus} onChange={e => setTemplateStatus(e.target.value)} />
+                        </div>
+                      </div>
+                      <div className="space-y-2">
+                         <label className="text-xs font-semibold uppercase text-gray-500 tracking-wider">Template Body</label>
+                         <textarea 
+                           className="flex min-h-[80px] w-full rounded-md border border-input bg-background px-3 py-2 text-sm placeholder:text-gray-400 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
+                           placeholder="Hello {{1}}, its time for yoga. You have {{2}} days left..."
+                           value={templateBody}
+                           onChange={e => setTemplateBody(e.target.value)}
+                         />
+                      </div>
+                      <div className="space-y-2">
+                         <label className="text-xs font-semibold uppercase text-gray-500 tracking-wider">Template Parameters (Comma-separated)</label>
+                         <Input placeholder="e.g. name, days_left, Morning Batch" value={templateVariables} onChange={e => setTemplateVariables(e.target.value)} />
+                         <p className="text-xs text-gray-500">
+                           Map values to placeholders <code className="bg-gray-100 px-1 rounded">{`{{1}}, {{2}}`}</code> in order. Available dynamic fields: <strong>name, mobile_number, days_left, batch_timing</strong>. Any other text will be sent exactly as typed.
+                         </p>
+                      </div>
+                    </div>
+                  </CardContent>
+                </Card>
+
                 {/* Trigger Area */}
                 <Card className="shadow-sm border-gray-100 bg-blue-50/50">
                   <CardHeader><CardTitle>Manual Trigger</CardTitle></CardHeader>
                   <CardContent className="space-y-4">
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4 items-end">
+                      
                       <div className="space-y-2">
-                        <label className="text-sm font-medium">Select Batch Time to Remind</label>
+                        <label className="text-sm font-medium">Target Audience</label>
                         <select
                           className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background file:border-0 file:bg-transparent file:text-sm file:font-medium placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
-                          value={selectedBatchTime}
-                          onChange={(e) => setSelectedBatchTime(e.target.value)}
+                          value={targetAudience}
+                          onChange={(e) => setTargetAudience(e.target.value)}
                         >
-                          {BATCH_TIMINGS.map(t => <option key={t} value={t}>{t}</option>)}
+                          <option value="batch">Specific Batch</option>
+                          <option value="all">All Users</option>
+                          <option value="active">Active Users Only</option>
+                          <option value="inactive">Inactive/Paused Users Only</option>
+                          <option value="custom">Custom Users List</option>
                         </select>
                       </div>
+
+                      {targetAudience === 'batch' && (
+                        <div className="space-y-2">
+                          <label className="text-sm font-medium">Select Batch Timing</label>
+                          <select
+                            className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background"
+                            value={selectedBatchTime}
+                            onChange={(e) => setSelectedBatchTime(e.target.value)}
+                          >
+                            {BATCH_TIMINGS.map(t => <option key={t} value={t}>{t}</option>)}
+                          </select>
+                        </div>
+                      )}
+
+                    </div>
+
+                    {targetAudience === 'custom' && (
+                      <div className="pt-4 border-t border-blue-100 space-y-4">
+                        <h4 className="font-medium text-sm text-gray-900">Add Custom Users</h4>
+                        <div className="flex gap-2 items-end">
+                          <div className="space-y-1 flex-1">
+                            <label className="text-xs font-medium text-gray-600">Name</label>
+                            <Input placeholder="Enter name" value={customUserName} onChange={e => setCustomUserName(e.target.value)} />
+                          </div>
+                          <div className="space-y-1 flex-1">
+                            <label className="text-xs font-medium text-gray-600">Mobile Number</label>
+                            <Input placeholder="Enter mobile" value={customUserPhone} onChange={e => setCustomUserPhone(e.target.value)} />
+                          </div>
+                          <Button 
+                            variant="secondary" 
+                            className="bg-white"
+                            onClick={() => {
+                              if(customUserName && customUserPhone) {
+                                setCustomUsers([...customUsers, {name: customUserName, phone: customUserPhone}]);
+                                setCustomUserName("");
+                                setCustomUserPhone("");
+                              }
+                            }}
+                          >
+                            Add
+                          </Button>
+                        </div>
+                        
+                        {customUsers.length > 0 && (
+                          <div className="bg-white rounded-md border p-2 space-y-2 max-h-40 overflow-y-auto">
+                            {customUsers.map((cu, idx) => (
+                              <div key={idx} className="flex justify-between items-center text-sm py-1 px-2 hover:bg-gray-50 rounded">
+                                <span>{cu.name} ({cu.phone})</span>
+                                <Button 
+                                  variant="ghost" 
+                                  size="sm" 
+                                  className="h-6 w-6 p-0 text-red-500" 
+                                  onClick={() => setCustomUsers(customUsers.filter((_, i) => i !== idx))}
+                                >
+                                  <X className="h-4 w-4" />
+                                </Button>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    )}
+
+                    <div className="pt-4 border-t border-blue-100 flex justify-between items-center">
+                      <div className="text-sm text-gray-600">
+                        {targetAudience === 'batch' && <span><strong>Targeting:</strong> {users.filter(u => u.batch_timing === selectedBatchTime && !u.subscription_paused).length} Active users in {selectedBatchTime} batch</span>}
+                        {targetAudience === 'all' && <span><strong>Targeting:</strong> All {users.length} users</span>}
+                        {targetAudience === 'active' && <span><strong>Targeting:</strong> {users.filter(u => !u.subscription_paused && (u.days_left || 0) > 0).length} Active users</span>}
+                        {targetAudience === 'inactive' && <span><strong>Targeting:</strong> {users.filter(u => u.subscription_paused || (u.days_left || 0) <= 0).length} Inactive users</span>}
+                        {targetAudience === 'custom' && <span><strong>Targeting:</strong> {customUsers.length} Custom users</span>}
+                      </div>
+
                       <Button
                         className="bg-blue-600 hover:bg-blue-700 text-white"
-                        disabled={isTriggering || !pabblyUrl}
+                        disabled={isTriggering || (targetAudience === 'custom' && customUsers.length === 0)}
                         onClick={async () => {
                           setIsTriggering(true);
                           try {
-                            // 1. Filter Users
-                            const targetUsers = users.filter(u => u.batch_timing === selectedBatchTime && !u.subscription_paused);
+                            // 1. Filter Users Based on Audience Type
+                            let targetUsers: any[] = [];
+                            
+                            if (targetAudience === 'batch') {
+                              targetUsers = users.filter(u => u.batch_timing === selectedBatchTime && !u.subscription_paused);
+                            } else if (targetAudience === 'all') {
+                              targetUsers = users;
+                            } else if (targetAudience === 'active') {
+                              targetUsers = users.filter(u => !u.subscription_paused && (u.days_left || 0) > 0);
+                            } else if (targetAudience === 'inactive') {
+                              targetUsers = users.filter(u => u.subscription_paused || (u.days_left || 0) <= 0);
+                            } else if (targetAudience === 'custom') {
+                              targetUsers = customUsers.map(cu => ({
+                                name: cu.name,
+                                mobile_number: cu.phone,
+                                days_left: 0
+                              }));
+                            }
 
                             if (targetUsers.length === 0) {
-                              toast({ title: "No Users", description: `No active users found for ${selectedBatchTime}` });
+                              toast({ title: "No Users", description: `No users found for selected audience.` });
                               setIsTriggering(false);
                               return;
                             }
 
-                            // 2. Prepare Payload
-                            const payload = {
-                              batch_time: selectedBatchTime,
-                              count: targetUsers.length,
-                              users: targetUsers.map(u => ({
-                                name: u.name,
-                                phone: u.mobile_number,
-                                days_left: u.days_left
-                              }))
-                            };
+                            // 2. Prepare users array for pub/sub queue
+                            const batchLabel = targetAudience === 'batch' 
+                              ? `${selectedBatchTime} batch` 
+                              : `Manual: ${targetAudience.toUpperCase()}`;
 
-                            // 3. Send to Pabbly
-                            const res = await fetch(pabblyUrl, {
-                              method: 'POST',
-                              headers: { 'Content-Type': 'application/json' },
-                              body: JSON.stringify(payload)
+                            const queueUsers = targetUsers.map(u => ({
+                              phone: formatPhoneNumber(u.mobile_number || u.phone),
+                              name: u.name || 'User',
+                              params: getParamsForUser(u, templateVariables)
+                            }));
+
+                            // 3. Publish to message queue via Supabase RPC
+                            const { data: batchId, error: rpcError } = await supabase.rpc('publish_messages', {
+                              p_batch_label: batchLabel,
+                              p_template_name: templateName || 'unnamed',
+                              p_template_id: templateId || '',
+                              p_template_category: templateCategory || '',
+                              p_users: queueUsers,
                             });
 
-                            if (res.ok) {
-                              toast({ title: "Sent!", description: `Reminders triggered for ${targetUsers.length} users.` });
-                            } else {
-                              throw new Error("Failed to send");
+                            if (rpcError) throw rpcError;
+
+                            toast({ 
+                              title: "📨 Messages Queued!", 
+                              description: `${targetUsers.length} messages published to queue. They will be delivered automatically.` 
+                            });
+
+                            if(targetAudience === 'custom') {
+                              setCustomUsers([]); // clear after sending
+                            }
+
+                            // Optionally trigger immediate processing
+                            try {
+                              await supabase.functions.invoke('process-message-queue', { body: {} });
+                            } catch (_) {
+                              // Non-critical: queue will be processed by scheduled cron
                             }
 
                           } catch (e) {
                             console.error(e);
-                            toast({ title: "Error", description: "Failed to trigger Pabbly webhook", variant: "destructive" });
+                            toast({ title: "Error", description: "Failed to publish messages to queue", variant: "destructive" });
                           } finally {
                             setIsTriggering(false);
                           }
                         }}
                       >
-                        {isTriggering ? "Sending..." : `Trigger Reminders for ${selectedBatchTime}`}
+                        {isTriggering ? "Publishing..." : `Queue ${targetAudience === 'batch' ? users.filter(u => u.batch_timing === selectedBatchTime && !u.subscription_paused).length : ''} Messages`}
                       </Button>
                     </div>
-                    <div className="text-sm text-gray-500">
-                      <p><strong>Target Users:</strong> {users.filter(u => u.batch_timing === selectedBatchTime && !u.subscription_paused).length}</p>
+                  </CardContent>
+                </Card>
+              </motion.div>
+            )}
+
+            {/* MESSAGE QUEUE SECTION (Pub/Sub Dashboard) */}
+            {currentSection === 'message-queue' && !selectedUser && (
+              <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="space-y-6">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <h1 className="text-2xl font-bold text-gray-900">Message Queue</h1>
+                    <p className="text-gray-500 text-sm">Pub/Sub message delivery dashboard — auto-refreshes every 10s</p>
+                  </div>
+                  <div className="flex gap-2">
+                    <Button variant="outline" onClick={() => { fetchMessageQueue(); fetchQueueStats(); }}>
+                      Refresh
+                    </Button>
+                    <Button className="bg-indigo-600 hover:bg-indigo-700 text-white" onClick={triggerQueueProcessing}>
+                      ⚡ Process Queue Now
+                    </Button>
+                  </div>
+                </div>
+
+                {/* Queue Stats Cards */}
+                <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
+                  {[
+                    { label: 'Pending', value: queueStats.pending, color: 'amber', emoji: '⏳' },
+                    { label: 'Processing', value: queueStats.processing, color: 'blue', emoji: '⚙️' },
+                    { label: 'Delivered', value: queueStats.delivered, color: 'green', emoji: '✅' },
+                    { label: 'Failed', value: queueStats.failed, color: 'red', emoji: '❌' },
+                    { label: 'Dead Letter', value: queueStats.dead_letter, color: 'gray', emoji: '💀' },
+                  ].map(stat => (
+                    <motion.div
+                      key={stat.label}
+                      initial={{ opacity: 0, y: 8 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      className={`bg-${stat.color}-50 border border-${stat.color}-200 rounded-xl p-4 text-center`}
+                      style={{
+                        backgroundColor: stat.color === 'amber' ? '#fffbeb' : stat.color === 'blue' ? '#eff6ff' : stat.color === 'green' ? '#f0fdf4' : stat.color === 'red' ? '#fef2f2' : '#f9fafb',
+                        borderColor: stat.color === 'amber' ? '#fde68a' : stat.color === 'blue' ? '#bfdbfe' : stat.color === 'green' ? '#bbf7d0' : stat.color === 'red' ? '#fecaca' : '#e5e7eb',
+                      }}
+                    >
+                      <div className="text-2xl mb-1">{stat.emoji}</div>
+                      <div className="text-2xl font-bold text-gray-900">{stat.value}</div>
+                      <div className="text-xs font-medium text-gray-500 mt-1">{stat.label}</div>
+                    </motion.div>
+                  ))}
+                </div>
+
+                {/* Batch History */}
+                <Card className="shadow-sm border-gray-100">
+                  <CardHeader>
+                    <CardTitle className="flex items-center gap-2">
+                      <FileText className="w-5 h-5 text-indigo-500" />
+                      Batch History
+                    </CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    {isLoadingQueue ? (
+                      <p className="text-center text-gray-400 py-4">Loading batches...</p>
+                    ) : messageBatches.length === 0 ? (
+                      <div className="text-center py-8 text-gray-400">
+                        <p className="text-sm">No message batches yet</p>
+                        <p className="text-xs mt-1">Messages will appear here when you send reminders from the Reminders section.</p>
+                      </div>
+                    ) : (
+                      <div className="overflow-x-auto">
+                        <Table>
+                          <TableHeader>
+                            <TableRow className="hover:bg-transparent">
+                              <TableHead>Batch</TableHead>
+                              <TableHead>Template</TableHead>
+                              <TableHead className="text-center">Total</TableHead>
+                              <TableHead className="text-center">Delivered</TableHead>
+                              <TableHead className="text-center">Failed</TableHead>
+                              <TableHead>Status</TableHead>
+                              <TableHead>Created</TableHead>
+                              <TableHead className="text-right">Actions</TableHead>
+                            </TableRow>
+                          </TableHeader>
+                          <TableBody>
+                            {messageBatches.map((batch: any) => (
+                              <TableRow key={batch.id} className="cursor-pointer hover:bg-gray-50" onClick={() => viewBatchDetails(batch)}>
+                                <TableCell className="font-medium text-gray-900">{batch.label}</TableCell>
+                                <TableCell className="text-gray-500 text-sm">{batch.template_name || '—'}</TableCell>
+                                <TableCell className="text-center font-medium">{batch.total_messages}</TableCell>
+                                <TableCell className="text-center">
+                                  <span className="text-green-600 font-medium">{batch.delivered_count}</span>
+                                </TableCell>
+                                <TableCell className="text-center">
+                                  <span className={batch.failed_count > 0 ? "text-red-600 font-medium" : "text-gray-400"}>{batch.failed_count}</span>
+                                </TableCell>
+                                <TableCell>
+                                  <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${
+                                    batch.status === 'completed' ? 'bg-green-100 text-green-800' :
+                                    batch.status === 'processing' ? 'bg-blue-100 text-blue-800' :
+                                    batch.status === 'partial_failure' ? 'bg-amber-100 text-amber-800' :
+                                    'bg-gray-100 text-gray-800'
+                                  }`}>
+                                    {batch.status === 'completed' ? '✅ Completed' :
+                                     batch.status === 'processing' ? '⚙️ Processing' :
+                                     batch.status === 'partial_failure' ? '⚠️ Partial Failure' :
+                                     '📋 Queued'}
+                                  </span>
+                                </TableCell>
+                                <TableCell className="text-gray-500 text-sm">
+                                  {new Date(batch.created_at).toLocaleString('en-IN', {
+                                    day: 'numeric', month: 'short',
+                                    hour: '2-digit', minute: '2-digit'
+                                  })}
+                                </TableCell>
+                                <TableCell className="text-right">
+                                  {(batch.status === 'partial_failure' || batch.failed_count > 0) && (
+                                    <Button
+                                      variant="ghost"
+                                      size="sm"
+                                      className="text-amber-600 hover:text-amber-700 h-8"
+                                      onClick={(e) => { e.stopPropagation(); retryFailedMessages(batch.id); }}
+                                    >
+                                      🔄 Retry
+                                    </Button>
+                                  )}
+                                  <Button variant="ghost" size="sm" className="text-blue-600 hover:text-blue-700 h-8" onClick={(e) => { e.stopPropagation(); viewBatchDetails(batch); }}>
+                                    View
+                                  </Button>
+                                </TableCell>
+                              </TableRow>
+                            ))}
+                          </TableBody>
+                        </Table>
+                      </div>
+                    )}
+                  </CardContent>
+                </Card>
+
+                {/* Architecture Info */}
+                <Card className="shadow-sm border-gray-100 bg-gradient-to-br from-slate-50 to-indigo-50/30">
+                  <CardContent className="p-6">
+                    <h3 className="font-semibold text-gray-800 mb-3">📐 How Pub/Sub Works</h3>
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-sm">
+                      <div className="bg-white/80 rounded-lg p-4 border border-gray-100">
+                        <div className="text-lg mb-1">📤 Publish</div>
+                        <p className="text-gray-600">When you send reminders, messages are <strong>published</strong> to the <code className="bg-gray-100 px-1 rounded text-xs">message_queue</code> table individually — not sent directly to Pabbly.</p>
+                      </div>
+                      <div className="bg-white/80 rounded-lg p-4 border border-gray-100">
+                        <div className="text-lg mb-1">⚙️ Process</div>
+                        <p className="text-gray-600">The <code className="bg-gray-100 px-1 rounded text-xs">process-message-queue</code> Edge Function <strong>subscribes</strong> and processes messages in batches of 10 with rate limiting.</p>
+                      </div>
+                      <div className="bg-white/80 rounded-lg p-4 border border-gray-100">
+                        <div className="text-lg mb-1">🔄 Retry</div>
+                        <p className="text-gray-600">Failed messages are automatically retried with <strong>exponential backoff</strong> (30s → 2m → 8m). After 3 failures → dead letter.</p>
+                      </div>
                     </div>
                   </CardContent>
                 </Card>
@@ -998,6 +1943,122 @@ const CRM = () => {
       </motion.div>
 
       {/* Global Dialogs */}
+      <Dialog open={showBulkUploadDialog} onOpenChange={setShowBulkUploadDialog}>
+        <DialogContent className="max-w-md">
+          <DialogHeader><DialogTitle>Bulk Upload Users</DialogTitle></DialogHeader>
+          <div className="space-y-4 mt-4">
+            <p className="text-sm text-gray-500">
+              To bulk upload users, please download the sample excel file format below, fill in your users' data, and then upload the completed file.
+            </p>
+            <div className="flex flex-col gap-3 pt-2">
+              <Button onClick={handleDownloadSample} variant="outline" className="w-full flex justify-start pl-4 border-blue-200 hover:bg-blue-50 text-blue-700 h-11">
+                <Download className="w-4 h-4 mr-3" /> 1. Download Sample Excel
+              </Button>
+              <Button onClick={() => fileInputRef.current?.click()} className="w-full flex justify-start pl-4 bg-green-600 hover:bg-green-700 h-11">
+                <Upload className="w-4 h-4 mr-3" /> 2. Upload Completed Excel
+              </Button>
+            </div>
+            <div className="pt-2 flex justify-end">
+              <Button variant="ghost" onClick={() => setShowBulkUploadDialog(false)}>Cancel</Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={showBulkPreviewDialog} onOpenChange={setShowBulkPreviewDialog}>
+        <DialogContent className="max-w-4xl max-h-[85vh] overflow-hidden flex flex-col">
+          <DialogHeader>
+            <DialogTitle>Preview File Data</DialogTitle>
+          </DialogHeader>
+          <div className="flex-1 overflow-y-auto mt-4 rounded-md border">
+            <Table>
+              <TableHeader className="bg-gray-50 sticky top-0">
+                <TableRow>
+                  <TableHead>User</TableHead>
+                  <TableHead>Phone</TableHead>
+                  <TableHead>Plan</TableHead>
+                  <TableHead>Days Left</TableHead>
+                  <TableHead>Batch</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {bulkPreviewUsers.map((u, i) => (
+                  <TableRow key={i}>
+                    <TableCell className="font-medium text-gray-900">{u.name}</TableCell>
+                    <TableCell className="text-gray-500">{u.mobile_number}</TableCell>
+                    <TableCell>{u.subscription_plan || "1 month plan"}</TableCell>
+                    <TableCell>{u.days_left}</TableCell>
+                    <TableCell>{u.batch_timing}</TableCell>
+                  </TableRow>
+                ))}
+                {bulkPreviewUsers.length === 0 && (
+                  <TableRow><TableCell colSpan={5} className="text-center py-6 text-gray-500">No users found in the file</TableCell></TableRow>
+                )}
+              </TableBody>
+            </Table>
+          </div>
+          <div className="pt-4 flex justify-between items-center border-t mt-4">
+            <span className="text-sm text-gray-600 font-medium">{bulkPreviewUsers.length} users ready to import</span>
+            <div className="flex gap-2">
+              <Button variant="outline" onClick={() => setShowBulkPreviewDialog(false)}>Cancel</Button>
+              <Button 
+                onClick={handleConfirmBulkUpload} 
+                disabled={isUploadingBulk || bulkPreviewUsers.length === 0}
+                className="bg-blue-600 hover:bg-blue-700 text-white shadow-md"
+              >
+                {isUploadingBulk ? "Uploading..." : "Confirm & Import Users"}
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={showAddUserDialog} onOpenChange={setShowAddUserDialog}>
+        <DialogContent className="max-w-md">
+          <DialogHeader><DialogTitle>Add New User</DialogTitle></DialogHeader>
+          <div className="space-y-4 mt-4">
+            <div className="space-y-2">
+              <label className="text-sm font-medium">User Name</label>
+              <Input placeholder="Enter user name" value={newUserName} onChange={e => setNewUserName(e.target.value)} />
+            </div>
+            <div className="space-y-2">
+              <label className="text-sm font-medium">Mobile Number</label>
+              <Input 
+                placeholder="Enter mobile number" 
+                value={newUserNumber} 
+                onChange={e => setNewUserNumber(e.target.value.replace(/[^\d+]/g, ''))} 
+                onBlur={() => setNewUserNumber(formatPhone(newUserNumber))}
+                maxLength={13}
+              />
+            </div>
+            <div className="space-y-2">
+              <label className="text-sm font-medium">Subscription Plan</label>
+              <select
+                className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background"
+                value={newUserPlan}
+                onChange={e => setNewUserPlan(e.target.value)}
+              >
+                <option value="Free plan">Free plan</option>
+                <option value="1 month plan">1 month plan</option>
+                <option value="3 month plan">3 month plan</option>
+                <option value="6 months plan">6 months plan</option>
+                <option value="12 months plan">12 months plan</option>
+              </select>
+            </div>
+            <div className="space-y-2">
+              <label className="text-sm font-medium">Join Date</label>
+              <Input type="date" value={newUserJoinDate} onChange={e => setNewUserJoinDate(e.target.value)} />
+            </div>
+            <div className="pt-4 flex justify-end gap-2">
+              <Button variant="outline" onClick={() => setShowAddUserDialog(false)}>Cancel</Button>
+              <Button onClick={handleAddUser} disabled={isAddingUser}>
+                {isAddingUser ? "Adding..." : "Add User"}
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+
       <Dialog open={showReportDialog} onOpenChange={setShowReportDialog}>
         <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
           {selectedReport && (
@@ -1012,6 +2073,85 @@ const CRM = () => {
               </div>
             </div>
           )}
+        </DialogContent>
+      </Dialog>
+
+      {/* Batch Detail Dialog (Message Queue) */}
+      <Dialog open={showBatchDetailDialog} onOpenChange={setShowBatchDetailDialog}>
+        <DialogContent className="max-w-4xl max-h-[85vh] overflow-hidden flex flex-col">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              📨 Batch: {selectedBatchDetail?.label}
+              <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ml-2 ${
+                selectedBatchDetail?.status === 'completed' ? 'bg-green-100 text-green-800' :
+                selectedBatchDetail?.status === 'processing' ? 'bg-blue-100 text-blue-800' :
+                selectedBatchDetail?.status === 'partial_failure' ? 'bg-amber-100 text-amber-800' :
+                'bg-gray-100 text-gray-800'
+              }`}>
+                {selectedBatchDetail?.status}
+              </span>
+            </DialogTitle>
+          </DialogHeader>
+          <div className="flex-1 overflow-y-auto mt-4 rounded-md border">
+            <Table>
+              <TableHeader className="bg-gray-50 sticky top-0">
+                <TableRow>
+                  <TableHead>Phone</TableHead>
+                  <TableHead>Name</TableHead>
+                  <TableHead>Status</TableHead>
+                  <TableHead>Retries</TableHead>
+                  <TableHead>Processed At</TableHead>
+                  <TableHead>Error</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {selectedBatchMessages.map((msg: any) => (
+                  <TableRow key={msg.id}>
+                    <TableCell className="font-medium text-gray-900">{msg.phone}</TableCell>
+                    <TableCell className="text-gray-500">{msg.user_name || '—'}</TableCell>
+                    <TableCell>
+                      <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${
+                        msg.status === 'delivered' ? 'bg-green-100 text-green-800' :
+                        msg.status === 'pending' ? 'bg-gray-100 text-gray-800' :
+                        msg.status === 'processing' ? 'bg-blue-100 text-blue-800' :
+                        msg.status === 'failed' ? 'bg-red-100 text-red-800' :
+                        'bg-gray-200 text-gray-600'
+                      }`}>
+                        {msg.status === 'delivered' ? '✅' : msg.status === 'pending' ? '⏳' : msg.status === 'processing' ? '⚙️' : msg.status === 'failed' ? '❌' : '💀'} {msg.status}
+                      </span>
+                    </TableCell>
+                    <TableCell className="text-gray-500">{msg.retry_count}/{msg.max_retries}</TableCell>
+                    <TableCell className="text-gray-500 text-sm">
+                      {msg.processed_at ? new Date(msg.processed_at).toLocaleString('en-IN', {
+                        day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit'
+                      }) : '—'}
+                    </TableCell>
+                    <TableCell className="text-xs text-red-500 max-w-[200px] truncate">
+                      {msg.last_error || '—'}
+                    </TableCell>
+                  </TableRow>
+                ))}
+                {selectedBatchMessages.length === 0 && (
+                  <TableRow>
+                    <TableCell colSpan={6} className="text-center py-6 text-gray-500">No messages in this batch</TableCell>
+                  </TableRow>
+                )}
+              </TableBody>
+            </Table>
+          </div>
+          <div className="pt-4 flex justify-between items-center border-t mt-2">
+            <span className="text-sm text-gray-500">
+              {selectedBatchMessages.length} messages · {selectedBatchMessages.filter((m: any) => m.status === 'delivered').length} delivered
+            </span>
+            <div className="flex gap-2">
+              {selectedBatchDetail && selectedBatchDetail.failed_count > 0 && (
+                <Button variant="outline" className="text-amber-600 border-amber-200 hover:bg-amber-50" onClick={() => { retryFailedMessages(selectedBatchDetail.id); setShowBatchDetailDialog(false); }}>
+                  🔄 Retry Failed
+                </Button>
+              )}
+              <Button variant="ghost" onClick={() => setShowBatchDetailDialog(false)}>Close</Button>
+            </div>
+          </div>
         </DialogContent>
       </Dialog>
     </div>

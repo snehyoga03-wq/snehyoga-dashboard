@@ -130,8 +130,10 @@ export const Signup = () => {
               type="tel"
               placeholder="Your WhatsApp number"
               value={formData.phone}
-              onChange={(e) => setFormData({ ...formData, phone: e.target.value })}
+              onChange={(e) => setFormData({ ...formData, phone: e.target.value.replace(/[^\d+]/g, '') })}
+              onBlur={() => setFormData({ ...formData, phone: formatPhone(formData.phone) })}
               required
+              maxLength={13}
               className="mt-1"
             />
           </div>
