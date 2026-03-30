@@ -1,0 +1,9 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(find 'c:\\\\Users\\\\prath\\\\OneDrive\\\\Documents\\\\@Downloads\\\\@sneha yoga\\\\@production\\\\snehyoga-dashboard' -type f -name *[Cc][Rr][Mm]*)",
+      "Bash(find 'c:\\\\Users\\\\prath\\\\OneDrive\\\\Documents\\\\@Downloads\\\\@sneha yoga\\\\@production\\\\snehyoga-dashboard' -type f \\\\\\(-name *route* -o -name *nav* -o -name *sidebar* \\\\\\))",
+      "Bash(find 'c:\\\\Users\\\\prath\\\\OneDrive\\\\Documents\\\\@Downloads\\\\@sneha yoga\\\\@production\\\\snehyoga-dashboard/src' -type f \\\\\\(-name *.tsx -o -name *.ts -o -name *.jsx -o -name *.js \\\\\\))"
+    ]
+  }
+}

@@ -12,7 +12,8 @@ import {
     BarChart3,
     ClipboardList,
     Link2,
-    SendHorizonal
+    SendHorizonal,
+    LayoutDashboard
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -33,6 +34,7 @@ const menuItems = [
     { id: 'message-queue', label: 'Message Queue', icon: SendHorizonal },
     { id: 'followup', label: 'Leads Management', icon: ClipboardList },
     { id: 'session-links', label: 'Session Settings', icon: Link2 },
+    { id: 'sap-portal', label: 'SAP Portal', icon: LayoutDashboard },
     { id: 'others', label: 'Others', icon: Settings },
 ];
 

@@ -116,7 +116,7 @@ interface ChatMessage {
   attachment_type?: string;
 }
 
-type Section = 'users' | 'session-links' | 'analytics' | 'followup' | 'chats' | 'dashboard' | 'message-queue';
+type Section = 'users' | 'session-links' | 'analytics' | 'followup' | 'chats' | 'dashboard' | 'message-queue' | 'sap-portal';
 
 const CRM = () => {
   const navigate = useNavigate();
@@ -222,7 +222,7 @@ const CRM = () => {
   // Constants
   const BATCH_TIMINGS = ["5 AM", "6 AM", "7:30 AM", "5 PM", "6 PM", "9:00 PM"];
 
-  type Section = 'users' | 'session-links' | 'analytics' | 'followup' | 'chats' | 'dashboard' | 'reminders' | 'message-queue';
+  type Section = 'users' | 'session-links' | 'analytics' | 'followup' | 'chats' | 'dashboard' | 'reminders' | 'message-queue' | 'sap-portal';
 
   // Message Queue (Pub/Sub)
   const [messageBatches, setMessageBatches] = useState<any[]>([]);
@@ -231,6 +231,85 @@ const CRM = () => {
   const [selectedBatchMessages, setSelectedBatchMessages] = useState<any[]>([]);
   const [showBatchDetailDialog, setShowBatchDetailDialog] = useState(false);
   const [selectedBatchDetail, setSelectedBatchDetail] = useState<any>(null);
+
+  // SAP Portal
+  interface SapPortalItem {
+    id: string;
+    title: string;
+    description: string;
+    pdf_url: string;
+    is_visible: boolean;
+    order_index: number;
+    created_at: string;
+  }
+  const [sapItems, setSapItems] = useState<SapPortalItem[]>([]);
+  const [isSapLoading, setIsSapLoading] = useState(false);
+  const [sapNewTitle, setSapNewTitle] = useState("");
+  const [sapNewDescription, setSapNewDescription] = useState("");
+  const [sapNewPdfUrl, setSapNewPdfUrl] = useState("");
+  const [isAddingSapItem, setIsAddingSapItem] = useState(false);
+  const [showAddSapDialog, setShowAddSapDialog] = useState(false);
+
+  const fetchSapItems = async () => {
+    setIsSapLoading(true);
+    try {
+      const { data } = await supabase
+        .from('sap_portal_items')
+        .select('*')
+        .order('order_index', { ascending: true });
+      setSapItems(data || []);
+    } catch (e) {
+      console.error('Error fetching SAP portal items:', e);
+    } finally {
+      setIsSapLoading(false);
+    }
+  };
+
+  const handleAddSapItem = async () => {
+    if (!sapNewTitle.trim() || !sapNewPdfUrl.trim()) return;
+    setIsAddingSapItem(true);
+    try {
+      const maxOrder = sapItems.length > 0 ? Math.max(...sapItems.map(i => i.order_index)) + 1 : 0;
+      const { error } = await supabase.from('sap_portal_items').insert({
+        title: sapNewTitle.trim(),
+        description: sapNewDescription.trim(),
+        pdf_url: sapNewPdfUrl.trim(),
+        is_visible: true,
+        order_index: maxOrder,
+      });
+      if (error) throw error;
+      setSapNewTitle("");
+      setSapNewDescription("");
+      setSapNewPdfUrl("");
+      setShowAddSapDialog(false);
+      toast({ title: "Item added to SAP Portal" });
+      fetchSapItems();
+    } catch (e: any) {
+      toast({ title: "Error adding item", description: e.message, variant: "destructive" });
+    } finally {
+      setIsAddingSapItem(false);
+    }
+  };
+
+  const handleToggleSapVisibility = async (item: SapPortalItem) => {
+    try {
+      await supabase.from('sap_portal_items').update({ is_visible: !item.is_visible }).eq('id', item.id);
+      setSapItems(prev => prev.map(i => i.id === item.id ? { ...i, is_visible: !i.is_visible } : i));
+    } catch (e: any) {
+      toast({ title: "Error updating visibility", variant: "destructive" });
+    }
+  };
+
+  const handleDeleteSapItem = async (id: string) => {
+    try {
+      await supabase.from('sap_portal_items').delete().eq('id', id);
+      setSapItems(prev => prev.filter(i => i.id !== id));
+      toast({ title: "Item removed from SAP Portal" });
+    } catch (e: any) {
+      toast({ title: "Error deleting item", variant: "destructive" });
+    }
+  };
+
   useEffect(() => {
     const isAuth = sessionStorage.getItem("crm_admin_auth") === "true";
     if (isAuth) {
@@ -261,6 +340,13 @@ const CRM = () => {
         }
       };
       fetchLogs();
+    }
+  }, [currentSection, isAuthenticated]);
+
+  // Fetch SAP portal items when entering sap-portal section
+  useEffect(() => {
+    if (currentSection === 'sap-portal' && isAuthenticated) {
+      fetchSapItems();
     }
   }, [currentSection, isAuthenticated]);
 
@@ -1937,10 +2023,138 @@ const CRM = () => {
               </motion.div>
             )}
 
+            {/* SAP PORTAL SECTION */}
+            {currentSection === 'sap-portal' && !selectedUser && (
+              <motion.div
+                key="sap-portal"
+                initial={{ opacity: 0, y: 10 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: -10 }}
+                className="space-y-6"
+              >
+                <div className="flex items-center justify-between">
+                  <div>
+                    <h1 className="text-2xl font-bold text-gray-900">SAP Portal</h1>
+                    <p className="text-gray-500 text-sm">Manage what PDFs and documents are visible to users in the SAP portal</p>
+                  </div>
+                  <Button
+                    className="bg-blue-600 hover:bg-blue-700 text-white"
+                    onClick={() => setShowAddSapDialog(true)}
+                  >
+                    + Add Item
+                  </Button>
+                </div>
+
+                {isSapLoading ? (
+                  <div className="text-center py-16 text-gray-400">Loading...</div>
+                ) : sapItems.length === 0 ? (
+                  <Card className="border-none shadow-sm">
+                    <CardContent className="py-16 text-center text-gray-400">
+                      <FileText size={40} className="mx-auto mb-3 opacity-30" />
+                      <p className="font-medium">No items in SAP Portal yet</p>
+                      <p className="text-sm mt-1">Click "Add Item" to add a PDF or document</p>
+                    </CardContent>
+                  </Card>
+                ) : (
+                  <div className="grid gap-4">
+                    {sapItems.map((item) => (
+                      <Card key={item.id} className={`border shadow-sm transition-opacity ${!item.is_visible ? 'opacity-50' : ''}`}>
+                        <CardContent className="p-5 flex items-start gap-4">
+                          <div className="p-3 bg-blue-50 rounded-lg text-blue-600 shrink-0">
+                            <FileText size={22} />
+                          </div>
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-center gap-2 flex-wrap">
+                              <h3 className="font-semibold text-gray-900">{item.title}</h3>
+                              <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${item.is_visible ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-500'}`}>
+                                {item.is_visible ? 'Visible' : 'Hidden'}
+                              </span>
+                            </div>
+                            {item.description && (
+                              <p className="text-sm text-gray-500 mt-1">{item.description}</p>
+                            )}
+                            <a
+                              href={item.pdf_url}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="text-xs text-blue-500 hover:underline mt-1 block truncate"
+                            >
+                              {item.pdf_url}
+                            </a>
+                          </div>
+                          <div className="flex items-center gap-2 shrink-0">
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              onClick={() => handleToggleSapVisibility(item)}
+                              className={item.is_visible ? 'border-amber-200 text-amber-700 hover:bg-amber-50' : 'border-green-200 text-green-700 hover:bg-green-50'}
+                            >
+                              {item.is_visible ? 'Hide' : 'Show'}
+                            </Button>
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              onClick={() => handleDeleteSapItem(item.id)}
+                              className="border-red-200 text-red-600 hover:bg-red-50"
+                            >
+                              Delete
+                            </Button>
+                          </div>
+                        </CardContent>
+                      </Card>
+                    ))}
+                  </div>
+                )}
+              </motion.div>
+            )}
+
             {/* Report Dialog Handling */}
           </AnimatePresence>
         </main>
       </motion.div>
+
+      {/* Add SAP Portal Item Dialog */}
+      <Dialog open={showAddSapDialog} onOpenChange={setShowAddSapDialog}>
+        <DialogContent className="max-w-md">
+          <DialogHeader><DialogTitle>Add Item to SAP Portal</DialogTitle></DialogHeader>
+          <div className="space-y-4 mt-4">
+            <div>
+              <label className="text-sm font-medium text-gray-700 block mb-1">Title *</label>
+              <Input
+                placeholder="e.g. Diet Plan - Week 1"
+                value={sapNewTitle}
+                onChange={e => setSapNewTitle(e.target.value)}
+              />
+            </div>
+            <div>
+              <label className="text-sm font-medium text-gray-700 block mb-1">Description</label>
+              <Input
+                placeholder="Optional description"
+                value={sapNewDescription}
+                onChange={e => setSapNewDescription(e.target.value)}
+              />
+            </div>
+            <div>
+              <label className="text-sm font-medium text-gray-700 block mb-1">PDF URL *</label>
+              <Input
+                placeholder="https://..."
+                value={sapNewPdfUrl}
+                onChange={e => setSapNewPdfUrl(e.target.value)}
+              />
+            </div>
+            <div className="flex justify-end gap-2 pt-2">
+              <Button variant="ghost" onClick={() => setShowAddSapDialog(false)}>Cancel</Button>
+              <Button
+                className="bg-blue-600 hover:bg-blue-700 text-white"
+                onClick={handleAddSapItem}
+                disabled={isAddingSapItem || !sapNewTitle.trim() || !sapNewPdfUrl.trim()}
+              >
+                {isAddingSapItem ? "Adding..." : "Add Item"}
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
 
       {/* Global Dialogs */}
       <Dialog open={showBulkUploadDialog} onOpenChange={setShowBulkUploadDialog}>
