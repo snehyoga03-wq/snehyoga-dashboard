@@ -3,7 +3,8 @@
     "allow": [
       "Bash(find 'c:\\\\Users\\\\prath\\\\OneDrive\\\\Documents\\\\@Downloads\\\\@sneha yoga\\\\@production\\\\snehyoga-dashboard' -type f -name *[Cc][Rr][Mm]*)",
       "Bash(find 'c:\\\\Users\\\\prath\\\\OneDrive\\\\Documents\\\\@Downloads\\\\@sneha yoga\\\\@production\\\\snehyoga-dashboard' -type f \\\\\\(-name *route* -o -name *nav* -o -name *sidebar* \\\\\\))",
-      "Bash(find 'c:\\\\Users\\\\prath\\\\OneDrive\\\\Documents\\\\@Downloads\\\\@sneha yoga\\\\@production\\\\snehyoga-dashboard/src' -type f \\\\\\(-name *.tsx -o -name *.ts -o -name *.jsx -o -name *.js \\\\\\))"
+      "Bash(find 'c:\\\\Users\\\\prath\\\\OneDrive\\\\Documents\\\\@Downloads\\\\@sneha yoga\\\\@production\\\\snehyoga-dashboard/src' -type f \\\\\\(-name *.tsx -o -name *.ts -o -name *.jsx -o -name *.js \\\\\\))",
+      "Bash(grep -n \"session_settings\\\\|pabbly_reminder_url\" \"c:/Users/prath/OneDrive/Documents/@Downloads/@sneha yoga/@production/snehyoga-dashboard/supabase/migrations/\"*.sql)"
     ]
   }
 }

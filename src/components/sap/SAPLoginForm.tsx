@@ -8,11 +8,11 @@ import { useToast } from "@/hooks/use-toast";
 import { formatPhone } from "@/lib/utils";
 
 interface SAPLoginFormProps {
-  onOTPSent: (phone: string, name: string) => void;
+  onVerified: (phone: string, name: string) => void;
   onAccessDenied: (reason: string) => void;
 }
 
-export const SAPLoginForm = ({ onOTPSent, onAccessDenied }: SAPLoginFormProps) => {
+export const SAPLoginForm = ({ onVerified, onAccessDenied }: SAPLoginFormProps) => {
   const { toast } = useToast();
   const [isLoading, setIsLoading] = useState(false);
   const [name, setName] = useState("");
@@ -68,23 +68,22 @@ export const SAPLoginForm = ({ onOTPSent, onAccessDenied }: SAPLoginFormProps) =
         return;
       }
 
-      // Send OTP via Supabase Phone Auth (Twilio)
-      const phoneForAuth = normalizedPhone.startsWith("+")
-        ? normalizedPhone
-        : `+91${cleanPhone}`;
-
-      const { error: otpError } = await supabase.auth.signInWithOtp({
-        phone: phoneForAuth,
-      });
-
-      if (otpError) throw otpError;
+      // Store SAP session directly — no OTP needed
+      const sapSession = {
+        phone: normalizedPhone,
+        name: userData.name || name,
+        verified: true,
+        verifiedAt: new Date().toISOString(),
+        expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(),
+      };
+      localStorage.setItem("sap_session", JSON.stringify(sapSession));
 
       toast({
-        title: "OTP Sent! 📱",
-        description: `Verification code sent to +91 ${cleanPhone.slice(-4).padStart(10, '•')}`,
+        title: "Access Granted! ✅",
+        description: "Welcome to Snehyoga Access Portal",
       });
 
-      onOTPSent(phoneForAuth, userData.name || name);
+      onVerified(normalizedPhone, userData.name || name);
     } catch (error: any) {
       console.error("SAP Login Error:", error);
       toast({
@@ -181,14 +180,14 @@ export const SAPLoginForm = ({ onOTPSent, onAccessDenied }: SAPLoginFormProps) =
               ) : (
                 <span className="flex items-center gap-2">
                   <Shield className="w-5 h-5" />
-                  Send OTP
+                  Verify Access
                 </span>
               )}
             </Button>
           </form>
 
           <p className="text-xs text-muted-foreground text-center mt-4">
-            You'll receive a verification code on your registered mobile number
+            Access is granted instantly for verified 12-month members
           </p>
         </div>
       </div>
