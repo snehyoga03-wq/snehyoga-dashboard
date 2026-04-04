@@ -14,7 +14,7 @@ import { useToast } from "@/hooks/use-toast";
 interface SAPOTPVerifyProps {
   phone: string;
   name: string;
-  onVerified: (userData: { phone: string; name: string }) => void;
+  onVerified: (phone: string, name: string) => void;
   onBack: () => void;
 }
 
@@ -51,32 +51,29 @@ export const SAPOTPVerify = ({ phone, name, onVerified, onBack }: SAPOTPVerifyPr
     setIsVerifying(true);
 
     try {
-      const { data, error } = await supabase.auth.verifyOtp({
-        phone,
-        token: otp,
-        type: "sms",
+      const res = await supabase.functions.invoke("sap-otp", {
+        body: { action: "verify", phone, otp },
       });
 
-      if (error) throw error;
+      if (res.error) throw new Error(res.error.message);
+      if (!res.data?.verified) throw new Error(res.data?.error || "Invalid or expired OTP");
 
-      if (data.session) {
-        toast({
-          title: "Verified! ✅",
-          description: "Welcome to Snehyoga Access Portal",
-        });
+      toast({
+        title: "Verified! ✅",
+        description: "Welcome to Snehyoga Access Portal",
+      });
 
-        // Store SAP session
-        const sapSession = {
-          phone,
-          name,
-          verified: true,
-          verifiedAt: new Date().toISOString(),
-          expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(),
-        };
-        localStorage.setItem("sap_session", JSON.stringify(sapSession));
+      // Store SAP session
+      const sapSession = {
+        phone,
+        name,
+        verified: true,
+        verifiedAt: new Date().toISOString(),
+        expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(),
+      };
+      localStorage.setItem("sap_session", JSON.stringify(sapSession));
 
-        onVerified({ phone, name });
-      }
+      onVerified(phone, name);
     } catch (error: any) {
       console.error("OTP Verify Error:", error);
       toast({
@@ -93,15 +90,17 @@ export const SAPOTPVerify = ({ phone, name, onVerified, onBack }: SAPOTPVerifyPr
   const handleResend = async () => {
     setIsResending(true);
     try {
-      const { error } = await supabase.auth.signInWithOtp({
-        phone,
+      const res = await supabase.functions.invoke("sap-otp", {
+        body: { action: "send", phone },
       });
 
-      if (error) throw error;
+      if (res.error || !res.data?.success) {
+        throw new Error(res.data?.error || res.error?.message || "Failed to resend OTP");
+      }
 
       toast({
         title: "OTP Resent! 📱",
-        description: "A new verification code has been sent.",
+        description: "A new verification code has been sent to your WhatsApp.",
       });
 
       setCountdown(60);
@@ -150,7 +149,7 @@ export const SAPOTPVerify = ({ phone, name, onVerified, onBack }: SAPOTPVerifyPr
           Enter Verification Code
         </h2>
         <p className="text-sm text-muted-foreground">
-          We sent a 6-digit code to{" "}
+          We sent a 6-digit code via WhatsApp to{" "}
           <span className="font-semibold text-foreground">{maskedPhone}</span>
         </p>
       </div>

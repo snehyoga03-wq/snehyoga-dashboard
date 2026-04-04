@@ -4,7 +4,7 @@
 //
 // This function:
 // 1. Picks up pending messages from message_queue (batch of N)
-// 2. Sends each message to Pabbly webhook
+// 2. Sends each message via WhatsApp Business API directly
 // 3. Marks each as delivered or failed
 // 4. Implements exponential backoff for retries
 // 5. Moves permanently failed messages to dead_letter
@@ -16,7 +16,8 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 
 const BATCH_SIZE = 10;           // Process N messages per invocation
-const RATE_LIMIT_DELAY_MS = 200; // Delay between individual sends (ms)
+const RATE_LIMIT_DELAY_MS = 500; // Delay between sends (WA API rate limit safety)
+const WA_API_VERSION = "v20.0";
 
 const corsHeaders = {
     "Access-Control-Allow-Origin": "*",
@@ -25,6 +26,69 @@ const corsHeaders = {
 
 function sleep(ms: number) {
     return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+// Send a single WhatsApp template message
+async function sendWhatsAppTemplate(
+    phoneNumberId: string,
+    token: string,
+    toPhone: string,      // e.g. "919145414083" (no + sign)
+    templateName: string,
+    languageCode: string,
+    params: string[],     // ordered list of body param values
+    category?: string,    // template category (AUTHENTICATION needs button component)
+): Promise<{ success: boolean; messageId?: string; error?: string }> {
+    const url = `https://graph.facebook.com/${WA_API_VERSION}/${phoneNumberId}/messages`;
+
+    // Build components array
+    const components: Record<string, unknown>[] = [];
+
+    if (params.length > 0) {
+        components.push({
+            type: "body",
+            parameters: params.map((p) => ({ type: "text", text: String(p) })),
+        });
+    }
+
+    // AUTHENTICATION templates (OTP) require a button component with the OTP code
+    if (category === "AUTHENTICATION" && params.length > 0) {
+        components.push({
+            type: "button",
+            sub_type: "url",
+            index: "0",
+            parameters: [{ type: "text", text: String(params[0]) }],
+        });
+    }
+
+    const body: Record<string, unknown> = {
+        messaging_product: "whatsapp",
+        to: toPhone,
+        type: "template",
+        template: {
+            name: templateName,
+            language: { code: languageCode },
+            components,
+        },
+    };
+
+    const res = await fetch(url, {
+        method: "POST",
+        headers: {
+            "Content-Type": "application/json",
+            "Authorization": `Bearer ${token}`,
+        },
+        body: JSON.stringify(body),
+    });
+
+    const json = await res.json();
+
+    if (!res.ok || json.error) {
+        const errMsg = json.error?.message || json.error?.error_data?.details || `HTTP ${res.status}`;
+        return { success: false, error: errMsg };
+    }
+
+    const messageId = json.messages?.[0]?.id;
+    return { success: true, messageId };
 }
 
 Deno.serve(async (req) => {
@@ -37,30 +101,32 @@ Deno.serve(async (req) => {
     const supabase = createClient(supabaseUrl, supabaseServiceKey);
 
     try {
-        // 1. Get the Pabbly webhook URL
+        // 1. Load WhatsApp config from session_settings
         const { data: settings, error: settingsError } = await supabase
             .from("session_settings")
-            .select("pabbly_reminder_url")
+            .select("wa_api_token, wa_phone_number_id, wa_language_code")
             .maybeSingle();
 
         if (settingsError) throw new Error(`Settings error: ${settingsError.message}`);
 
-        const pabblyUrl = settings?.pabbly_reminder_url;
-        if (!pabblyUrl) {
+        const waToken = settings?.wa_api_token;
+        const phoneNumberId = settings?.wa_phone_number_id || "808910018982018";
+        const languageCode = settings?.wa_language_code || "en";
+
+        if (!waToken) {
             return new Response(
-                JSON.stringify({ success: false, error: "Pabbly webhook URL not configured" }),
+                JSON.stringify({ success: false, error: "WhatsApp API token not configured in session_settings" }),
                 { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } }
             );
         }
 
-        // 2. Fetch pending messages that are ready for processing
-        //    (pending OR failed with retry available, and next_retry_at <= now)
+        // 2. Fetch pending messages ready for processing
         const { data: messages, error: fetchError } = await supabase
             .from("message_queue")
             .select("*")
             .or("status.eq.pending,status.eq.failed")
             .lte("next_retry_at", new Date().toISOString())
-            .lt("retry_count", 3)  // Haven't exceeded max retries
+            .lt("retry_count", 3)
             .order("created_at", { ascending: true })
             .limit(BATCH_SIZE);
 
@@ -73,73 +139,61 @@ Deno.serve(async (req) => {
             );
         }
 
-        console.log(`📋 Processing ${messages.length} messages from queue...`);
+        console.log(`📋 Processing ${messages.length} messages via WhatsApp API...`);
 
-        // 3. Mark all as "processing" (claim them)
+        // 3. Claim messages (mark as processing)
         const messageIds = messages.map((m: any) => m.id);
         await supabase
             .from("message_queue")
             .update({ status: "processing", updated_at: new Date().toISOString() })
             .in("id", messageIds);
 
-        // 4. Process each message individually with rate limiting
+        // 4. Send each message via WhatsApp API
         let deliveredCount = 0;
         let failedCount = 0;
         const batchUpdates: Record<string, { delivered: number; failed: number }> = {};
 
         for (const msg of messages) {
-            try {
-                // Build individual Pabbly payload
-                const payload = {
-                    template_name: msg.template_name,
-                    template_id: msg.template_id,
-                    category: msg.template_category,
-                    batch_time: msg.batch_label,
-                    users: [{
-                        phone: msg.phone,
-                        params: msg.template_params || [],
-                    }],
-                };
+            // Normalise phone: strip any non-digits, ensure no leading +
+            const phone = msg.phone.replace(/\D/g, "");
+            const params: string[] = Array.isArray(msg.template_params) ? msg.template_params : [];
 
-                const res = await fetch(pabblyUrl, {
-                    method: "POST",
-                    headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify(payload),
+            const result = await sendWhatsAppTemplate(
+                phoneNumberId,
+                waToken,
+                phone,
+                msg.template_name,
+                languageCode,
+                params,
+                msg.template_category,
+            );
+
+            if (result.success) {
+                await supabase
+                    .from("message_queue")
+                    .update({
+                        status: "delivered",
+                        delivered_at: new Date().toISOString(),
+                        processed_at: new Date().toISOString(),
+                        updated_at: new Date().toISOString(),
+                        last_error: null,
+                    })
+                    .eq("id", msg.id);
+
+                await supabase.from("reminder_logs").insert({
+                    batch_time: msg.batch_label || "QUEUE",
+                    phone: msg.phone,
+                    status: "success",
                 });
 
-                if (res.ok) {
-                    // ✅ Delivered
-                    await supabase
-                        .from("message_queue")
-                        .update({
-                            status: "delivered",
-                            delivered_at: new Date().toISOString(),
-                            processed_at: new Date().toISOString(),
-                            updated_at: new Date().toISOString(),
-                        })
-                        .eq("id", msg.id);
+                deliveredCount++;
+                if (!batchUpdates[msg.batch_id]) batchUpdates[msg.batch_id] = { delivered: 0, failed: 0 };
+                batchUpdates[msg.batch_id].delivered++;
 
-                    deliveredCount++;
-                    if (!batchUpdates[msg.batch_id]) batchUpdates[msg.batch_id] = { delivered: 0, failed: 0 };
-                    batchUpdates[msg.batch_id].delivered++;
-
-                    // Log success
-                    await supabase.from("reminder_logs").insert({
-                        batch_time: msg.batch_label || "QUEUE",
-                        phone: msg.phone,
-                        status: "success",
-                    });
-
-                    console.log(`✅ Delivered to ${msg.phone}`);
-                } else {
-                    throw new Error(`HTTP ${res.status}: ${await res.text().catch(() => "")}`);
-                }
-            } catch (err) {
-                const errorMsg = err instanceof Error ? err.message : String(err);
+                console.log(`✅ Sent to ${msg.phone} (wamid: ${result.messageId})`);
+            } else {
                 const newRetryCount = (msg.retry_count || 0) + 1;
                 const isDeadLetter = newRetryCount >= (msg.max_retries || 3);
-
-                // Exponential backoff: 30s, 120s, 480s
                 const backoffSeconds = Math.pow(4, newRetryCount) * 30;
                 const nextRetry = new Date(Date.now() + backoffSeconds * 1000).toISOString();
 
@@ -148,35 +202,32 @@ Deno.serve(async (req) => {
                     .update({
                         status: isDeadLetter ? "dead_letter" : "failed",
                         retry_count: newRetryCount,
-                        last_error: errorMsg.substring(0, 500),
+                        last_error: (result.error || "Unknown error").substring(0, 500),
                         next_retry_at: isDeadLetter ? null : nextRetry,
                         processed_at: new Date().toISOString(),
                         updated_at: new Date().toISOString(),
                     })
                     .eq("id", msg.id);
 
-                failedCount++;
-                if (!batchUpdates[msg.batch_id]) batchUpdates[msg.batch_id] = { delivered: 0, failed: 0 };
-                batchUpdates[msg.batch_id].failed++;
-
-                // Log failure
                 await supabase.from("reminder_logs").insert({
                     batch_time: msg.batch_label || "QUEUE",
                     phone: msg.phone,
                     status: "failed",
-                    error_message: errorMsg.substring(0, 200),
+                    error_message: (result.error || "").substring(0, 200),
                 });
 
-                console.error(`❌ Failed for ${msg.phone}: ${errorMsg}`);
+                failedCount++;
+                if (!batchUpdates[msg.batch_id]) batchUpdates[msg.batch_id] = { delivered: 0, failed: 0 };
+                batchUpdates[msg.batch_id].failed++;
+
+                console.error(`❌ Failed for ${msg.phone}: ${result.error}`);
             }
 
-            // Rate limit: small delay between sends
             await sleep(RATE_LIMIT_DELAY_MS);
         }
 
         // 5. Update batch summary records
         for (const [batchId, counts] of Object.entries(batchUpdates)) {
-            // Fetch current batch state
             const { data: batch } = await supabase
                 .from("message_batches")
                 .select("*")
@@ -203,24 +254,17 @@ Deno.serve(async (req) => {
             }
         }
 
-        console.log(`📊 Batch complete: ${deliveredCount} delivered, ${failedCount} failed`);
+        console.log(`📊 Done: ${deliveredCount} delivered, ${failedCount} failed`);
 
         return new Response(
-            JSON.stringify({
-                success: true,
-                processed: messages.length,
-                delivered: deliveredCount,
-                failed: failedCount,
-            }),
+            JSON.stringify({ success: true, processed: messages.length, delivered: deliveredCount, failed: failedCount }),
             { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } }
         );
+
     } catch (err) {
         console.error("❌ process-message-queue error:", err);
         return new Response(
-            JSON.stringify({
-                success: false,
-                error: err instanceof Error ? err.message : String(err),
-            }),
+            JSON.stringify({ success: false, error: err instanceof Error ? err.message : String(err) }),
             { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
         );
     }

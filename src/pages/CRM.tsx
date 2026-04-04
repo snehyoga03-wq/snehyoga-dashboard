@@ -210,6 +210,8 @@ const CRM = () => {
   const [templateBody, setTemplateBody] = useState("");
   const [templateVariables, setTemplateVariables] = useState("");
   const [pabblyToken, setPabblyToken] = useState("");
+  const [waPhoneNumberId, setWaPhoneNumberId] = useState("808910018982018");
+  const [waLanguageCode, setWaLanguageCode] = useState("en");
   const [fetchedTemplates, setFetchedTemplates] = useState<{id: string, name: string, category: string, status: string, body: string}[]>([]);
   const [isFetchingTemplates, setIsFetchingTemplates] = useState(false);
   
@@ -693,7 +695,7 @@ const CRM = () => {
     try {
       const { data, error } = await supabase
         .from('session_settings')
-        .select('session_link, premium_session_link, pabbly_reminder_url')
+        .select('session_link, premium_session_link, pabbly_reminder_url, wa_api_token, wa_phone_number_id, wa_language_code')
         .maybeSingle();
 
       if (error) {
@@ -707,6 +709,9 @@ const CRM = () => {
         setPremiumSessionLink(data.premium_session_link || "");
         setNewPremiumLink(data.premium_session_link || "");
         setPabblyUrl(data.pabbly_reminder_url || "");
+        setPabblyToken(data.wa_api_token || "");
+        setWaPhoneNumberId(data.wa_phone_number_id || "808910018982018");
+        setWaLanguageCode(data.wa_language_code || "en");
       }
     } catch (error) {
       console.error('Error fetching session link:', error);
@@ -1531,63 +1536,94 @@ const CRM = () => {
                   );
                 })()}
 
-                {/* Configuration */}
+                {/* WhatsApp API Configuration */}
                 <Card className="shadow-sm border-gray-100">
-                  <CardHeader><CardTitle>Configuration</CardTitle></CardHeader>
+                  <CardHeader><CardTitle>WhatsApp API Configuration</CardTitle></CardHeader>
                   <CardContent className="space-y-4">
                     <div className="space-y-2">
-                      <label className="text-sm font-medium">Pabbly Webhook URL</label>
+                      <label className="text-sm font-medium">API Token</label>
                       <div className="flex gap-2">
                         <Input
-                          placeholder="https://connect.pabbly.com/workflow/sendwebhookdata/..."
-                          value={pabblyUrl}
-                          onChange={(e) => setPabblyUrl(e.target.value)}
+                          type="password"
+                          placeholder="EAAUtx..."
+                          value={pabblyToken}
+                          onChange={(e) => setPabblyToken(e.target.value)}
                         />
-                        <Button onClick={async () => {
-                          try {
-                            const { data: settings } = await supabase.from('session_settings').select('id').single();
-                            if (settings) {
-                              await supabase.from('session_settings').update({ pabbly_reminder_url: pabblyUrl }).eq('id', settings.id);
-                              toast({ title: "Saved", description: "Webhook URL updated" });
-                            }
-                          } catch (e) { toast({ title: "Error", variant: "destructive" }); }
-                        }}>Save</Button>
                       </div>
-                      <p className="text-xs text-muted-foreground">This URL will receive the list of users to remind.</p>
                     </div>
+                    <div className="grid grid-cols-2 gap-4">
+                      <div className="space-y-2">
+                        <label className="text-sm font-medium">Phone Number ID</label>
+                        <Input
+                          placeholder="808910018982018"
+                          value={waPhoneNumberId}
+                          onChange={(e) => setWaPhoneNumberId(e.target.value)}
+                        />
+                      </div>
+                      <div className="space-y-2">
+                        <label className="text-sm font-medium">Language Code</label>
+                        <Input
+                          placeholder="en"
+                          value={waLanguageCode}
+                          onChange={(e) => setWaLanguageCode(e.target.value)}
+                        />
+                        <p className="text-xs text-muted-foreground">e.g. en, en_US, hi</p>
+                      </div>
+                    </div>
+                    <Button onClick={async () => {
+                      try {
+                        const { data: settings } = await supabase.from('session_settings').select('id').single();
+                        if (settings) {
+                          await supabase.from('session_settings').update({
+                            wa_api_token: pabblyToken,
+                            wa_phone_number_id: waPhoneNumberId,
+                            wa_language_code: waLanguageCode,
+                          }).eq('id', settings.id);
+                          toast({ title: "Saved", description: "WhatsApp config saved" });
+                        }
+                      } catch (e) { toast({ title: "Error saving config", variant: "destructive" }); }
+                    }}>Save Config</Button>
 
                     {/* Test Connection */}
                     <div className="pt-4 border-t">
-                      <label className="text-sm font-medium">Test Connection</label>
+                      <label className="text-sm font-medium">Test — Send Demo Message</label>
                       <div className="flex gap-2 mt-2">
-                        <Input placeholder="Mobile Number for Demo" defaultValue="9145414083" id="test-mobile" className="max-w-[200px]" />
+                        <Input placeholder="Mobile e.g. 9145414083" defaultValue="9145414083" id="test-mobile" className="max-w-[220px]" />
                         <Button variant="secondary" onClick={async () => {
                           const testMobile = (document.getElementById('test-mobile') as HTMLInputElement).value;
-                          if (!pabblyUrl) { toast({ title: "Error", description: "Set Webhook URL first", variant: "destructive" }); return; }
+                          if (!pabblyToken) { toast({ title: "Error", description: "Enter API Token first", variant: "destructive" }); return; }
+                          if (!templateName) { toast({ title: "Error", description: "Select a template first", variant: "destructive" }); return; }
 
                           try {
-                            const payload = {
-                              template_id: templateId,
-                              template_name: templateName,
-                              category: templateCategory,
-                              status: templateStatus,
-                              batch_time: "TEST_DEMO",
-                              users: [{ 
-                                phone: formatPhoneNumber(testMobile), 
-                                params: getParamsForUser({ name: "Demo User", phone: testMobile, days_left: 30, batch_timing: "6 AM" }, templateVariables) 
-                              }]
-                            };
-
-                            await fetch(pabblyUrl, {
+                            const phone = formatPhoneNumber(testMobile).replace(/\D/g, "");
+                            const params = getParamsForUser({ name: "Demo User", phone: testMobile, days_left: 30, batch_timing: "6 AM" }, templateVariables);
+                            const res = await fetch(`https://graph.facebook.com/v20.0/${waPhoneNumberId}/messages`, {
                               method: 'POST',
-                              headers: { 'Content-Type': 'application/json' },
-                              body: JSON.stringify(payload)
+                              headers: {
+                                'Content-Type': 'application/json',
+                                'Authorization': `Bearer ${pabblyToken}`,
+                              },
+                              body: JSON.stringify({
+                                messaging_product: "whatsapp",
+                                to: phone,
+                                type: "template",
+                                template: {
+                                  name: templateName,
+                                  language: { code: waLanguageCode || "en" },
+                                  components: params.length > 0 ? [{
+                                    type: "body",
+                                    parameters: params.map((p: string) => ({ type: "text", text: p }))
+                                  }] : []
+                                }
+                              })
                             });
-                            toast({ title: "Sent", description: `Demo sent to ${testMobile}` });
-                          } catch (e) {
-                            toast({ title: "Error", description: "Failed to send test", variant: "destructive" });
+                            const json = await res.json();
+                            if (!res.ok || json.error) throw new Error(json.error?.message || `HTTP ${res.status}`);
+                            toast({ title: "Sent!", description: `Demo message sent to ${testMobile}` });
+                          } catch (e: any) {
+                            toast({ title: "Failed to send", description: e.message, variant: "destructive" });
                           }
-                        }}>Send Demo Template</Button>
+                        }}>Send Demo</Button>
                       </div>
                     </div>
                   </CardContent>
@@ -1598,28 +1634,39 @@ const CRM = () => {
                   <CardHeader><CardTitle>Message Template Settings</CardTitle></CardHeader>
                   <CardContent className="space-y-4">
                     <div className="space-y-2">
-                      <label className="text-sm font-medium">API Token (Fetch from Pabbly/WhatsApp)</label>
+                      <label className="text-sm font-medium">Fetch Templates from WhatsApp</label>
+                      <p className="text-xs text-muted-foreground">Uses the API Token saved in the Configuration card above.</p>
                       <div className="flex gap-2">
-                        <Input 
-                          type="password"
-                          placeholder="Enter your API Token..." 
-                          value={pabblyToken} 
-                          onChange={(e) => setPabblyToken(e.target.value)} 
-                        />
-                        <Button 
+                        <Button
                           variant="secondary"
                           disabled={isFetchingTemplates || !pabblyToken}
-                          onClick={() => {
+                          onClick={async () => {
                             setIsFetchingTemplates(true);
-                            // Mocking fetch since actual template API depends on specific WhatsApp provider behind Pabbly
-                            setTimeout(() => {
-                              setFetchedTemplates([
-                                { id: "tpl_12345", name: "daily_reminder_hello", category: "MARKETING", status: "APPROVED", body: "Hi {{1}}, tomorrow is your yoga class! You have {{2}} days left." },
-                                { id: "tpl_67890", name: "subscription_alert_soon", category: "UTILITY", status: "APPROVED", body: "Hello {{1}}, your subscription expires in {{2}} days. Renew now!" }
-                              ]);
+                            try {
+                              const wabaId = "1530834774801331";
+                              const url = `https://graph.facebook.com/v20.0/${wabaId}/message_templates?fields=name,status,category,components&limit=100&access_token=${pabblyToken}`;
+                              const res = await fetch(url);
+                              const json = await res.json();
+                              if (!res.ok || json.error) {
+                                throw new Error(json.error?.message || "Failed to fetch templates");
+                              }
+                              const templates = (json.data || []).map((t: any) => {
+                                const bodyComp = t.components?.find((c: any) => c.type === "BODY");
+                                return {
+                                  id: t.id,
+                                  name: t.name,
+                                  category: t.category,
+                                  status: t.status,
+                                  body: bodyComp?.text || "",
+                                };
+                              });
+                              setFetchedTemplates(templates);
+                              toast({ title: "Connected", description: `Fetched ${templates.length} templates from WhatsApp.` });
+                            } catch (err: any) {
+                              toast({ title: "Error fetching templates", description: err.message, variant: "destructive" });
+                            } finally {
                               setIsFetchingTemplates(false);
-                              toast({ title: "Connected", description: "Successfully fetched templates via API." });
-                            }, 1500);
+                            }
                           }}
                         >
                           {isFetchingTemplates ? "Fetching..." : "Connect & Fetch"}
@@ -1653,7 +1700,7 @@ const CRM = () => {
                     <div className="pt-4 border-t space-y-4">
                       <div>
                         <h4 className="font-medium text-sm text-gray-900">Template Details</h4>
-                        <p className="text-xs text-gray-500">Define the template to use. This data will go to your Pabbly Webhook payload.</p>
+                        <p className="text-xs text-gray-500">Define the template to use. This data will be sent via WhatsApp Business API.</p>
                       </div>
                       <div className="grid grid-cols-2 gap-4">
                         <div className="space-y-2">

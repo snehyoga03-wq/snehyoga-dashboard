@@ -1,10 +1,11 @@
 import { useState, useEffect, useCallback } from "react";
 import { SAPLoginForm } from "@/components/sap/SAPLoginForm";
+import { SAPOTPVerify } from "@/components/sap/SAPOTPVerify";
 import { SAPDocumentLibrary } from "@/components/sap/SAPDocumentLibrary";
 import { SAPAccessDenied } from "@/components/sap/SAPAccessDenied";
 import { AnimatePresence, motion } from "framer-motion";
 
-type SAPStep = "login" | "denied" | "library";
+type SAPStep = "login" | "otp" | "denied" | "library";
 
 interface SAPSession {
   phone: string;
@@ -67,6 +68,12 @@ const SAP = () => {
     return () => document.removeEventListener("keydown", handler);
   }, []);
 
+  const handleOtpSent = useCallback((phoneNumber: string, userName: string) => {
+    setPhone(phoneNumber);
+    setName(userName);
+    setStep("otp");
+  }, []);
+
   const handleVerified = useCallback((phoneNumber: string, userName: string) => {
     setPhone(phoneNumber);
     setName(userName);
@@ -115,8 +122,25 @@ const SAP = () => {
             className="relative z-10 min-h-screen flex items-center justify-center px-4 py-8"
           >
             <SAPLoginForm
-              onVerified={handleVerified}
+              onOtpSent={handleOtpSent}
               onAccessDenied={handleAccessDenied}
+            />
+          </motion.div>
+        )}
+
+        {step === "otp" && (
+          <motion.div
+            key="otp"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="relative z-10 min-h-screen flex items-center justify-center px-4 py-8"
+          >
+            <SAPOTPVerify
+              phone={phone}
+              name={name}
+              onVerified={handleVerified}
+              onBack={() => setStep("login")}
             />
           </motion.div>
         )}

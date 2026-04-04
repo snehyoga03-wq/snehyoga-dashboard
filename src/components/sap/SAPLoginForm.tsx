@@ -8,11 +8,11 @@ import { useToast } from "@/hooks/use-toast";
 import { formatPhone } from "@/lib/utils";
 
 interface SAPLoginFormProps {
-  onVerified: (phone: string, name: string) => void;
+  onOtpSent: (phone: string, name: string) => void;
   onAccessDenied: (reason: string) => void;
 }
 
-export const SAPLoginForm = ({ onVerified, onAccessDenied }: SAPLoginFormProps) => {
+export const SAPLoginForm = ({ onOtpSent, onAccessDenied }: SAPLoginFormProps) => {
   const { toast } = useToast();
   const [isLoading, setIsLoading] = useState(false);
   const [name, setName] = useState("");
@@ -68,22 +68,21 @@ export const SAPLoginForm = ({ onVerified, onAccessDenied }: SAPLoginFormProps) 
         return;
       }
 
-      // Store SAP session directly — no OTP needed
-      const sapSession = {
-        phone: normalizedPhone,
-        name: userData.name || name,
-        verified: true,
-        verifiedAt: new Date().toISOString(),
-        expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(),
-      };
-      localStorage.setItem("sap_session", JSON.stringify(sapSession));
-
-      toast({
-        title: "Access Granted! ✅",
-        description: "Welcome to Snehyoga Access Portal",
+      // Send WhatsApp OTP via edge function
+      const res = await supabase.functions.invoke("sap-otp", {
+        body: { action: "send", phone: normalizedPhone },
       });
 
-      onVerified(normalizedPhone, userData.name || name);
+      if (res.error || !res.data?.success) {
+        throw new Error(res.data?.error || res.error?.message || "Failed to send OTP");
+      }
+
+      toast({
+        title: "OTP Sent! 📱",
+        description: "Check your WhatsApp for the verification code.",
+      });
+
+      onOtpSent(normalizedPhone, userData.name || name);
     } catch (error: any) {
       console.error("SAP Login Error:", error);
       toast({
@@ -180,14 +179,14 @@ export const SAPLoginForm = ({ onVerified, onAccessDenied }: SAPLoginFormProps) 
               ) : (
                 <span className="flex items-center gap-2">
                   <Shield className="w-5 h-5" />
-                  Verify Access
+                  Send OTP via WhatsApp
                 </span>
               )}
             </Button>
           </form>
 
           <p className="text-xs text-muted-foreground text-center mt-4">
-            Access is granted instantly for verified 12-month members
+            A WhatsApp OTP will be sent to your registered number
           </p>
         </div>
       </div>
