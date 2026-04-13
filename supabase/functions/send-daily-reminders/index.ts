@@ -29,11 +29,10 @@ Deno.serve(async (req) => {
         const supabaseServiceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
         const supabase = createClient(supabaseUrl, supabaseServiceKey);
 
-        // 1. Get all active users for this batch time
+        // 1. Get all active users regardless of batch time
         const { data: batchUsers, error: usersError } = await supabase
             .from("main_data_registration")
             .select("name, mobile_number, days_left, batch_timing")
-            .eq("batch_timing", batchTime)
             .eq("subscription_paused", false)
             .gt("days_left", 0);
 
