@@ -41,6 +41,7 @@ const App = () => (
           <Route path="/crm" element={<CRM />} />
           <Route path="/live" element={<SessionRedirect />} />
           <Route path="/sap" element={<SAP />} />
+          <Route path="/:slug" element={<SessionRedirect />} />
           {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}
           <Route path="*" element={<MobileLayout><NotFound /></MobileLayout>} />
         </Routes>

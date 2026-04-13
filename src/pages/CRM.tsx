@@ -50,14 +50,14 @@ const getParamsForUser = (user: any, templateVarsStr: string) => {
     if (key === 'name') return user.name || '';
     if (key === 'mobile_number' || key === 'phone') return user.mobile_number || user.phone || '';
     if (key === 'days_left') return String(user.days_left || 0);
-    if (key === 'batch_timing') return user.batch_timing || '';
+    if (key === 'batch_timing') return user.batch_timing || '-';
     if (key === 'slug') {
       const match = user.referral_link ? user.referral_link.match(/ref=([^&]+)/) : null;
-      return match && match[1] ? match[1] : '';
+      return (match && match[1]) ? match[1] : 'default';
     }
     if (key === 'personal_link') {
       const match = user.referral_link ? user.referral_link.match(/ref=([^&]+)/) : null;
-      return match && match[1] ? `https://365.snehyoga.com/${match[1]}` : '';
+      return (match && match[1]) ? `https://365.snehyoga.com/${match[1]}` : 'https://365.snehyoga.com';
     }
     return key; // literal string
   });
@@ -1858,11 +1858,21 @@ const CRM = () => {
                             } else if (targetAudience === 'inactive') {
                               targetUsers = users.filter(u => u.subscription_paused || (u.days_left || 0) <= 0);
                             } else if (targetAudience === 'custom') {
-                              targetUsers = customUsers.map(cu => ({
-                                name: cu.name,
-                                mobile_number: cu.phone,
-                                days_left: 0
-                              }));
+                              targetUsers = customUsers.map(cu => {
+                                // Try to find the user in the database to fetch their referral link
+                                const phoneStr = String(cu.phone).replace(/\D/g, '');
+                                const dbUser = users.find(u => {
+                                  const dbPhone = String(u.mobile_number || u.phone).replace(/\D/g, '');
+                                  return dbPhone.includes(phoneStr);
+                                });
+                                return {
+                                  name: cu.name || dbUser?.name || 'User',
+                                  mobile_number: cu.phone,
+                                  days_left: dbUser?.days_left || 0,
+                                  batch_timing: dbUser?.batch_timing || '',
+                                  referral_link: dbUser?.referral_link || ''
+                                };
+                              });
                             }
 
                             if (targetUsers.length === 0) {
