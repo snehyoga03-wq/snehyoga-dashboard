@@ -209,7 +209,7 @@ export function UserDetail({ user, onBack, onUpdate }: UserDetailProps) {
                                     <InfoItem label="Referral Link" value={user.referral_link || 'None'} />
                                     <InfoItem label="Personal Link" value={
                                         user.referral_link 
-                                            ? (user.referral_link.match(/ref=([^&]+)/)?.[1] ? `https://Yoga.snehyoga.com/${user.referral_link.match(/ref=([^&]+)/)?.[1]}` : 'None')
+                                            ? (user.referral_link.match(/ref=([^&]+)/)?.[1] ? `https://365.snehyoga.com/${user.referral_link.match(/ref=([^&]+)/)?.[1]}` : 'None')
                                             : 'None'
                                     } />
                                     <InfoItem label="Joined" value={user.created_at ? new Date(user.created_at).toLocaleDateString() : 'Unknown'} />

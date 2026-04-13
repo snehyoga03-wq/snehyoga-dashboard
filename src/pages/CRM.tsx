@@ -51,6 +51,14 @@ const getParamsForUser = (user: any, templateVarsStr: string) => {
     if (key === 'mobile_number' || key === 'phone') return user.mobile_number || user.phone || '';
     if (key === 'days_left') return String(user.days_left || 0);
     if (key === 'batch_timing') return user.batch_timing || '';
+    if (key === 'slug') {
+      const match = user.referral_link ? user.referral_link.match(/ref=([^&]+)/) : null;
+      return match && match[1] ? match[1] : '';
+    }
+    if (key === 'personal_link') {
+      const match = user.referral_link ? user.referral_link.match(/ref=([^&]+)/) : null;
+      return match && match[1] ? `https://365.snehyoga.com/${match[1]}` : '';
+    }
     return key; // literal string
   });
 };
@@ -1733,7 +1741,7 @@ const CRM = () => {
                          <label className="text-xs font-semibold uppercase text-gray-500 tracking-wider">Template Parameters (Comma-separated)</label>
                          <Input placeholder="e.g. name, days_left, Morning Batch" value={templateVariables} onChange={e => setTemplateVariables(e.target.value)} />
                          <p className="text-xs text-gray-500">
-                           Map values to placeholders <code className="bg-gray-100 px-1 rounded">{`{{1}}, {{2}}`}</code> in order. Available dynamic fields: <strong>name, mobile_number, days_left, batch_timing</strong>. Any other text will be sent exactly as typed.
+                           Map values to placeholders <code className="bg-gray-100 px-1 rounded">{`{{1}}, {{2}}`}</code> in order. Available dynamic fields: <strong>name, mobile_number, days_left, batch_timing, slug, personal_link</strong>. Any other text will be sent exactly as typed.
                          </p>
                       </div>
                     </div>
