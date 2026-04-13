@@ -19,7 +19,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { useToast } from "@/hooks/use-toast";
-import { LogOut, Search, Edit2, Save, X, Download, Eye, FileText, MessageCircle, Send, Paperclip, Upload, Users, Link2, BarChart3, ClipboardList, Activity, Calendar } from "lucide-react";
+import { LogOut, Search, Edit2, Save, X, Download, Eye, FileText, MessageCircle, Send, Paperclip, Upload, Users, Link2, BarChart3, ClipboardList, Activity, Calendar, Settings, Plus, Trash2, ToggleLeft, ToggleRight } from "lucide-react";
 import { read, utils, writeFile } from "xlsx";
 import {
   Dialog,
@@ -210,6 +210,26 @@ const CRM = () => {
   const [reminderLogs, setReminderLogs] = useState<any[]>([]);
   const [logsLoading, setLogsLoading] = useState(false);
 
+  // ── Reminder Schedules (per-slot config) ──────────────────────────
+  interface ReminderSchedule {
+    id?: string;
+    slot: string;
+    enabled: boolean;
+    audience: string;        // 'active' | 'all' | 'inactive' | 'custom'
+    custom_users: { name: string; phone: string }[];
+    template_name: string;
+    template_id: string;
+    template_category: string;
+    template_params: string;
+  }
+  const AUTO_SLOTS = ["5 AM", "6 AM", "8 AM", "5 PM", "6 PM", "7 PM"];
+  const [schedules, setSchedules] = useState<Record<string, ReminderSchedule>>({});
+  const [editingSlot, setEditingSlot] = useState<string | null>(null);
+  const [slotDraft, setSlotDraft] = useState<ReminderSchedule | null>(null);
+  const [isSavingSchedule, setIsSavingSchedule] = useState(false);
+  const [slotCustomUserName, setSlotCustomUserName] = useState("");
+  const [slotCustomUserPhone, setSlotCustomUserPhone] = useState("");
+
   // Template settings
   const [templateId, setTemplateId] = useState("");
   const [templateName, setTemplateName] = useState("");
@@ -331,7 +351,7 @@ const CRM = () => {
     }
   }, []);
 
-  // Fetch reminder logs when entering reminders section
+  // Fetch reminder logs + schedules when entering reminders section
   useEffect(() => {
     if (currentSection === 'reminders' && isAuthenticated) {
       const fetchLogs = async () => {
@@ -349,7 +369,25 @@ const CRM = () => {
           setLogsLoading(false);
         }
       };
+      const fetchSchedules = async () => {
+        try {
+          const { data } = await supabase
+            .from('reminder_schedules')
+            .select('*');
+          const map: Record<string, any> = {};
+          (data || []).forEach((s: any) => {
+            map[s.slot] = {
+              ...s,
+              custom_users: Array.isArray(s.custom_users) ? s.custom_users : [],
+            };
+          });
+          setSchedules(map);
+        } catch (e) {
+          console.error('Error fetching reminder schedules:', e);
+        }
+      };
       fetchLogs();
+      fetchSchedules();
     }
   }, [currentSection, isAuthenticated]);
 
@@ -1426,123 +1464,259 @@ const CRM = () => {
               <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="space-y-6">
                 <h1 className="text-2xl font-bold text-gray-900">Daily Reminders (Pabbly)</h1>
 
-                {/* ===== AUTO-REMINDER STATUS PANEL ===== */}
-                {(() => {
-                  const AUTO_SLOTS = ["5 AM", "6 AM", "8 AM", "5 PM", "6 PM", "7 PM"];
 
-                  // Get latest log for each time slot
-                  const getSlotStatus = (slot: string) => {
-                    const log = reminderLogs.find(l => l.batch_time === slot);
-                    return log || null;
-                  };
+                {/* ===== AUTO-REMINDER SCHEDULER PANEL ===== */}
+                <Card className="shadow-sm border-gray-100">
+                  <CardHeader className="flex flex-row items-center justify-between">
+                    <CardTitle className="flex items-center gap-2">
+                      <Activity className="w-5 h-5 text-blue-500" />
+                      Auto-Reminder Schedule
+                    </CardTitle>
+                    <span className="text-xs text-gray-400 bg-gray-50 px-2 py-1 rounded-full">
+                      pg_cron → Edge Function → WhatsApp API
+                    </span>
+                  </CardHeader>
+                  <CardContent className="space-y-3">
+                    {AUTO_SLOTS.map(slot => {
+                      const log = reminderLogs.find(l => l.batch_time === slot);
+                      const isPending = !log;
+                      const isSuccess = log?.status === 'success';
+                      const cfg = schedules[slot];
+                      const isEnabled = cfg?.enabled !== false;
+                      const isEditing = editingSlot === slot;
 
-                  return (
-                    <>
-                      {/* Time Slot Status Cards */}
-                      <Card className="shadow-sm border-gray-100">
-                        <CardHeader>
-                          <CardTitle className="flex items-center gap-2">
-                            <Activity className="w-5 h-5 text-blue-500" />
-                            Auto-Reminder Status (9145414083)
-                          </CardTitle>
-                        </CardHeader>
-                        <CardContent>
-                          <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
-                            {AUTO_SLOTS.map(slot => {
-                              const log = getSlotStatus(slot);
-                              const isPending = !log;
-                              const isSuccess = log?.status === 'success';
-
-                              return (
-                                <div
-                                  key={slot}
-                                  className={`rounded-xl p-4 text-center border transition-all ${isPending
-                                    ? 'bg-gray-50 border-gray-200'
-                                    : isSuccess
-                                      ? 'bg-green-50 border-green-200'
-                                      : 'bg-red-50 border-red-200'
-                                    }`}
-                                >
-                                  <div className="text-2xl mb-1">
-                                    {isPending ? '⏳' : isSuccess ? '✅' : '❌'}
-                                  </div>
-                                  <div className="font-bold text-gray-900 text-sm">{slot}</div>
-                                  <div className="text-xs text-gray-500 mt-1">
-                                    {isPending
-                                      ? 'No data yet'
-                                      : new Date(log.created_at).toLocaleDateString('en-IN', {
-                                        day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit'
-                                      })
-                                    }
-                                  </div>
+                      return (
+                        <div key={slot} className={`rounded-xl border transition-all ${isEnabled ? 'border-gray-200 bg-white' : 'border-gray-100 bg-gray-50 opacity-60'}`}>
+                          {/* Slot Header Row */}
+                          <div className="flex items-center justify-between px-4 py-3">
+                            <div className="flex items-center gap-3">
+                              <span className="text-xl">{isPending ? '⏳' : isSuccess ? '✅' : '❌'}</span>
+                              <div>
+                                <div className="flex items-center gap-2">
+                                  <span className="font-bold text-gray-900">{slot}</span>
+                                  {!isEnabled && <span className="text-xs bg-gray-200 text-gray-600 px-1.5 py-0.5 rounded-full">Disabled</span>}
+                                  {cfg && isEnabled && (
+                                    <span className={`text-xs px-1.5 py-0.5 rounded-full font-medium ${
+                                      cfg.audience === 'active' ? 'bg-green-100 text-green-700' :
+                                      cfg.audience === 'all'    ? 'bg-blue-100 text-blue-700' :
+                                      cfg.audience === 'inactive' ? 'bg-yellow-100 text-yellow-700' :
+                                      'bg-purple-100 text-purple-700'
+                                    }`}>
+                                      {cfg.audience === 'active' ? '👥 Active Users' :
+                                       cfg.audience === 'all' ? '👥 All Users' :
+                                       cfg.audience === 'inactive' ? '⏸ Inactive' :
+                                       `🎯 Custom (${cfg.custom_users?.length || 0})`}
+                                    </span>
+                                  )}
+                                  {cfg?.template_name && <span className="text-xs text-gray-500 font-mono">📋 {cfg.template_name}</span>}
                                 </div>
-                              );
-                            })}
+                                <div className="text-xs text-gray-400 mt-0.5">
+                                  {isPending ? 'Not sent today' : new Date(log.created_at).toLocaleString('en-IN', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}
+                                </div>
+                              </div>
+                            </div>
+                            <div className="flex items-center gap-2">
+                              {/* Enable/Disable Toggle */}
+                              <button
+                                className={`flex items-center gap-1 text-xs px-2 py-1 rounded-lg border transition-colors ${isEnabled ? 'bg-green-50 border-green-200 text-green-700 hover:bg-green-100' : 'bg-gray-100 border-gray-200 text-gray-500 hover:bg-gray-200'}`}
+                                onClick={async () => {
+                                  const newEnabled = !isEnabled;
+                                  try {
+                                    const existing = schedules[slot];
+                                    if (existing?.id) {
+                                      await supabase.from('reminder_schedules').update({ enabled: newEnabled, updated_at: new Date().toISOString() }).eq('id', existing.id);
+                                    } else {
+                                      await supabase.from('reminder_schedules').upsert({ slot, enabled: newEnabled, audience: 'active', custom_users: [], template_name: '', template_id: '', template_category: '', template_params: 'name,slug', updated_at: new Date().toISOString() }, { onConflict: 'slot' });
+                                    }
+                                    setSchedules(prev => ({ ...prev, [slot]: { ...(prev[slot] || { slot, audience: 'active', custom_users: [], template_name: '', template_id: '', template_category: '', template_params: 'name,slug' }), enabled: newEnabled } }));
+                                    toast({ title: newEnabled ? `${slot} enabled` : `${slot} disabled` });
+                                  } catch (e) { toast({ title: 'Error updating schedule', variant: 'destructive' }); }
+                                }}
+                              >
+                                {isEnabled ? <ToggleRight className="w-3.5 h-3.5" /> : <ToggleLeft className="w-3.5 h-3.5" />}
+                                {isEnabled ? 'ON' : 'OFF'}
+                              </button>
+                              {/* Configure */}
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                className="h-7 px-2 text-xs"
+                                onClick={() => {
+                                  if (isEditing) {
+                                    setEditingSlot(null);
+                                    setSlotDraft(null);
+                                  } else {
+                                    const defaults: any = { slot, enabled: true, audience: 'active', custom_users: [], template_name: '', template_id: '', template_category: '', template_params: 'name,slug' };
+                                    setSlotDraft({ ...defaults, ...(schedules[slot] || {}), custom_users: schedules[slot]?.custom_users || [] });
+                                    setEditingSlot(slot);
+                                  }
+                                }}
+                              >
+                                <Settings className="w-3 h-3 mr-1" />
+                                {isEditing ? 'Close' : 'Configure'}
+                              </Button>
+                            </div>
                           </div>
-                          <p className="text-xs text-gray-400 mt-3 text-center">
-                            These reminders are sent automatically via pg_cron → Supabase Edge Function → Pabbly webhook
-                          </p>
-                        </CardContent>
-                      </Card>
 
-                      {/* History Log */}
-                      <Card className="shadow-sm border-gray-100">
-                        <CardHeader>
-                          <CardTitle className="flex items-center gap-2">
-                            <FileText className="w-5 h-5 text-indigo-500" />
-                            Send History
-                          </CardTitle>
-                        </CardHeader>
-                        <CardContent>
-                          {logsLoading ? (
-                            <p className="text-center text-gray-400 py-4">Loading logs...</p>
-                          ) : reminderLogs.length === 0 ? (
-                            <p className="text-center text-gray-400 py-6">No reminder logs yet. Logs will appear here once the automated reminders start running.</p>
-                          ) : (
-                            <div className="overflow-x-auto">
-                              <Table>
-                                <TableHeader>
-                                  <TableRow className="hover:bg-transparent">
-                                    <TableHead>Time Slot</TableHead>
-                                    <TableHead>Phone</TableHead>
-                                    <TableHead>Status</TableHead>
-                                    <TableHead>Sent At</TableHead>
-                                    <TableHead>Error</TableHead>
-                                  </TableRow>
-                                </TableHeader>
-                                <TableBody>
-                                  {reminderLogs.slice(0, 20).map((log: any) => (
-                                    <TableRow key={log.id}>
-                                      <TableCell className="font-medium">{log.batch_time}</TableCell>
-                                      <TableCell className="text-gray-500">{log.phone}</TableCell>
-                                      <TableCell>
-                                        <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${log.status === 'success'
-                                          ? 'bg-green-100 text-green-800'
-                                          : 'bg-red-100 text-red-800'
-                                          }`}>
-                                          {log.status === 'success' ? '✅ Success' : '❌ Failed'}
-                                        </span>
-                                      </TableCell>
-                                      <TableCell className="text-gray-500 text-sm">
-                                        {new Date(log.created_at).toLocaleString('en-IN', {
-                                          day: 'numeric', month: 'short', year: 'numeric',
-                                          hour: '2-digit', minute: '2-digit'
-                                        })}
-                                      </TableCell>
-                                      <TableCell className="text-xs text-red-500 max-w-[200px] truncate">
-                                        {log.error_message || '—'}
-                                      </TableCell>
-                                    </TableRow>
-                                  ))}
-                                </TableBody>
-                              </Table>
+                          {/* ── Inline Editor ── */}
+                          {isEditing && slotDraft && (
+                            <div className="border-t border-gray-100 px-4 pb-4 pt-3 space-y-4 bg-blue-50/40">
+                              {/* Audience */}
+                              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                <div className="space-y-1">
+                                  <label className="text-xs font-semibold text-gray-600 uppercase tracking-wide">Audience</label>
+                                  <select
+                                    className="flex h-9 w-full rounded-md border border-input bg-white px-3 text-sm"
+                                    value={slotDraft.audience}
+                                    onChange={e => setSlotDraft(d => d ? { ...d, audience: e.target.value } : d)}
+                                  >
+                                    <option value="active">Active Users Only (days_left &gt; 0)</option>
+                                    <option value="all">All Users</option>
+                                    <option value="inactive">Inactive / Paused Only</option>
+                                    <option value="custom">Custom List</option>
+                                  </select>
+                                </div>
+                                <div className="space-y-1">
+                                  <label className="text-xs font-semibold text-gray-600 uppercase tracking-wide">Template Name</label>
+                                  <Input placeholder="e.g. daily_reminder" value={slotDraft.template_name} onChange={e => setSlotDraft(d => d ? { ...d, template_name: e.target.value } : d)} className="h-9 bg-white" />
+                                </div>
+                                <div className="space-y-1">
+                                  <label className="text-xs font-semibold text-gray-600 uppercase tracking-wide">Template Params <span className="lowercase font-normal text-gray-400">(comma-separated)</span></label>
+                                  <Input placeholder="e.g. name,slug" value={slotDraft.template_params} onChange={e => setSlotDraft(d => d ? { ...d, template_params: e.target.value } : d)} className="h-9 bg-white" />
+                                  <p className="text-xs text-gray-400">Available: <strong>name, mobile_number, days_left, batch_timing, slug, personal_link</strong></p>
+                                </div>
+                                <div className="space-y-1">
+                                  <label className="text-xs font-semibold text-gray-600 uppercase tracking-wide">Template Category</label>
+                                  <Input placeholder="e.g. UTILITY" value={slotDraft.template_category} onChange={e => setSlotDraft(d => d ? { ...d, template_category: e.target.value } : d)} className="h-9 bg-white" />
+                                </div>
+                              </div>
+
+                              {/* Custom Users */}
+                              {slotDraft.audience === 'custom' && (
+                                <div className="space-y-2">
+                                  <label className="text-xs font-semibold text-gray-600 uppercase tracking-wide">Custom User List</label>
+                                  <div className="flex gap-2">
+                                    <Input placeholder="Name" value={slotCustomUserName} onChange={e => setSlotCustomUserName(e.target.value)} className="h-8 bg-white text-sm" />
+                                    <Input placeholder="Mobile" value={slotCustomUserPhone} onChange={e => setSlotCustomUserPhone(e.target.value)} className="h-8 bg-white text-sm" />
+                                    <Button size="sm" variant="secondary" className="h-8 shrink-0" onClick={() => {
+                                      if (slotCustomUserName && slotCustomUserPhone) {
+                                        setSlotDraft(d => d ? { ...d, custom_users: [...(d.custom_users || []), { name: slotCustomUserName, phone: slotCustomUserPhone }] } : d);
+                                        setSlotCustomUserName('');
+                                        setSlotCustomUserPhone('');
+                                      }
+                                    }}>
+                                      <Plus className="w-3 h-3" />
+                                    </Button>
+                                  </div>
+                                  {(slotDraft.custom_users || []).length > 0 && (
+                                    <div className="bg-white rounded-lg border p-2 space-y-1 max-h-32 overflow-y-auto">
+                                      {(slotDraft.custom_users || []).map((cu, idx) => (
+                                        <div key={idx} className="flex justify-between items-center text-xs text-gray-700 px-2 py-1 hover:bg-gray-50 rounded">
+                                          <span>{cu.name} — {cu.phone}</span>
+                                          <button onClick={() => setSlotDraft(d => d ? { ...d, custom_users: d.custom_users.filter((_, i) => i !== idx) } : d)} className="text-red-400 hover:text-red-600"><Trash2 className="w-3 h-3" /></button>
+                                        </div>
+                                      ))}
+                                    </div>
+                                  )}
+                                </div>
+                              )}
+
+                              {/* Save Button */}
+                              <div className="flex justify-end gap-2 pt-1">
+                                <Button variant="outline" size="sm" onClick={() => { setEditingSlot(null); setSlotDraft(null); }}>Cancel</Button>
+                                <Button
+                                  size="sm"
+                                  className="bg-blue-600 hover:bg-blue-700 text-white"
+                                  disabled={isSavingSchedule}
+                                  onClick={async () => {
+                                    if (!slotDraft) return;
+                                    setIsSavingSchedule(true);
+                                    try {
+                                      const payload = {
+                                        slot: slotDraft.slot,
+                                        enabled: slotDraft.enabled,
+                                        audience: slotDraft.audience,
+                                        custom_users: slotDraft.custom_users || [],
+                                        template_name: slotDraft.template_name,
+                                        template_id: slotDraft.template_id || '',
+                                        template_category: slotDraft.template_category,
+                                        template_params: slotDraft.template_params,
+                                        updated_at: new Date().toISOString(),
+                                      };
+                                      const { error } = await supabase.from('reminder_schedules').upsert(payload, { onConflict: 'slot' });
+                                      if (error) throw error;
+                                      setSchedules(prev => ({ ...prev, [slotDraft.slot]: slotDraft }));
+                                      setEditingSlot(null);
+                                      setSlotDraft(null);
+                                      toast({ title: `✅ ${slot} schedule saved!` });
+                                    } catch (e: any) {
+                                      toast({ title: 'Error saving schedule', description: e.message, variant: 'destructive' });
+                                    } finally {
+                                      setIsSavingSchedule(false);
+                                    }
+                                  }}
+                                >
+                                  <Save className="w-3 h-3 mr-1" />
+                                  {isSavingSchedule ? 'Saving...' : 'Save Schedule'}
+                                </Button>
+                              </div>
                             </div>
                           )}
-                        </CardContent>
-                      </Card>
-                    </>
-                  );
-                })()}
+                        </div>
+                      );
+                    })}
+                  </CardContent>
+                </Card>
+
+                {/* ===== SEND HISTORY LOG ===== */}
+                <Card className="shadow-sm border-gray-100">
+                  <CardHeader>
+                    <CardTitle className="flex items-center gap-2">
+                      <FileText className="w-5 h-5 text-indigo-500" />
+                      Send History
+                    </CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    {logsLoading ? (
+                      <p className="text-center text-gray-400 py-4">Loading logs...</p>
+                    ) : reminderLogs.length === 0 ? (
+                      <p className="text-center text-gray-400 py-6">No reminder logs yet. Logs will appear here once the automated reminders start running.</p>
+                    ) : (
+                      <div className="overflow-x-auto">
+                        <Table>
+                          <TableHeader>
+                            <TableRow className="hover:bg-transparent">
+                              <TableHead>Time Slot</TableHead>
+                              <TableHead>Phone</TableHead>
+                              <TableHead>Status</TableHead>
+                              <TableHead>Sent At</TableHead>
+                              <TableHead>Error</TableHead>
+                            </TableRow>
+                          </TableHeader>
+                          <TableBody>
+                            {reminderLogs.slice(0, 20).map((log: any) => (
+                              <TableRow key={log.id}>
+                                <TableCell className="font-medium">{log.batch_time}</TableCell>
+                                <TableCell className="text-gray-500">{log.phone}</TableCell>
+                                <TableCell>
+                                  <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${log.status === 'success' ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'}`}>
+                                    {log.status === 'success' ? '✅ Success' : '❌ Failed'}
+                                  </span>
+                                </TableCell>
+                                <TableCell className="text-gray-500 text-sm">
+                                  {new Date(log.created_at).toLocaleString('en-IN', { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })}
+                                </TableCell>
+                                <TableCell className="text-xs text-red-500 max-w-[200px] truncate">
+                                  {log.error_message || '—'}
+                                </TableCell>
+                              </TableRow>
+                            ))}
+                          </TableBody>
+                        </Table>
+                      </div>
+                    )}
+                  </CardContent>
+                </Card>
 
                 {/* WhatsApp API Configuration */}
                 <Card className="shadow-sm border-gray-100">

@@ -1,11 +1,10 @@
 // Supabase Edge Function: send-daily-reminders
 // ==============================================
-// UPDATED: Now publishes to message_queue (Pub/Sub) instead of
-// sending directly to Pabbly. This ensures reliable delivery
-// under heavy load with automatic retries.
+// UPDATED: Reads per-slot config from `reminder_schedules` table.
+// Each time slot can independently configure audience, template, and params.
 //
 // Flow: pg_cron → this function (PUBLISHER) → message_queue
-//       → process-message-queue (SUBSCRIBER) → Pabbly webhook
+//       → process-message-queue (SUBSCRIBER) → WhatsApp Business API
 //
 // Deploy:  supabase functions deploy send-daily-reminders
 
@@ -16,6 +15,28 @@ const corsHeaders = {
     "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
 };
 
+// Helper: extract slug from referral_link e.g. "...?ref=snehankitamane75"
+const getSlug = (referralLink: string | null): string => {
+    if (!referralLink) return "default";
+    const match = referralLink.match(/ref=([^&]+)/);
+    return match?.[1] ?? "default";
+};
+
+// Helper: resolve template parameter keys to user field values
+const resolveParams = (user: Record<string, any>, paramsStr: string): string[] => {
+    if (!paramsStr?.trim()) return [];
+    return paramsStr.split(",").map((key) => {
+        const k = key.trim();
+        if (k === "name")          return user.name || "User";
+        if (k === "mobile_number") return user.mobile_number || "";
+        if (k === "days_left")     return String(user.days_left || 0);
+        if (k === "batch_timing")  return user.batch_timing || "-";
+        if (k === "slug")          return getSlug(user.referral_link);
+        if (k === "personal_link") return `https://365.snehyoga.com/${getSlug(user.referral_link)}`;
+        return k; // literal string
+    });
+};
+
 Deno.serve(async (req) => {
     if (req.method === "OPTIONS") {
         return new Response("ok", { headers: corsHeaders });
@@ -23,58 +44,100 @@ Deno.serve(async (req) => {
 
     try {
         const body = await req.json().catch(() => ({}));
-        const batchTime = body.batch_time || "Unknown";
+        const batchTime: string = body.batch_time || "Unknown";
 
         const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
         const supabaseServiceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
         const supabase = createClient(supabaseUrl, supabaseServiceKey);
 
-        // 1. Get all active users regardless of batch time
-        const { data: batchUsers, error: usersError } = await supabase
-            .from("main_data_registration")
-            .select("name, mobile_number, days_left, batch_timing")
-            .eq("subscription_paused", false)
-            .gt("days_left", 0);
+        // ─── 1. Load the per-slot schedule config ────────────────────────
+        const { data: schedule, error: scheduleError } = await supabase
+            .from("reminder_schedules")
+            .select("*")
+            .eq("slot", batchTime)
+            .single();
 
-        if (usersError) throw new Error(`Users fetch error: ${usersError.message}`);
+        // If explicitly disabled, bail early
+        if (!scheduleError && schedule && schedule.enabled === false) {
+            console.log(`⏸ Slot ${batchTime} is disabled — skipping.`);
+            return new Response(
+                JSON.stringify({ success: true, message: `Slot ${batchTime} is disabled`, queued: 0 }),
+                { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+            );
+        }
 
-        if (!batchUsers || batchUsers.length === 0) {
-            console.log(`ℹ️ No active users found for ${batchTime} batch`);
+        // Resolve settings: prefer DB schedule, fall back to defaults
+        const audience: string        = schedule?.audience        || "active";
+        const customUsers: any[]      = schedule?.custom_users    || [];
+        const templateNameCfg: string = schedule?.template_name   || "daily_reminder";
+        const templateIdCfg: string   = schedule?.template_id     || "";
+        const templateCatCfg: string  = schedule?.template_category || "UTILITY";
+        const templateParams: string  = schedule?.template_params  || "name,slug";
 
-            // Log empty batch
+        // ─── 2. Fetch users based on audience type ───────────────────────
+        let targetUsers: any[] = [];
+
+        if (audience === "custom") {
+            // Use the stored custom users list directly
+            targetUsers = customUsers;
+        } else {
+            let query = supabase
+                .from("main_data_registration")
+                .select("name, mobile_number, days_left, batch_timing, referral_link");
+
+            if (audience === "active") {
+                query = query.eq("subscription_paused", false).gt("days_left", 0);
+            } else if (audience === "inactive") {
+                // We need paused OR days_left <= 0 — fetch all then filter
+                const { data: allUsers } = await supabase
+                    .from("main_data_registration")
+                    .select("name, mobile_number, days_left, batch_timing, referral_link");
+                targetUsers = (allUsers || []).filter(
+                    (u: any) => u.subscription_paused || (u.days_left || 0) <= 0
+                );
+            }
+
+            if (audience !== "inactive") {
+                const { data, error: usersError } = await query;
+                if (usersError) throw new Error(`Users fetch error: ${usersError.message}`);
+                targetUsers = data || [];
+            }
+        }
+
+        if (targetUsers.length === 0) {
+            console.log(`ℹ️ No users found for ${batchTime} (audience: ${audience})`);
             await supabase.from("reminder_logs").insert({
                 batch_time: batchTime,
                 phone: "N/A",
                 status: "success",
-                error_message: `No active users in ${batchTime} batch`,
+                error_message: `No users in audience "${audience}" for slot ${batchTime}`,
             });
-
             return new Response(
                 JSON.stringify({ success: true, message: `No users for ${batchTime}`, queued: 0 }),
                 { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } }
             );
         }
 
-        // 2. Publish to message queue via RPC
-        const queueUsers = batchUsers.map(u => ({
-            phone: u.mobile_number,
+        // ─── 3. Build queue payload ──────────────────────────────────────
+        const queueUsers = targetUsers.map((u: any) => ({
+            phone: u.mobile_number || u.phone,
             name: u.name || "User",
-            params: [u.name || "User", String(u.days_left || 0)],
+            params: resolveParams(u, templateParams),
         }));
 
         const { data: batchId, error: rpcError } = await supabase.rpc("publish_messages", {
             p_batch_label: `${batchTime} auto`,
-            p_template_name: "daily_reminder",
-            p_template_id: "",
-            p_template_category: "UTILITY",
+            p_template_name: templateNameCfg,
+            p_template_id: templateIdCfg,
+            p_template_category: templateCatCfg,
             p_users: queueUsers,
         });
 
         if (rpcError) throw new Error(`Publish error: ${rpcError.message}`);
 
-        console.log(`📤 Published ${batchUsers.length} messages for ${batchTime} batch (batch_id: ${batchId})`);
+        console.log(`📤 Published ${targetUsers.length} messages for ${batchTime} (audience: ${audience}, batch_id: ${batchId})`);
 
-        // 3. Trigger queue processing immediately
+        // ─── 4. Trigger queue processing immediately ─────────────────────
         try {
             const fnUrl = `${supabaseUrl}/functions/v1/process-message-queue`;
             await fetch(fnUrl, {
@@ -87,35 +150,34 @@ Deno.serve(async (req) => {
             });
         } catch (triggerErr) {
             console.warn("⚠️ Could not trigger queue processing:", triggerErr);
-            // Non-critical — cron will pick it up
         }
 
-        // 4. Log success
+        // ─── 5. Log success ───────────────────────────────────────────────
         await supabase.from("reminder_logs").insert({
             batch_time: batchTime,
             phone: "QUEUE",
             status: "success",
-            error_message: `Published ${batchUsers.length} messages to queue`,
+            error_message: `Published ${targetUsers.length} messages (audience: ${audience})`,
         });
 
         return new Response(
             JSON.stringify({
                 success: true,
-                message: `Queued ${batchUsers.length} reminders for ${batchTime}`,
-                queued: batchUsers.length,
+                message: `Queued ${targetUsers.length} reminders for ${batchTime}`,
+                queued: targetUsers.length,
                 batch_id: batchId,
+                audience,
             }),
             { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } }
         );
+
     } catch (err) {
         console.error("❌ send-daily-reminders error:", err);
 
-        // Log failure
         try {
             const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
             const supabaseServiceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
             const supabase = createClient(supabaseUrl, supabaseServiceKey);
-
             const body = await req.clone().json().catch(() => ({}));
             await supabase.from("reminder_logs").insert({
                 batch_time: body.batch_time || "Unknown",
@@ -123,9 +185,7 @@ Deno.serve(async (req) => {
                 status: "failed",
                 error_message: err instanceof Error ? err.message : String(err),
             });
-        } catch (_) {
-            // Ignore logging errors
-        }
+        } catch (_) { /* ignore */ }
 
         return new Response(
             JSON.stringify({ success: false, error: err instanceof Error ? err.message : String(err) }),
