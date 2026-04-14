@@ -19,9 +19,10 @@ CREATE TABLE IF NOT EXISTS reminder_schedules (
 -- Enable Row Level Security (RLS) - only service role can write
 ALTER TABLE reminder_schedules ENABLE ROW LEVEL SECURITY;
 
--- Allow anon/authenticated to read (CRM reads schedules)
-CREATE POLICY "Allow read" ON reminder_schedules
-  FOR SELECT USING (true);
+-- Allow anon/authenticated full access (CRM reads and writes schedules)
+CREATE POLICY "Allow anon all" ON reminder_schedules
+  FOR ALL USING (true);
+
 
 -- Allow service role full access (Edge Function writes logs)
 CREATE POLICY "Allow service role all" ON reminder_schedules
