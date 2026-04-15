@@ -119,11 +119,16 @@ Deno.serve(async (req) => {
         }
 
         // ─── 3. Build queue payload ──────────────────────────────────────
-        const queueUsers = targetUsers.map((u: any) => ({
-            phone: u.mobile_number || u.phone,
-            name: u.name || "User",
-            params: resolveParams(u, templateParams),
-        }));
+        const queueUsers = targetUsers.map((u: any) => {
+            let p = String(u.mobile_number || u.phone || "").replace(/\D/g, "");
+            if (p.length === 10) p = "91" + p;
+            
+            return {
+                phone: p,
+                name: u.name || "User",
+                params: resolveParams(u, templateParams),
+            };
+        });
 
         const { data: batchId, error: rpcError } = await supabase.rpc("publish_messages", {
             p_batch_label: `${batchTime} auto`,
@@ -140,7 +145,8 @@ Deno.serve(async (req) => {
         // ─── 4. Trigger queue processing immediately ─────────────────────
         try {
             const fnUrl = `${supabaseUrl}/functions/v1/process-message-queue`;
-            await fetch(fnUrl, {
+            console.log(`🔄 [Trigger] Calling queue processor at ${fnUrl}...`);
+            const triggerRes = await fetch(fnUrl, {
                 method: "POST",
                 headers: {
                     "Content-Type": "application/json",
@@ -148,8 +154,9 @@ Deno.serve(async (req) => {
                 },
                 body: JSON.stringify({}),
             });
+            console.log(`🔄 [Trigger] Queue processor response status: ${triggerRes.status}`);
         } catch (triggerErr) {
-            console.warn("⚠️ Could not trigger queue processing:", triggerErr);
+            console.error("⚠️ [Trigger] Could not trigger queue processing:", triggerErr);
         }
 
         // ─── 5. Log success ───────────────────────────────────────────────

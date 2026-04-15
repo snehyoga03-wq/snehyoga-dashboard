@@ -113,7 +113,10 @@ Deno.serve(async (req) => {
         const phoneNumberId = settings?.wa_phone_number_id || "808910018982018";
         const languageCode = settings?.wa_language_code || "en";
 
+        console.log(`🔍 [QueueProcessor] WA Token present: ${!!waToken}, Phone ID: ${phoneNumberId}`);
+
         if (!waToken) {
+            console.error(`❌ [QueueProcessor] Missing WhatsApp API token in session_settings`);
             return new Response(
                 JSON.stringify({ success: false, error: "WhatsApp API token not configured in session_settings" }),
                 { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } }
@@ -121,11 +124,14 @@ Deno.serve(async (req) => {
         }
 
         // 2. Fetch pending messages ready for processing
+        const now = new Date().toISOString();
+        console.log(`🔍 [QueueProcessor] Fetching messages with status=pending/failed and next_retry_at <= ${now}`);
+
         const { data: messages, error: fetchError } = await supabase
             .from("message_queue")
             .select("*")
             .or("status.eq.pending,status.eq.failed")
-            .lte("next_retry_at", new Date().toISOString())
+            .lte("next_retry_at", now)
             .lt("retry_count", 3)
             .order("created_at", { ascending: true })
             .limit(BATCH_SIZE);
@@ -133,13 +139,14 @@ Deno.serve(async (req) => {
         if (fetchError) throw new Error(`Queue fetch error: ${fetchError.message}`);
 
         if (!messages || messages.length === 0) {
+            console.log(`ℹ️ [QueueProcessor] No pending messages found in queue.`);
             return new Response(
                 JSON.stringify({ success: true, processed: 0, message: "Queue empty" }),
                 { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } }
             );
         }
 
-        console.log(`📋 Processing ${messages.length} messages via WhatsApp API...`);
+        console.log(`📋 [QueueProcessor] Processing ${messages.length} messages...`);
 
         // 3. Claim messages (mark as processing)
         const messageIds = messages.map((m: any) => m.id);
@@ -155,7 +162,12 @@ Deno.serve(async (req) => {
 
         for (const msg of messages) {
             // Normalise phone: strip any non-digits, ensure no leading +
-            const phone = msg.phone.replace(/\D/g, "");
+            let phone = (msg.phone || "").replace(/\D/g, "");
+            // If it's a 10-digit number, assume it's an Indian number and add the 91 country code
+            if (phone.length === 10) {
+                phone = "91" + phone;
+            }
+            
             const params: string[] = Array.isArray(msg.template_params) ? msg.template_params : [];
 
             const result = await sendWhatsAppTemplate(

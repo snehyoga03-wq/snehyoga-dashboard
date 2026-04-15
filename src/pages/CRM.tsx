@@ -19,7 +19,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { useToast } from "@/hooks/use-toast";
-import { LogOut, Search, Edit2, Save, X, Download, Eye, FileText, MessageCircle, Send, Paperclip, Upload, Users, Link2, BarChart3, ClipboardList, Activity, Calendar, Settings, Plus, Trash2, ToggleLeft, ToggleRight } from "lucide-react";
+import { LogOut, Search, Edit2, Save, X, Download, Eye, FileText, MessageCircle, Send, Paperclip, Upload, Users, Link2, BarChart3, ClipboardList, Activity, Calendar, Settings, Plus, Trash2, ToggleLeft, ToggleRight, Play, AlertTriangle } from "lucide-react";
 import { read, utils, writeFile } from "xlsx";
 import {
   Dialog,
@@ -226,9 +226,13 @@ const CRM = () => {
   const [schedules, setSchedules] = useState<Record<string, ReminderSchedule>>({});
   const [editingSlot, setEditingSlot] = useState<string | null>(null);
   const [slotDraft, setSlotDraft] = useState<ReminderSchedule | null>(null);
+  const slotDraftRef = useRef<ReminderSchedule | null>(null);
+  // Keep ref in sync with state so save handler always gets latest value
+  useEffect(() => { slotDraftRef.current = slotDraft; }, [slotDraft]);
   const [isSavingSchedule, setIsSavingSchedule] = useState(false);
   const [slotCustomUserName, setSlotCustomUserName] = useState("");
   const [slotCustomUserPhone, setSlotCustomUserPhone] = useState("");
+  const [testingSlot, setTestingSlot] = useState<string | null>(null);
 
   // Template settings
   const [templateId, setTemplateId] = useState("");
@@ -1465,6 +1469,19 @@ const CRM = () => {
                 <h1 className="text-2xl font-bold text-gray-900">Daily Reminders (Pabbly)</h1>
 
 
+                {/* ===== LANGUAGE CODE WARNING ===== */}
+                <div className="flex items-start gap-3 p-4 rounded-xl border border-amber-200 bg-amber-50/70">
+                  <AlertTriangle className="w-5 h-5 text-amber-600 mt-0.5 shrink-0" />
+                  <div>
+                    <p className="text-sm font-semibold text-amber-800">"Template name does not exist in the translation" error?</p>
+                    <p className="text-xs text-amber-700 mt-1">
+                      This means the <strong>Language Code</strong> in your WhatsApp Config below doesn't match the template's language.
+                      Check your template in <strong>WhatsApp Business Manager</strong> → if it shows <code className="bg-amber-100 px-1 rounded">en_US</code>, set Language Code to <code className="bg-amber-100 px-1 rounded">en_US</code> (not <code className="bg-amber-100 px-1 rounded">en</code>).
+                      Common codes: <code className="bg-amber-100 px-1 rounded">en</code>, <code className="bg-amber-100 px-1 rounded">en_US</code>, <code className="bg-amber-100 px-1 rounded">en_GB</code>, <code className="bg-amber-100 px-1 rounded">hi</code>
+                    </p>
+                  </div>
+                </div>
+
                 {/* ===== AUTO-REMINDER SCHEDULER PANEL ===== */}
                 <Card className="shadow-sm border-gray-100">
                   <CardHeader className="flex flex-row items-center justify-between">
@@ -1536,6 +1553,40 @@ const CRM = () => {
                                 {isEnabled ? <ToggleRight className="w-3.5 h-3.5" /> : <ToggleLeft className="w-3.5 h-3.5" />}
                                 {isEnabled ? 'ON' : 'OFF'}
                               </button>
+                              {/* Test Now */}
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                className="h-7 px-2 text-xs bg-orange-50 border-orange-200 text-orange-700 hover:bg-orange-100"
+                                disabled={testingSlot === slot}
+                                onClick={async () => {
+                                  // Warn if editor is open (unsaved changes)
+                                  if (isEditing) {
+                                    toast({ title: '⚠️ Save first!', description: 'Click "Save Schedule" before testing. The Test uses saved DB config, not the draft.', variant: 'destructive' });
+                                    return;
+                                  }
+                                  setTestingSlot(slot);
+                                  try {
+                                    const { data, error } = await supabase.functions.invoke('send-daily-reminders', {
+                                      body: { batch_time: slot },
+                                    });
+                                    if (error) throw error;
+                                    const result = typeof data === 'string' ? JSON.parse(data) : data;
+                                    if (result.success) {
+                                      toast({ title: `✅ ${slot} triggered!`, description: result.message || `Queued ${result.queued || 0} messages` });
+                                    } else {
+                                      toast({ title: `❌ ${slot} failed`, description: result.error || 'Unknown error', variant: 'destructive' });
+                                    }
+                                  } catch (e: any) {
+                                    toast({ title: `❌ Error triggering ${slot}`, description: e.message, variant: 'destructive' });
+                                  } finally {
+                                    setTestingSlot(null);
+                                  }
+                                }}
+                              >
+                                <Play className="w-3 h-3 mr-1" />
+                                {testingSlot === slot ? 'Testing...' : 'Test Now'}
+                              </Button>
                               {/* Configure */}
                               <Button
                                 variant="outline"
@@ -1599,10 +1650,18 @@ const CRM = () => {
                                     <Input placeholder="Name" value={slotCustomUserName} onChange={e => setSlotCustomUserName(e.target.value)} className="h-8 bg-white text-sm" />
                                     <Input placeholder="Mobile" value={slotCustomUserPhone} onChange={e => setSlotCustomUserPhone(e.target.value)} className="h-8 bg-white text-sm" />
                                     <Button size="sm" variant="secondary" className="h-8 shrink-0" onClick={() => {
+                                      console.log('➕ Add clicked. name:', slotCustomUserName, 'phone:', slotCustomUserPhone);
                                       if (slotCustomUserName && slotCustomUserPhone) {
-                                        setSlotDraft(d => d ? { ...d, custom_users: [...(d.custom_users || []), { name: slotCustomUserName, phone: slotCustomUserPhone }] } : d);
+                                        setSlotDraft(d => {
+                                          if (!d) return d;
+                                          const updated = { ...d, custom_users: [...(d.custom_users || []), { name: slotCustomUserName, phone: slotCustomUserPhone }] };
+                                          console.log('➕ Updated custom_users:', updated.custom_users);
+                                          return updated;
+                                        });
                                         setSlotCustomUserName('');
                                         setSlotCustomUserPhone('');
+                                      } else {
+                                        console.log('➕ Skipped: name or phone is empty');
                                       }
                                     }}>
                                       <Plus className="w-3 h-3" />
@@ -1629,27 +1688,79 @@ const CRM = () => {
                                   className="bg-blue-600 hover:bg-blue-700 text-white"
                                   disabled={isSavingSchedule}
                                   onClick={async () => {
-                                    if (!slotDraft) return;
+                                    // Read from ref to avoid stale closure
+                                    const draft = slotDraftRef.current;
+                                    if (!draft) return;
                                     setIsSavingSchedule(true);
                                     try {
-                                      const payload = {
-                                        slot: slotDraft.slot,
-                                        enabled: slotDraft.enabled,
-                                        audience: slotDraft.audience,
-                                        custom_users: slotDraft.custom_users || [],
-                                        template_name: slotDraft.template_name,
-                                        template_id: slotDraft.template_id || '',
-                                        template_category: slotDraft.template_category,
-                                        template_params: slotDraft.template_params,
+                                      // Auto-add any unsaved text from name/phone inputs
+                                      let customUsersList = [...(draft.custom_users || [])];
+                                      if (slotCustomUserName && slotCustomUserPhone) {
+                                        customUsersList.push({ name: slotCustomUserName, phone: slotCustomUserPhone });
+                                        setSlotCustomUserName('');
+                                        setSlotCustomUserPhone('');
+                                        console.log('💾 Auto-added pending user:', slotCustomUserName, slotCustomUserPhone);
+                                      }
+                                      const customUsersToSave = JSON.parse(JSON.stringify(customUsersList));
+                                      console.log('💾 Saving schedule for slot:', draft.slot);
+                                      console.log('💾 custom_users (final):', customUsersToSave);
+                                      console.log('💾 audience:', draft.audience);
+
+                                      const payload: Record<string, any> = {
+                                        slot: draft.slot,
+                                        enabled: draft.enabled !== false,
+                                        audience: draft.audience || 'active',
+                                        custom_users: customUsersToSave,
+                                        template_name: draft.template_name || '',
+                                        template_id: draft.template_id || '',
+                                        template_category: draft.template_category || '',
+                                        template_params: draft.template_params || '',
                                         updated_at: new Date().toISOString(),
                                       };
-                                      const { error } = await supabase.from('reminder_schedules').upsert(payload, { onConflict: 'slot' });
+
+                                      // Use update if row exists, insert if not
+                                      const existingId = schedules[draft.slot]?.id || draft.id;
+                                      let error: any = null;
+
+                                      if (existingId) {
+                                        console.log('💾 Updating existing row id:', existingId);
+                                        const res = await supabase
+                                          .from('reminder_schedules')
+                                          .update(payload)
+                                          .eq('id', existingId);
+                                        error = res.error;
+                                      } else {
+                                        console.log('💾 Inserting new row for slot:', draft.slot);
+                                        const res = await supabase
+                                          .from('reminder_schedules')
+                                          .upsert(payload, { onConflict: 'slot' });
+                                        error = res.error;
+                                      }
+
                                       if (error) throw error;
-                                      setSchedules(prev => ({ ...prev, [slotDraft.slot]: slotDraft }));
+
+                                      // Verify save by re-fetching
+                                      const { data: verifyData } = await supabase
+                                        .from('reminder_schedules')
+                                        .select('*')
+                                        .eq('slot', draft.slot)
+                                        .single();
+                                      console.log('💾 Verified DB data:', verifyData);
+                                      console.log('💾 Verified custom_users:', verifyData?.custom_users);
+
+                                      const savedSchedule = verifyData || { ...draft, custom_users: customUsersToSave };
+                                      setSchedules(prev => ({
+                                        ...prev,
+                                        [draft.slot]: {
+                                          ...savedSchedule,
+                                          custom_users: Array.isArray(savedSchedule.custom_users) ? savedSchedule.custom_users : [],
+                                        }
+                                      }));
                                       setEditingSlot(null);
                                       setSlotDraft(null);
-                                      toast({ title: `✅ ${slot} schedule saved!` });
+                                      toast({ title: `✅ ${slot} schedule saved!`, description: `${customUsersToSave.length} custom user(s) saved` });
                                     } catch (e: any) {
+                                      console.error('💾 Save error:', e);
                                       toast({ title: 'Error saving schedule', description: e.message, variant: 'destructive' });
                                     } finally {
                                       setIsSavingSchedule(false);
