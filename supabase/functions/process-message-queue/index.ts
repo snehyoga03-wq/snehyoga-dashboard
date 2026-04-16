@@ -15,8 +15,8 @@
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 
-const BATCH_SIZE = 10;           // Process N messages per invocation
-const RATE_LIMIT_DELAY_MS = 500; // Delay between sends (WA API rate limit safety)
+const BATCH_SIZE = 50;           // Process N messages per invocation
+const RATE_LIMIT_DELAY_MS = 100; // Delay between sends (WA API rate limit safety)
 const WA_API_VERSION = "v20.0";
 
 const corsHeaders = {
@@ -267,6 +267,25 @@ Deno.serve(async (req) => {
         }
 
         console.log(`📊 Done: ${deliveredCount} delivered, ${failedCount} failed`);
+
+        // 6. If we processed a full batch, there might be more messages waiting in the queue.
+        // Trigger this edge function again asynchronously.
+        if (messages.length === BATCH_SIZE) {
+            console.log("🔄 Re-triggering process-message-queue for remaining messages...");
+            try {
+                const fnUrl = `${supabaseUrl}/functions/v1/process-message-queue`;
+                fetch(fnUrl, { // Fire and forget loosely
+                    method: "POST",
+                    headers: {
+                        "Content-Type": "application/json",
+                        "Authorization": `Bearer ${supabaseServiceKey}`,
+                    },
+                    body: JSON.stringify({}),
+                }).catch(e => console.error("Auto-fetch triggering error:", e));
+            } catch (err) {
+                console.error("⚠️ Failed to re-trigger queue processor:", err);
+            }
+        }
 
         return new Response(
             JSON.stringify({ success: true, processed: messages.length, delivered: deliveredCount, failed: failedCount }),
