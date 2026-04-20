@@ -32,7 +32,7 @@ const resolveParams = (user: Record<string, any>, paramsStr: string): string[] =
         if (k === "days_left")     return String(user.days_left || 0);
         if (k === "batch_timing")  return user.batch_timing || "-";
         if (k === "slug")          return getSlug(user.referral_link);
-        if (k === "personal_link") return `https://365.snehyoga.com/${getSlug(user.referral_link)}`;
+        if (k === "personal_link") return `https://yoga.snehyoga.com/${getSlug(user.referral_link)}`;
         return k; // literal string
     });
 };

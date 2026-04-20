@@ -57,7 +57,7 @@ const getParamsForUser = (user: any, templateVarsStr: string) => {
     }
     if (key === 'personal_link') {
       const match = user.referral_link ? user.referral_link.match(/ref=([^&]+)/) : null;
-      return (match && match[1]) ? `https://365.snehyoga.com/${match[1]}` : 'https://365.snehyoga.com';
+      return (match && match[1]) ? `https://yoga.snehyoga.com/${match[1]}` : 'https://yoga.snehyoga.com';
     }
     return key; // literal string
   });
