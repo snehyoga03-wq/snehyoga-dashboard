@@ -1,50 +1,76 @@
 import { useEffect } from "react";
-import { useNavigate } from "react-router-dom";
+import { useParams, useNavigate } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
-import { getCookie } from "@/lib/cookies";
+import { getCookie, setCookie } from "@/lib/cookies";
 
 const SessionRedirect = () => {
+    const { slug } = useParams();
     const navigate = useNavigate();
     const { toast } = useToast();
 
     useEffect(() => {
         const handleRedirect = async () => {
-            // 1. Check Auth (Cookie)
-            const userPhone = getCookie("userPhone");
-            const userName = getCookie("userName");
-
-            if (!userPhone || !userName) {
-                toast({
-                    title: "Login Required",
-                    description: "Please login to access the session",
-                    variant: "destructive",
-                });
-                navigate("/?returnUrl=/live");
-                return;
-            }
+            let userPhone = getCookie("userPhone");
+            let userName = getCookie("userName");
+            let userDataToUse = null;
 
             try {
-                // 2. Fetch User Data (Days Left)
-                const { data: userData, error: userError } = await supabase
-                    .from("main_data_registration")
-                    .select("days_left, subscription_plan, subscription_paused")
-                    .eq("mobile_number", userPhone)
-                    .single();
+                // If there's a slug and it's not the generic 'live' path
+                if (slug && slug !== 'live') {
+                    // Find user by their referral link containing the slug
+                    const { data: slugUser, error: slugError } = await supabase
+                        .from("main_data_registration")
+                        .select("mobile_number, name, days_left, subscription_plan, subscription_paused")
+                        .ilike("referral_link", `%ref=${slug}%`)
+                        .limit(1)
+                        .maybeSingle();
 
-                if (userError || !userData) {
-                    console.error("User fetch error:", userError);
-                    toast({
-                        title: "Error",
-                        description: "Could not verify subscription status",
-                        variant: "destructive",
-                    });
-                    navigate("/dashboard");
-                    return;
+                    if (slugUser) {
+                        userPhone = slugUser.mobile_number;
+                        userName = slugUser.name;
+                        userDataToUse = slugUser;
+                        
+                        // Automatically log them in for future visits
+                        setCookie("userPhone", userPhone);
+                        setCookie("userName", userName);
+                    }
+                }
+
+                // If user wasn't found by slug or no slug was provided, fallback to cookie
+                if (!userDataToUse) {
+                    if (!userPhone || !userName) {
+                        toast({
+                            title: "Login Required",
+                            description: "Please login to access the session",
+                            variant: "destructive",
+                        });
+                        navigate(`/?returnUrl=/${slug || 'live'}`);
+                        return;
+                    }
+
+                    // Fetch User Data by phone
+                    const { data: userData, error: userError } = await supabase
+                        .from("main_data_registration")
+                        .select("days_left, subscription_plan, subscription_paused")
+                        .eq("mobile_number", userPhone)
+                        .single();
+
+                    if (userError || !userData) {
+                        console.error("User fetch error:", userError);
+                        toast({
+                            title: "Error",
+                            description: "Could not verify subscription status",
+                            variant: "destructive",
+                        });
+                        navigate("/dashboard");
+                        return;
+                    }
+                    userDataToUse = userData;
                 }
 
                 // 3. Check Subscription Status
-                if (userData.subscription_paused) {
+                if (userDataToUse.subscription_paused) {
                     toast({
                         title: "Subscription Paused",
                         description: "Your subscription is currently paused.",
@@ -54,7 +80,7 @@ const SessionRedirect = () => {
                     return;
                 }
 
-                if ((userData.days_left || 0) <= 0) {
+                if ((userDataToUse.days_left || 0) <= 0) {
                     toast({
                         title: "Plan Expired",
                         description: "Please renew your plan to join sessions.",
@@ -81,16 +107,8 @@ const SessionRedirect = () => {
                     return;
                 }
 
-                // Determine link based on plan (optional logic, can just use main link)
-                // For now, defaulting to standard session link, but can switch if needed
-                // const targetLink = userData.subscription_plan === 'premium' ? settingsData.premium_session_link : settingsData.session_link;
-                // Looking at CRM.tsx logic, mainly session_link is used? Or maybe both.
-                // Let's use session_link as default, assuming 'premium' might be special.
-                // Actually, let's just use the main session_link for now unless requirements specify otherwise.
-                // Let's check if the user is 'premium' just in case.
-
                 let targetLink = settingsData.session_link;
-                if (userData.subscription_plan === 'personalized' || userData.subscription_plan === 'premium') {
+                if (userDataToUse.subscription_plan === 'personalized' || userDataToUse.subscription_plan === 'premium') {
                     if (settingsData.premium_session_link) {
                         targetLink = settingsData.premium_session_link;
                     }
@@ -112,10 +130,12 @@ const SessionRedirect = () => {
                     // but since we are redirecting via window.location.href, we should probably await it briefly 
                     // or fire and forget. Fire and forget might be cancelled by browser navigation.
                     // Safer to await with a timeout or just await it. It's a quick insert.
-                    await supabase.from('attendance').insert({
-                        mobile_number: userPhone,
-                        // date: new Date().toISOString().split('T')[0] // Optional if we want explicit date column
-                    });
+                    if (userPhone) {
+                        await supabase.from('attendance').insert({
+                            mobile_number: userPhone,
+                            // date: new Date().toISOString().split('T')[0] // Optional if we want explicit date column
+                        });
+                    }
                 } catch (attendanceError) {
                     console.error("Failed to mark attendance:", attendanceError);
                     // Don't block redirect
@@ -135,7 +155,7 @@ const SessionRedirect = () => {
         };
 
         handleRedirect();
-    }, [navigate]);
+    }, [slug, navigate, toast]);
 
     return (
         <div className="min-h-screen flex items-center justify-center bg-background">
