@@ -16,6 +16,13 @@ const SessionRedirect = () => {
             let userDataToUse = null;
 
             try {
+                // 1. Start fetching session settings immediately (runs in parallel to save time)
+                const settingsPromise = supabase
+                    .from("session_settings")
+                    .select("session_link, premium_session_link")
+                    .single();
+
+                // 2. Find user data
                 // If there's a slug and it's not the generic 'live' path
                 if (slug && slug !== 'live') {
                     // Find user by their referral link containing the slug
@@ -90,11 +97,8 @@ const SessionRedirect = () => {
                     return;
                 }
 
-                // 4. Fetch Session Link
-                const { data: settingsData, error: settingsError } = await supabase
-                    .from("session_settings")
-                    .select("session_link, premium_session_link")
-                    .single();
+                // 4. Wait for Session Link (this resolves instantly now because it was fetching in background)
+                const { data: settingsData, error: settingsError } = await settingsPromise;
 
                 if (settingsError || !settingsData) {
                     console.error("Settings fetch error:", settingsError);
@@ -138,21 +142,18 @@ const SessionRedirect = () => {
                     return;
                 }
 
-                // 5. Mark Attendance & Redirect
+                // 5. Mark Attendance & Redirect (Optimized for speed)
                 try {
-                    // We don't await this to avoid blocking the redirect if it's slow, 
-                    // but since we are redirecting via window.location.href, we should probably await it briefly 
-                    // or fire and forget. Fire and forget might be cancelled by browser navigation.
-                    // Safer to await with a timeout or just await it. It's a quick insert.
                     if (userPhone) {
-                        await supabase.from('attendance').insert({
-                            mobile_number: userPhone,
-                            // date: new Date().toISOString().split('T')[0] // Optional if we want explicit date column
-                        });
+                        // Use Promise.race to give the attendance insert 150ms to fire, 
+                        // but DO NOT wait longer than that so the redirect feels instant.
+                        await Promise.race([
+                            supabase.from('attendance').insert({ mobile_number: userPhone }),
+                            new Promise(resolve => setTimeout(resolve, 150)) 
+                        ]);
                     }
                 } catch (attendanceError) {
                     console.error("Failed to mark attendance:", attendanceError);
-                    // Don't block redirect
                 }
 
                 window.location.href = targetLink;
