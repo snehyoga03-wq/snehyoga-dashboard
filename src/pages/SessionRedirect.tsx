@@ -108,10 +108,24 @@ const SessionRedirect = () => {
                 }
 
                 let targetLink = settingsData.session_link;
-                if (userDataToUse.subscription_plan === 'personalized' || userDataToUse.subscription_plan === 'premium') {
-                    if (settingsData.premium_session_link) {
-                        targetLink = settingsData.premium_session_link;
+                try {
+                    if (targetLink && targetLink.startsWith('{')) {
+                        const parsed = JSON.parse(targetLink);
+                        const days = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'];
+                        const todayStr = days[new Date().getDay()];
+                        const activeWeek = parsed.active_week || 1;
+                        const key = `w${activeWeek}_${todayStr}`;
+                        targetLink = parsed[key];
+                    } else {
+                        // Legacy fallback
+                        if (userDataToUse.subscription_plan === 'personalized' || userDataToUse.subscription_plan === 'premium') {
+                            if (settingsData.premium_session_link) {
+                                targetLink = settingsData.premium_session_link;
+                            }
+                        }
                     }
+                } catch (e) {
+                    console.error("Failed to parse session link:", e);
                 }
 
                 if (!targetLink) {

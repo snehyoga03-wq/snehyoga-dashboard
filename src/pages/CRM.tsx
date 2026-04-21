@@ -177,6 +177,12 @@ const CRM = () => {
   const [premiumSessionLink, setPremiumSessionLink] = useState("");
   const [newPremiumLink, setNewPremiumLink] = useState("");
   const [editingLink, setEditingLink] = useState(false);
+  
+  // Weekly Links state
+  const [activeWeek, setActiveWeek] = useState(1);
+  const [newActiveWeek, setNewActiveWeek] = useState(1);
+  const [weeklyLinks, setWeeklyLinks] = useState<any>({});
+  const [newWeeklyLinks, setNewWeeklyLinks] = useState<any>({});
 
   // Analytics
   const [selectedDate, setSelectedDate] = useState(new Date().toISOString().split('T')[0]);
@@ -754,6 +760,18 @@ const CRM = () => {
       }
 
       if (data) {
+        let parsedLinks: any = {};
+        try {
+          if (data.session_link && data.session_link.startsWith('{')) {
+            parsedLinks = JSON.parse(data.session_link);
+          }
+        } catch (e) {}
+
+        setActiveWeek(parsedLinks.active_week || 1);
+        setNewActiveWeek(parsedLinks.active_week || 1);
+        setWeeklyLinks(parsedLinks || {});
+        setNewWeeklyLinks(parsedLinks || {});
+
         setSessionLink(data.session_link || "");
         setNewLink(data.session_link || "");
         setPremiumSessionLink(data.premium_session_link || "");
@@ -778,13 +796,18 @@ const CRM = () => {
 
       if (fetchError) throw fetchError;
 
+      const payload = JSON.stringify({
+        active_week: newActiveWeek,
+        ...newWeeklyLinks
+      });
+
       if (!existingData) {
         // Create new row
         const { error: insertError } = await supabase
           .from('session_settings')
           .insert({
-            session_link: newLink,
-            premium_session_link: newPremiumLink,
+            session_link: payload,
+            premium_session_link: "",
             updated_by: username,
             updated_at: new Date().toISOString()
           });
@@ -794,8 +817,8 @@ const CRM = () => {
         const { error: updateError } = await supabase
           .from('session_settings')
           .update({
-            session_link: newLink,
-            premium_session_link: newPremiumLink,
+            session_link: payload,
+            premium_session_link: "",
             updated_at: new Date().toISOString(),
             updated_by: username
           })
@@ -803,10 +826,10 @@ const CRM = () => {
         if (updateError) throw updateError;
       }
 
-      setSessionLink(newLink);
-      setPremiumSessionLink(newPremiumLink);
+      setActiveWeek(newActiveWeek);
+      setWeeklyLinks(newWeeklyLinks);
       setEditingLink(false);
-      toast({ title: "Links Updated! ✅", description: "Your class session link is now live." });
+      toast({ title: "Links Updated! ✅", description: "Your class session links are now live." });
     } catch (error: any) {
       console.error('Update error:', error);
       toast({ title: "Error", description: error.message || "Failed to update links", variant: "destructive" });
@@ -1435,24 +1458,90 @@ const CRM = () => {
               <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="space-y-6">
                 <h1 className="text-2xl font-bold text-gray-900">Session Settings</h1>
                 <Card className="shadow-sm border-gray-100">
-                  <CardHeader><CardTitle>Update Links</CardTitle></CardHeader>
-                  <CardContent className="space-y-4">
-                    <div className="space-y-2">
-                      <label className="text-sm font-medium">Regular Session Link</label>
-                      <Input value={editingLink ? newLink : sessionLink} disabled={!editingLink} onChange={e => setNewLink(e.target.value)} />
+                  <CardHeader><CardTitle>Update Daily Links</CardTitle></CardHeader>
+                  <CardContent className="space-y-6">
+                    <div className="flex items-center space-x-4 mb-4">
+                      <label className="text-sm font-bold text-gray-700">Active Week:</label>
+                      <select 
+                        value={editingLink ? newActiveWeek : activeWeek}
+                        disabled={!editingLink}
+                        onChange={e => setNewActiveWeek(Number(e.target.value))}
+                        className="p-2 border rounded-md"
+                      >
+                        <option value={1}>Week 1</option>
+                        <option value={2}>Week 2</option>
+                      </select>
+
+                      {!editingLink && (
+                        <div className="ml-6 flex flex-col">
+                          <span className="text-xs text-gray-500 uppercase font-semibold">Today's Active Link ({['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'][new Date().getDay()]})</span>
+                          <span className="text-sm font-medium text-green-700 break-all bg-green-50 px-2 py-1 rounded">
+                            {weeklyLinks[`w${activeWeek}_${['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'][new Date().getDay()]}`] || "No link set for today"}
+                          </span>
+                        </div>
+                      )}
                     </div>
-                    <div className="space-y-2">
-                      <label className="text-sm font-medium">Premium Session Link</label>
-                      <Input value={editingLink ? newPremiumLink : premiumSessionLink} disabled={!editingLink} onChange={e => setNewPremiumLink(e.target.value)} />
+
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+                      {/* Week 1 Links */}
+                      <div className="space-y-3">
+                        <h3 className="font-bold text-md border-b pb-2">Week 1 Links</h3>
+                        {['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun'].map((day) => {
+                          const isToday = day === ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'][new Date().getDay()];
+                          const isActiveCol = isToday && (editingLink ? newActiveWeek : activeWeek) === 1;
+                          return (
+                            <div key={`w1_${day}`} className="space-y-1">
+                              <label className="text-xs font-semibold uppercase">{day} {isActiveCol && <span className="text-green-600 font-bold ml-1">(Today)</span>}</label>
+                              <Input 
+                                placeholder={`Week 1 ${day} link`}
+                                value={editingLink ? (newWeeklyLinks[`w1_${day}`] || '') : (weeklyLinks[`w1_${day}`] || '')} 
+                                disabled={!editingLink} 
+                                onChange={e => setNewWeeklyLinks({...newWeeklyLinks, [`w1_${day}`]: e.target.value})} 
+                                className={isActiveCol ? "border-green-500 bg-green-50 focus-visible:ring-green-500" : ""}
+                              />
+                            </div>
+                          );
+                        })}
+                      </div>
+
+                      {/* Week 2 Links */}
+                      <div className="space-y-3">
+                        <h3 className="font-bold text-md border-b pb-2">Week 2 Links</h3>
+                        {['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun'].map((day) => {
+                          const isToday = day === ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'][new Date().getDay()];
+                          const isActiveCol = isToday && (editingLink ? newActiveWeek : activeWeek) === 2;
+                          return (
+                            <div key={`w2_${day}`} className="space-y-1">
+                              <label className="text-xs font-semibold uppercase">{day} {isActiveCol && <span className="text-green-600 font-bold ml-1">(Today)</span>}</label>
+                              <Input 
+                                placeholder={`Week 2 ${day} link`}
+                                value={editingLink ? (newWeeklyLinks[`w2_${day}`] || '') : (weeklyLinks[`w2_${day}`] || '')} 
+                                disabled={!editingLink} 
+                                onChange={e => setNewWeeklyLinks({...newWeeklyLinks, [`w2_${day}`]: e.target.value})} 
+                                className={isActiveCol ? "border-green-500 bg-green-50 focus-visible:ring-green-500" : ""}
+                              />
+                            </div>
+                          );
+                        })}
+                      </div>
                     </div>
-                    <div className="pt-2">
+
+                    <div className="pt-4 border-t">
                       {editingLink ? (
                         <div className="flex gap-2">
                           <Button onClick={updateSessionLink}>Save Changes</Button>
-                          <Button variant="outline" onClick={() => setEditingLink(false)}>Cancel</Button>
+                          <Button variant="outline" onClick={() => {
+                            setEditingLink(false);
+                            setNewWeeklyLinks(weeklyLinks);
+                            setNewActiveWeek(activeWeek);
+                          }}>Cancel</Button>
                         </div>
                       ) : (
-                        <Button onClick={() => setEditingLink(true)}>Edit Links</Button>
+                        <Button onClick={() => {
+                          setNewWeeklyLinks({...weeklyLinks});
+                          setNewActiveWeek(activeWeek);
+                          setEditingLink(true);
+                        }}>Edit Links</Button>
                       )}
                     </div>
                   </CardContent>
