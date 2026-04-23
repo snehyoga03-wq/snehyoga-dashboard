@@ -306,7 +306,10 @@ const Dashboard = () => {
                         console.error("Failed to mark attendance:", err);
                       }
                       const refMatch = referralLink?.match(/ref=([^&]+)/);
-                      const personalJoinLink = refMatch?.[1] ? `https://yoga.snehyoga.com/${refMatch[1]}` : sessionLink;
+                      const slug = refMatch?.[1];
+                      const personalJoinLink = slug 
+                        ? `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/session-redirect/${slug}` 
+                        : sessionLink;
                       window.open(personalJoinLink, '_blank');
                     }}
                   >
