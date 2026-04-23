@@ -21,38 +21,6 @@ const corsHeaders = {
     "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
 };
 
-// YouTube video ID extraction for app deep links
-const extractYouTubeId = (url: string): string | null => {
-    try {
-        const u = new URL(url);
-        const host = u.hostname.replace('www.', '');
-        if (host === 'youtube.com' || host === 'm.youtube.com') {
-            if (u.searchParams.has('v')) return u.searchParams.get('v');
-            const pathMatch = u.pathname.match(/^\/(live|embed|shorts|v)\/([^/?]+)/);
-            if (pathMatch) return pathMatch[2];
-        }
-        if (host === 'youtu.be') {
-            return u.pathname.slice(1).split('/')[0] || null;
-        }
-    } catch { /* not a valid URL */ }
-    return null;
-};
-
-// Build redirect URL — for YouTube links, use Intent URL on Android for app opening
-const getRedirectUrl = (url: string, userAgent: string): string => {
-    const videoId = extractYouTubeId(url);
-    if (videoId) {
-        const ua = userAgent.toLowerCase();
-        if (ua.includes('android')) {
-            return `intent://www.youtube.com/watch?v=${videoId}#Intent;scheme=https;package=com.google.android.youtube;S.browser_fallback_url=${encodeURIComponent(url)};end`;
-        }
-        // iOS: youtube:// scheme doesn't work via HTTP redirect (needs JS).
-        // But regular YouTube URLs will trigger Universal Links on iOS if YouTube app is installed.
-        // So just return the regular URL for iOS.
-    }
-    return url;
-};
-
 // Minimal error HTML page
 const errorPage = (title: string, message: string, redirectUrl: string) => `
 <!DOCTYPE html>
@@ -73,7 +41,7 @@ const errorPage = (title: string, message: string, redirectUrl: string) => `
   <div class="card">
     <h2>${title}</h2>
     <p>${message}</p>
-    <a href="${redirectUrl}">Go to Dashboard →</a>
+    <a href="${redirectUrl}">Go to Dashboard &rarr;</a>
   </div>
 </body>
 </html>`;
@@ -85,11 +53,9 @@ Deno.serve(async (req) => {
 
     const t0 = Date.now();
     const url = new URL(req.url);
-    const userAgent = req.headers.get("user-agent") || "";
 
     // Extract slug from path: /session-redirect/abc123 → abc123
     const pathParts = url.pathname.split("/").filter(Boolean);
-    // Path format: /session-redirect/{slug}
     const slug = pathParts.length >= 2 ? pathParts[pathParts.length - 1] : null;
 
     // Dashboard URL for error redirects
@@ -109,14 +75,12 @@ Deno.serve(async (req) => {
 
         // Run BOTH queries in parallel for speed
         const [userResult, settingsResult] = await Promise.all([
-            // Find user by slug in referral_link
             supabase
                 .from("main_data_registration")
                 .select("mobile_number, name, days_left, subscription_plan, subscription_paused")
                 .ilike("referral_link", `%ref=${slug}%`)
                 .limit(1)
                 .maybeSingle(),
-            // Get session settings
             supabase
                 .from("session_settings")
                 .select("session_link, premium_session_link")
@@ -196,35 +160,16 @@ Deno.serve(async (req) => {
         );
 
         // ─── Redirect! ─────────────────────────────────────────────────
-        const finalUrl = getRedirectUrl(targetLink, userAgent);
-        console.log(`[session-redirect] Redirecting ${user.name} → ${finalUrl} (${Date.now() - t0}ms total)`);
+        // Simple HTTP 302 redirect — works everywhere including WhatsApp in-app browser.
+        // YouTube/Zoom/Meet URLs automatically open their respective apps via
+        // Android App Links / iOS Universal Links when the app is installed.
+        console.log(`[session-redirect] Redirecting ${user.name} -> ${targetLink} (${Date.now() - t0}ms total)`);
 
-        // For Android intent:// URLs, we can't use a 302 redirect (browsers don't follow intent:// via 302).
-        // Instead, serve a minimal HTML page that does the redirect via JS + meta refresh fallback.
-        if (finalUrl.startsWith('intent://')) {
-            const intentHtml = `<!DOCTYPE html>
-<html><head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width,initial-scale=1.0">
-<title>Joining Session...</title>
-<meta http-equiv="refresh" content="1;url=${targetLink}">
-<style>body{font-family:-apple-system,sans-serif;display:flex;align-items:center;justify-content:center;min-height:100vh;margin:0;background:#faf9f6;}.card{text-align:center;padding:2rem;}h2{color:#f97316;}.spin{width:40px;height:40px;border:3px solid #f3f3f3;border-top:3px solid #f97316;border-radius:50%;animation:spin 0.8s linear infinite;margin:1rem auto;}@keyframes spin{to{transform:rotate(360deg)}}</style>
-</head><body>
-<div class="card"><div class="spin"></div><h2>Opening YouTube...</h2><p style="color:#888">Redirecting you now</p></div>
-<script>window.location.href="${finalUrl}";</script>
-</body></html>`;
-            return new Response(intentHtml, {
-                status: 200,
-                headers: { ...corsHeaders, "Content-Type": "text/html; charset=utf-8" },
-            });
-        }
-
-        // Standard HTTP 302 redirect (fastest possible — zero HTML/JS needed)
         return new Response(null, {
             status: 302,
             headers: {
                 ...corsHeaders,
-                "Location": finalUrl,
+                "Location": targetLink,
                 "Cache-Control": "no-cache, no-store, must-revalidate",
             },
         });
