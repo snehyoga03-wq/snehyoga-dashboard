@@ -25,7 +25,6 @@ const getSlug = (referralLink: string | null): string => {
 // Helper: resolve template parameter keys to user field values
 const resolveParams = (user: Record<string, any>, paramsStr: string): string[] => {
     if (!paramsStr?.trim()) return [];
-    const supabaseUrl = Deno.env.get("SUPABASE_URL") || "";
     return paramsStr.split(",").map((key) => {
         const k = key.trim();
         if (k === "name")          return user.name || "User";
@@ -33,8 +32,8 @@ const resolveParams = (user: Record<string, any>, paramsStr: string): string[] =
         if (k === "days_left")     return String(user.days_left || 0);
         if (k === "batch_timing")  return user.batch_timing || "-";
         if (k === "slug")          return getSlug(user.referral_link);
-        // personal_link now points to the edge function for instant server-side redirect
-        if (k === "personal_link") return `${supabaseUrl}/functions/v1/session-redirect/${getSlug(user.referral_link)}`;
+        // personal_link uses /join/ path which Netlify proxies to the edge function (instant server-side redirect)
+        if (k === "personal_link") return `https://yoga.snehyoga.com/join/${getSlug(user.referral_link)}`;
         return k; // literal string
     });
 };

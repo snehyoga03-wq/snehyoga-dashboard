@@ -8,7 +8,16 @@
   # Ensure consistent Node version during build
   NODE_VERSION = "22"
 
-# SPA redirect rule - serve index.html for all routes
+# Server-side proxy for personal session links (instant redirect via Supabase Edge Function)
+# yoga.snehyoga.com/join/{slug} → edge function → 302 redirect to session
+# This runs at CDN level — zero JS download, sub-second redirect
+[[redirects]]
+  from = "/join/*"
+  to = "https://bzqwaxqzggejpejyxhde.supabase.co/functions/v1/session-redirect/:splat"
+  status = 200
+  force = true
+
+# SPA redirect rule - serve index.html for all other routes
 [[redirects]]
   from = "/*"
   to = "/index.html"

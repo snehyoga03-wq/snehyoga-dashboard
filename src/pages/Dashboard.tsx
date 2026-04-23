@@ -308,7 +308,7 @@ const Dashboard = () => {
                       const refMatch = referralLink?.match(/ref=([^&]+)/);
                       const slug = refMatch?.[1];
                       const personalJoinLink = slug 
-                        ? `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/session-redirect/${slug}` 
+                        ? `https://yoga.snehyoga.com/join/${slug}` 
                         : sessionLink;
                       window.open(personalJoinLink, '_blank');
                     }}
