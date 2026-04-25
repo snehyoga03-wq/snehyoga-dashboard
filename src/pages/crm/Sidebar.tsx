@@ -13,7 +13,8 @@ import {
     ClipboardList,
     Link2,
     SendHorizonal,
-    LayoutDashboard
+    LayoutDashboard,
+    HeartPulse
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -29,6 +30,7 @@ interface SidebarProps {
 const menuItems = [
     { id: 'dashboard', label: 'Dashboard', icon: BarChart3 },
     { id: 'users', label: 'User Management', icon: Users },
+    { id: 'retention', label: 'User Retention', icon: HeartPulse },
     { id: 'chats', label: 'Chats', icon: MessageCircle },
     { id: 'reminders', label: 'Reminders', icon: Calendar },
     { id: 'message-queue', label: 'Message Queue', icon: SendHorizonal },

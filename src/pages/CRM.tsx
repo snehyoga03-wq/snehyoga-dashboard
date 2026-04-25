@@ -30,6 +30,7 @@ import {
 import { motion, AnimatePresence } from "framer-motion";
 import { Sidebar } from "./crm/Sidebar";
 import { UserDetail } from "./crm/UserDetail";
+import { RetentionDashboard } from "./crm/RetentionDashboard";
 import { formatPhone } from "@/lib/utils";
 
 // Helper functions for formatting records
@@ -124,7 +125,7 @@ interface ChatMessage {
   attachment_type?: string;
 }
 
-type Section = 'users' | 'session-links' | 'analytics' | 'followup' | 'chats' | 'dashboard' | 'message-queue' | 'sap-portal';
+type Section = 'users' | 'session-links' | 'analytics' | 'followup' | 'chats' | 'dashboard' | 'message-queue' | 'sap-portal' | 'retention';
 
 const CRM = () => {
   const navigate = useNavigate();
@@ -262,7 +263,7 @@ const CRM = () => {
   // Constants
   const BATCH_TIMINGS = ["5 AM", "6 AM", "7:30 AM", "5 PM", "6 PM", "9:00 PM"];
 
-  type Section = 'users' | 'session-links' | 'analytics' | 'followup' | 'chats' | 'dashboard' | 'reminders' | 'message-queue' | 'sap-portal';
+  type Section = 'users' | 'session-links' | 'analytics' | 'followup' | 'chats' | 'dashboard' | 'reminders' | 'message-queue' | 'sap-portal' | 'retention';
 
   // Message Queue (Pub/Sub)
   const [messageBatches, setMessageBatches] = useState<any[]>([]);
@@ -2545,6 +2546,11 @@ const CRM = () => {
                   </div>
                 )}
               </motion.div>
+            )}
+
+            {/* RETENTION OS SECTION */}
+            {currentSection === 'retention' && !selectedUser && (
+              <RetentionDashboard />
             )}
 
             {/* Report Dialog Handling */}

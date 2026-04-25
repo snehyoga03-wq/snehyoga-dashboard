@@ -14,3 +14,9 @@ verify_jwt = false
 
 [functions.session-redirect]
 verify_jwt = false
+
+[functions.compute-retention-states]
+verify_jwt = false
+
+[functions.retention-notifications]
+verify_jwt = false
