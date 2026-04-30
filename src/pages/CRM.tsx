@@ -253,6 +253,8 @@ const CRM = () => {
   const [waLanguageCode, setWaLanguageCode] = useState("en");
   const [fetchedTemplates, setFetchedTemplates] = useState<{id: string, name: string, category: string, status: string, body: string}[]>([]);
   const [isFetchingTemplates, setIsFetchingTemplates] = useState(false);
+  const [metaBalanceInfo, setMetaBalanceInfo] = useState<any>(null);
+  const [isFetchingBalance, setIsFetchingBalance] = useState(false);
   
   // Target Audience settings
   const [targetAudience, setTargetAudience] = useState("batch"); // batch, all, active, inactive, custom
@@ -2008,6 +2010,41 @@ const CRM = () => {
                           }
                         }}>Send Demo</Button>
                       </div>
+                    </div>
+                    {/* Meta Balance Check */}
+                    <div className="pt-4 border-t">
+                      <label className="text-sm font-medium">Meta Balance & Limits</label>
+                      <div className="flex gap-2 mt-2">
+                        <Button 
+                          variant="secondary" 
+                          disabled={isFetchingBalance || !pabblyToken}
+                          onClick={async () => {
+                            setIsFetchingBalance(true);
+                            try {
+                              const url = `https://graph.facebook.com/v20.0/${waPhoneNumberId}?fields=display_phone_number,quality_rating,messaging_limit_tier&access_token=${pabblyToken}`;
+                              const res = await fetch(url);
+                              const json = await res.json();
+                              if (!res.ok || json.error) throw new Error(json.error?.message || "Failed to fetch balance");
+                              setMetaBalanceInfo(json);
+                              toast({ title: "Fetched", description: "Meta balance info fetched successfully." });
+                            } catch (err: any) {
+                              toast({ title: "Error", description: err.message, variant: "destructive" });
+                            } finally {
+                              setIsFetchingBalance(false);
+                            }
+                          }}
+                        >
+                          {isFetchingBalance ? "Fetching..." : "Fetch Meta Balance"}
+                        </Button>
+                      </div>
+                      {metaBalanceInfo && (
+                        <div className="mt-4 p-3 bg-gray-50 rounded-md text-sm border">
+                          <p><strong>Phone Number:</strong> {metaBalanceInfo.display_phone_number || 'N/A'}</p>
+                          <p><strong>Quality Rating:</strong> <span className={metaBalanceInfo.quality_rating === 'GREEN' ? 'text-green-600 font-medium' : metaBalanceInfo.quality_rating === 'YELLOW' ? 'text-yellow-600 font-medium' : 'text-red-600 font-medium'}>{metaBalanceInfo.quality_rating || 'N/A'}</span></p>
+                          <p><strong>Messaging Limit Tier:</strong> {metaBalanceInfo.messaging_limit_tier || 'N/A'}</p>
+                          <p className="text-xs text-gray-500 mt-2">Note: For exact monetary balance, please check Meta Business Suite Billing.</p>
+                        </div>
+                      )}
                     </div>
                   </CardContent>
                 </Card>
