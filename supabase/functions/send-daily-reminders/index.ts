@@ -88,6 +88,8 @@ Deno.serve(async (req) => {
 
             if (audience === "active") {
                 query = query.eq("subscription_paused", false).gt("days_left", 0);
+            } else if (audience === "batch") {
+                query = query.eq("subscription_paused", false).gt("days_left", 0).eq("batch_timing", batchTime);
             } else if (audience === "inactive") {
                 // We need paused OR days_left <= 0 — fetch all then filter
                 const { data: allUsers } = await supabase

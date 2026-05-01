@@ -58,7 +58,7 @@ const getParamsForUser = (user: any, templateVarsStr: string) => {
     }
     if (key === 'personal_link') {
       const match = user.referral_link ? user.referral_link.match(/ref=([^&]+)/) : null;
-      return (match && match[1]) ? `https://yoga.snehyoga.com/${match[1]}` : 'https://yoga.snehyoga.com';
+      return (match && match[1]) ? `https://yoga.snehyoga.com/join/${match[1]}` : 'https://yoga.snehyoga.com';
     }
     return key; // literal string
   });
@@ -229,7 +229,7 @@ const CRM = () => {
     template_category: string;
     template_params: string;
   }
-  const AUTO_SLOTS = ["5 AM", "6 AM", "8 AM", "5 PM", "6 PM", "7 PM"];
+  const AUTO_SLOTS = ["5:00 AM", "6:00 AM", "8:00 AM", "5:00 PM", "6:00 PM", "7:00 PM"];
   const [schedules, setSchedules] = useState<Record<string, ReminderSchedule>>({});
   const [editingSlot, setEditingSlot] = useState<string | null>(null);
   const [slotDraft, setSlotDraft] = useState<ReminderSchedule | null>(null);
@@ -263,7 +263,7 @@ const CRM = () => {
   const [customUserPhone, setCustomUserPhone] = useState("");
 
   // Constants
-  const BATCH_TIMINGS = ["5 AM", "6 AM", "7:30 AM", "5 PM", "6 PM", "9:00 PM"];
+  const BATCH_TIMINGS = ["5:00 AM", "6:00 AM", "8:00 AM", "5:00 PM", "6:00 PM", "7:00 PM"];
 
   type Section = 'users' | 'session-links' | 'analytics' | 'followup' | 'chats' | 'dashboard' | 'reminders' | 'message-queue' | 'sap-portal' | 'retention';
 
@@ -589,7 +589,7 @@ const CRM = () => {
         created_at: new Date(newUserJoinDate).toISOString(),
         days_left: getDaysForPlan(newUserPlan),
         subscription_paused: false,
-        batch_timing: "Unassigned",
+        batch_timing: "5:00 AM",
         referral_link: referralLink
       });
       if (error) throw error;
@@ -625,7 +625,7 @@ const CRM = () => {
       subscription_plan: u.subscription_plan || 'N/A',
       days_left: u.days_left || 0,
       subscription_status: u.subscription_paused ? 'Paused' : 'Active',
-      batch_timing: u.batch_timing || 'Unassigned',
+      batch_timing: u.batch_timing || '5:00 AM',
       joined_date: new Date(u.created_at).toLocaleDateString(),
       referral_link: u.referral_link || ''
     }));
@@ -678,7 +678,7 @@ const CRM = () => {
           mobile_number: String(u.mobile_number || ""),
           subscription_plan: String(u.subscription_plan || '1 month plan'),
           days_left: Number(u.days_left || 30),
-          batch_timing: String(u.batch_timing || 'Unassigned'),
+          batch_timing: String(u.batch_timing || '5:00 AM'),
           created_at: new Date().toISOString(),
           subscription_paused: false,
           referral_link: referralLink
@@ -1206,7 +1206,7 @@ const CRM = () => {
                       <div className="p-5 space-y-4">
                         {(() => {
                           const batchCounts = users.reduce((acc, user) => {
-                            const bt = user.batch_timing || 'Unassigned';
+                            const bt = user.batch_timing || '5:00 AM';
                             if (user.subscription_paused || (user.days_left || 0) <= 0) return acc; // Only count active
                             acc[bt] = (acc[bt] || 0) + 1;
                             return acc;
@@ -1714,6 +1714,7 @@ const CRM = () => {
                                     onChange={e => setSlotDraft(d => d ? { ...d, audience: e.target.value } : d)}
                                   >
                                     <option value="active">Active Users Only (days_left &gt; 0)</option>
+                                    <option value="batch">Active Users in this Batch Only (10 mins before)</option>
                                     <option value="all">All Users</option>
                                     <option value="inactive">Inactive / Paused Only</option>
                                     <option value="custom">Custom List</option>
@@ -1981,7 +1982,7 @@ const CRM = () => {
 
                           try {
                             const phone = formatPhoneNumber(testMobile).replace(/\D/g, "");
-                            const params = getParamsForUser({ name: "Demo User", phone: testMobile, days_left: 30, batch_timing: "6 AM" }, templateVariables);
+                            const params = getParamsForUser({ name: "Demo User", phone: testMobile, days_left: 30, batch_timing: "6:00 AM" }, templateVariables);
                             const res = await fetch(`https://graph.facebook.com/v20.0/${waPhoneNumberId}/messages`, {
                               method: 'POST',
                               headers: {

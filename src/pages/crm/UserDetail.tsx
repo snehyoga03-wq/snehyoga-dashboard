@@ -16,7 +16,7 @@ interface UserDetailProps {
     onUpdate?: (id: string, updates: any) => void;
 }
 
-const BATCH_TIMINGS = ["5 AM", "6 AM", "7:30 AM", "5 PM", "6 PM", "9:00 PM"];
+const BATCH_TIMINGS = ["5:00 AM", "6:00 AM", "8:00 AM", "5:00 PM", "6:00 PM", "7:00 PM"];
 const PLAN_OPTIONS = ["Free plan", "1 month plan", "3 month plan", "6 months plan", "12 months plan"];
 
 export function UserDetail({ user, onBack, onUpdate }: UserDetailProps) {
@@ -29,7 +29,7 @@ export function UserDetail({ user, onBack, onUpdate }: UserDetailProps) {
     const [isEditingSub, setIsEditingSub] = useState(false);
     const [editPlan, setEditPlan] = useState(user.subscription_plan || '1 month plan');
     const [editDaysLeft, setEditDaysLeft] = useState(user.days_left ?? 0);
-    const [editBatch, setEditBatch] = useState(user.batch_timing || '5 AM');
+    const [editBatch, setEditBatch] = useState(user.batch_timing || '5:00 AM');
 
     // Attendance data
     const [attendanceRecords, setAttendanceRecords] = useState<Date[]>([]);
@@ -106,7 +106,7 @@ export function UserDetail({ user, onBack, onUpdate }: UserDetailProps) {
     const handleCancelSub = () => {
         setEditPlan(user.subscription_plan || '1 month plan');
         setEditDaysLeft(user.days_left ?? 0);
-        setEditBatch(user.batch_timing || '5 AM');
+        setEditBatch(user.batch_timing || '5:00 AM');
         setIsEditingSub(false);
     };
 
@@ -209,7 +209,7 @@ export function UserDetail({ user, onBack, onUpdate }: UserDetailProps) {
                                     <InfoItem label="Referral Link" value={user.referral_link || 'None'} />
                                     <InfoItem label="Personal Link" value={
                                         user.referral_link 
-                                            ? (user.referral_link.match(/ref=([^&]+)/)?.[1] ? `https://yoga.snehyoga.com/${user.referral_link.match(/ref=([^&]+)/)?.[1]}` : 'None')
+                                            ? (user.referral_link.match(/ref=([^&]+)/)?.[1] ? `https://yoga.snehyoga.com/join/${user.referral_link.match(/ref=([^&]+)/)?.[1]}` : 'None')
                                             : 'None'
                                     } />
                                     <InfoItem label="Joined" value={user.created_at ? new Date(user.created_at).toLocaleDateString() : 'Unknown'} />
