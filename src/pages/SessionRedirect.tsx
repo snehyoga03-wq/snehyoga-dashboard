@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
@@ -6,16 +6,13 @@ import { getCookie, setCookie } from "@/lib/cookies";
 
 /**
  * Extracts YouTube video ID from various YouTube URL formats.
- * Supports: youtube.com/watch?v=, youtu.be/, youtube.com/live/, youtube.com/embed/, etc.
  */
 const extractYouTubeId = (url: string): string | null => {
     try {
         const u = new URL(url);
         const host = u.hostname.replace('www.', '');
         if (host === 'youtube.com' || host === 'm.youtube.com') {
-            // /watch?v=VIDEO_ID
             if (u.searchParams.has('v')) return u.searchParams.get('v');
-            // /live/VIDEO_ID or /embed/VIDEO_ID or /shorts/VIDEO_ID
             const pathMatch = u.pathname.match(/^\/(live|embed|shorts|v)\/([^/?]+)/);
             if (pathMatch) return pathMatch[2];
         }
@@ -27,51 +24,91 @@ const extractYouTubeId = (url: string): string | null => {
 };
 
 /**
- * Opens a URL, preferring the native app for YouTube links.
- * - Android: Uses Intent URL which opens the YouTube app directly (with browser fallback)
- * - iOS: Uses youtube:// deep link scheme
- * - Desktop/fallback: Regular redirect
+ * Opens a URL, preferring the native YouTube app on mobile.
  */
 const openWithAppPreference = (url: string) => {
     const videoId = extractYouTubeId(url);
-
     if (videoId) {
         const ua = navigator.userAgent.toLowerCase();
         const isAndroid = ua.includes('android');
         const isIOS = /iphone|ipad|ipod/.test(ua);
-
         if (isAndroid) {
-            // Android Intent URL — opens YouTube app if installed, falls back to browser
             window.location.href = `intent://www.youtube.com/watch?v=${videoId}#Intent;scheme=https;package=com.google.android.youtube;S.browser_fallback_url=${encodeURIComponent(url)};end`;
             return;
         }
-
         if (isIOS) {
-            // iOS: try youtube:// deep link, fallback to web after 500ms
-            const fallbackTimer = setTimeout(() => {
-                window.location.href = url;
-            }, 500);
+            const fallbackTimer = setTimeout(() => { window.location.href = url; }, 500);
             window.location.href = `youtube://watch?v=${videoId}`;
-            // If the app opened, the page will be hidden — clear the fallback
             const handleVisibility = () => {
-                if (document.hidden) {
-                    clearTimeout(fallbackTimer);
-                    document.removeEventListener('visibilitychange', handleVisibility);
-                }
+                if (document.hidden) { clearTimeout(fallbackTimer); document.removeEventListener('visibilitychange', handleVisibility); }
             };
             document.addEventListener('visibilitychange', handleVisibility);
             return;
         }
     }
-
-    // Non-YouTube or desktop — just redirect normally
     window.location.href = url;
+};
+
+/**
+ * Smart batch slot picker.
+ * Returns the correct slot key based on current time.
+ * Each slot goes live 20 minutes before its session time.
+ *
+ * Slots & active-from times:
+ *   5am  → 4:40 AM
+ *   6am  → 5:40 AM
+ *   8am  → 7:40 AM
+ *   5pm  → 4:40 PM
+ *   6pm  → 5:40 PM
+ *   7pm  → 6:40 PM
+ *   Before 4:40 AM → 7pm (yesterday's last session recording)
+ */
+const getActiveBatchSlot = (): string => {
+    const now = new Date();
+    const cur = now.getHours() * 60 + now.getMinutes();
+    const slots = [
+        { slot: '5am',  from: 5 * 60 - 20  },
+        { slot: '6am',  from: 6 * 60 - 20  },
+        { slot: '8am',  from: 8 * 60 - 20  },
+        { slot: '5pm',  from: 17 * 60 - 20 },
+        { slot: '6pm',  from: 18 * 60 - 20 },
+        { slot: '7pm',  from: 19 * 60 - 20 },
+    ];
+    for (let i = slots.length - 1; i >= 0; i--) {
+        if (cur >= slots[i].from) return slots[i].slot;
+    }
+    return '7pm'; // Before 4:40 AM — show yesterday's last session
+};
+
+const SLOT_LABELS: Record<string, string> = {
+    '5am': '5:00 AM', '6am': '6:00 AM', '8am': '8:00 AM',
+    '5pm': '5:00 PM', '6pm': '6:00 PM', '7pm': '7:00 PM',
+};
+
+const getNextSlotInfo = (): { label: string; minutesUntil: number } | null => {
+    const now = new Date();
+    const cur = now.getHours() * 60 + now.getMinutes();
+    const slots = [
+        { slot: '5am',  from: 5 * 60 - 20  },
+        { slot: '6am',  from: 6 * 60 - 20  },
+        { slot: '8am',  from: 8 * 60 - 20  },
+        { slot: '5pm',  from: 17 * 60 - 20 },
+        { slot: '6pm',  from: 18 * 60 - 20 },
+        { slot: '7pm',  from: 19 * 60 - 20 },
+    ];
+    for (const s of slots) {
+        if (s.from > cur) return { label: SLOT_LABELS[s.slot], minutesUntil: s.from - cur };
+    }
+    return null;
 };
 
 const SessionRedirect = () => {
     const { slug } = useParams();
     const navigate = useNavigate();
     const { toast } = useToast();
+    const [noSession, setNoSession] = useState(false);
+    const [activeSlotLabel, setActiveSlotLabel] = useState('');
+    const [nextSlot, setNextSlot] = useState<{ label: string; minutesUntil: number } | null>(null);
 
     useEffect(() => {
         const handleRedirect = async () => {
@@ -81,16 +118,26 @@ const SessionRedirect = () => {
             let userDataToUse = null;
 
             try {
-                // 1. Build all queries to run in PARALLEL
+                // 1. Determine today's day key and active batch slot
+                const days = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'];
+                const todayStr = days[new Date().getDay()];
+                const activeSlot = getActiveBatchSlot();
+                setActiveSlotLabel(SLOT_LABELS[activeSlot]);
+                setNextSlot(getNextSlotInfo());
+
+                // 2. Run user + batch links + settings queries in parallel
+                const batchLinksPromise = supabase
+                    .from('session_batch_links')
+                    .select('batch_slot, link, week')
+                    .eq('day', todayStr);
+
                 const settingsPromise = supabase
-                    .from("session_settings")
-                    .select("session_link, premium_session_link")
-                    .single();
+                    .from('session_settings')
+                    .select('session_link')
+                    .maybeSingle();
 
                 let userPromise = null;
-
                 if (slug && slug !== 'live') {
-                    // Find user by slug — use .eq on a pattern match
                     userPromise = supabase
                         .from("main_data_registration")
                         .select("mobile_number, name, days_left, subscription_plan, subscription_paused")
@@ -98,7 +145,6 @@ const SessionRedirect = () => {
                         .limit(1)
                         .maybeSingle();
                 } else if (userPhone) {
-                    // Fallback: find user by cookie phone
                     userPromise = supabase
                         .from("main_data_registration")
                         .select("mobile_number, name, days_left, subscription_plan, subscription_paused")
@@ -106,56 +152,36 @@ const SessionRedirect = () => {
                         .single();
                 }
 
-                // 2. Run BOTH queries at the same time
                 if (!userPromise) {
-                    // No cookie and no slug — need login
-                    toast({
-                        title: "Login Required",
-                        description: "Please login to access the session",
-                        variant: "destructive",
-                    });
+                    toast({ title: "Login Required", description: "Please login to access the session", variant: "destructive" });
                     navigate(`/?returnUrl=/${slug || 'live'}`);
                     return;
                 }
 
-                const [userResult, settingsResult] = await Promise.all([userPromise, settingsPromise]);
+                const [userResult, batchResult, settingsResult] = await Promise.all([userPromise, batchLinksPromise, settingsPromise]);
                 console.log(`[SessionRedirect] DB queries took ${Math.round(performance.now() - t0)}ms`);
 
                 // 3. Process user data
                 const { data: userData, error: userError } = userResult;
-                
                 if (slug && slug !== 'live' && userData) {
-                    // Found by slug — auto-login
                     userPhone = userData.mobile_number;
                     userName = userData.name;
                     userDataToUse = userData;
                     setCookie("userPhone", userPhone);
                     setCookie("userName", userName);
                 } else if (slug && slug !== 'live' && !userData) {
-                    // Slug didn't match — try cookie fallback
                     if (!userPhone || !userName) {
-                        toast({
-                            title: "Login Required",
-                            description: "Please login to access the session",
-                            variant: "destructive",
-                        });
+                        toast({ title: "Login Required", description: "Please login to access the session", variant: "destructive" });
                         navigate(`/?returnUrl=/${slug || 'live'}`);
                         return;
                     }
-                    // Need a separate query for cookie user
                     const { data: cookieUser, error: cookieError } = await supabase
                         .from("main_data_registration")
                         .select("days_left, subscription_plan, subscription_paused")
                         .eq("mobile_number", userPhone)
                         .single();
-                    
                     if (cookieError || !cookieUser) {
-                        console.error("User fetch error:", cookieError);
-                        toast({
-                            title: "Error",
-                            description: "Could not verify subscription status",
-                            variant: "destructive",
-                        });
+                        toast({ title: "Error", description: "Could not verify subscription status", variant: "destructive" });
                         navigate("/dashboard");
                         return;
                     }
@@ -164,82 +190,46 @@ const SessionRedirect = () => {
                     userDataToUse = userData;
                 } else {
                     console.error("User fetch error:", userError);
-                    toast({
-                        title: "Error",
-                        description: "Could not verify subscription status",
-                        variant: "destructive",
-                    });
+                    toast({ title: "Error", description: "Could not verify subscription status", variant: "destructive" });
                     navigate("/dashboard");
                     return;
                 }
 
-                // 4. Check Subscription Status
+                // 4. Check subscription status
                 if (userDataToUse.subscription_paused) {
-                    toast({
-                        title: "Subscription Paused",
-                        description: "Your subscription is currently paused.",
-                        variant: "destructive",
-                    });
+                    toast({ title: "Subscription Paused", description: "Your subscription is currently paused.", variant: "destructive" });
                     navigate("/dashboard");
                     return;
                 }
-
                 if ((userDataToUse.days_left || 0) <= 0) {
-                    toast({
-                        title: "Plan Expired",
-                        description: "Please renew your plan to join sessions.",
-                        variant: "destructive",
-                    });
+                    toast({ title: "Plan Expired", description: "Please renew your plan to join sessions.", variant: "destructive" });
                     navigate("/dashboard");
                     return;
                 }
 
-                // 5. Determine session link
-                const { data: settingsData, error: settingsError } = settingsResult;
-
-                if (settingsError || !settingsData) {
-                    console.error("Settings fetch error:", settingsError);
-                    toast({
-                        title: "Error",
-                        description: "Could not find session link",
-                        variant: "destructive",
-                    });
-                    navigate("/dashboard");
-                    return;
-                }
-
-                let targetLink = settingsData.session_link;
+                // 5. Determine active week from session_settings
+                let activeWeek = 1;
                 try {
-                    if (targetLink && targetLink.startsWith('{')) {
-                        const parsed = JSON.parse(targetLink);
-                        const days = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'];
-                        const todayStr = days[new Date().getDay()];
-                        const activeWeek = parsed.active_week || 1;
-                        const key = `w${activeWeek}_${todayStr}`;
-                        targetLink = parsed[key];
-                    } else {
-                        // Legacy fallback
-                        if (userDataToUse.subscription_plan === 'personalized' || userDataToUse.subscription_plan === 'premium') {
-                            if (settingsData.premium_session_link) {
-                                targetLink = settingsData.premium_session_link;
-                            }
-                        }
+                    const settingsData = settingsResult.data;
+                    if (settingsData?.session_link?.startsWith('{')) {
+                        const parsed = JSON.parse(settingsData.session_link);
+                        activeWeek = parsed.active_week || 1;
                     }
-                } catch (e) {
-                    console.error("Failed to parse session link:", e);
-                }
+                } catch (e) { /* use default week 1 */ }
 
+                // 6. Pick the correct batch link for today + active week + active slot
+                const batchRows = batchResult.data || [];
+                const weekRows = batchRows.filter(r => r.week === activeWeek);
+                const slotRow = weekRows.find(r => r.batch_slot === activeSlot);
+                const targetLink = slotRow?.link?.trim() || '';
+
+                // 7. No link set → show "session not started" screen
                 if (!targetLink) {
-                    toast({
-                        title: "No Session Found",
-                        description: "There is no active session link right now.",
-                        variant: "destructive",
-                    });
-                    navigate("/dashboard");
+                    setNoSession(true);
                     return;
                 }
 
-                // 6. Fire attendance as fire-and-forget (DO NOT await — redirect immediately)
+                // 8. Fire attendance (non-blocking)
                 if (userPhone) {
                     supabase.from('attendance').insert({ mobile_number: userPhone }).then(null, (err: unknown) => {
                         console.error("Failed to mark attendance:", err);
@@ -251,11 +241,7 @@ const SessionRedirect = () => {
 
             } catch (error) {
                 console.error("Redirect error:", error);
-                toast({
-                    title: "Error",
-                    description: "Something went wrong. Please try again.",
-                    variant: "destructive",
-                });
+                toast({ title: "Error", description: "Something went wrong. Please try again.", variant: "destructive" });
                 navigate("/dashboard");
             }
         };
@@ -263,6 +249,42 @@ const SessionRedirect = () => {
         handleRedirect();
     }, [slug, navigate, toast]);
 
+    // "Session Not Started" screen
+    if (noSession) {
+        return (
+            <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-orange-50 to-amber-50 p-4">
+                <div className="text-center space-y-6 max-w-sm w-full">
+                    <div className="text-6xl animate-bounce">🧘</div>
+                    <div>
+                        <h2 className="text-2xl font-bold text-gray-800">Session Not Started Yet</h2>
+                        <p className="text-gray-500 mt-2 text-sm">
+                            The <span className="font-semibold text-amber-600">{activeSlotLabel}</span> session link hasn't been set yet.
+                            Please try again closer to the session time.
+                        </p>
+                    </div>
+                    {nextSlot && (
+                        <div className="bg-white rounded-2xl p-5 shadow-sm border border-amber-100">
+                            <p className="text-xs text-gray-500 uppercase tracking-wide font-semibold">Next session in</p>
+                            <p className="text-3xl font-bold text-amber-600 mt-1">
+                                {nextSlot.minutesUntil >= 60
+                                    ? `${Math.floor(nextSlot.minutesUntil / 60)}h ${nextSlot.minutesUntil % 60}m`
+                                    : `${nextSlot.minutesUntil} min`}
+                            </p>
+                            <p className="text-sm text-gray-400 mt-1">{nextSlot.label} batch</p>
+                        </div>
+                    )}
+                    <button
+                        onClick={() => navigate("/dashboard")}
+                        className="w-full py-3 px-6 bg-amber-500 hover:bg-amber-600 active:bg-amber-700 text-white font-semibold rounded-xl transition-colors shadow-md text-base"
+                    >
+                        ← Back to Dashboard
+                    </button>
+                </div>
+            </div>
+        );
+    }
+
+    // Loading / redirecting screen
     return (
         <div className="min-h-screen flex items-center justify-center bg-background">
             <div className="text-center space-y-4">

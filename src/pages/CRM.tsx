@@ -146,7 +146,10 @@ const CRM = () => {
   const [isLoading, setIsLoading] = useState(false);
   const [searchTerm, setSearchTerm] = useState("");
   const [filterDays7, setFilterDays7] = useState(false);
+  const [expiryFilter, setExpiryFilter] = useState<string>("all"); // 'all' | 'expiring7' | 'expiring14' | 'expiring30' | 'all_expiring' | 'expired'
   const [filterPlan, setFilterPlan] = useState<string>("all");
+  const [expiryDateFrom, setExpiryDateFrom] = useState("");
+  const [expiryDateTo, setExpiryDateTo] = useState("");
   const getDisplayPlan = (u: UserRecord) => {
     if (u.subscription_plan) return u.subscription_plan;
     if ((u.days_left || 0) <= 7) return "Free plan";
@@ -184,6 +187,57 @@ const CRM = () => {
   const [newActiveWeek, setNewActiveWeek] = useState(1);
   const [weeklyLinks, setWeeklyLinks] = useState<any>({});
   const [newWeeklyLinks, setNewWeeklyLinks] = useState<any>({});
+
+  // Batch Links state (new: 6 slots per day)
+  const BATCH_SLOTS = ['5am', '6am', '8am', '5pm', '6pm', '7pm'] as const;
+  const BATCH_SLOT_LABELS: Record<string, string> = { '5am': '5:00 AM', '6am': '6:00 AM', '8am': '8:00 AM', '5pm': '5:00 PM', '6pm': '6:00 PM', '7pm': '7:00 PM' };
+  const DAYS = ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun'] as const;
+  const DAY_LABELS: Record<string, string> = { mon: 'Mon', tue: 'Tue', wed: 'Wed', thu: 'Thu', fri: 'Fri', sat: 'Sat', sun: 'Sun' };
+  // batchLinks[week][day][slot] = link string
+  type BatchLinksMap = Record<number, Record<string, Record<string, string>>>;
+  const [batchLinks, setBatchLinks] = useState<BatchLinksMap>({ 1: {}, 2: {} });
+  const [editBatchLinks, setEditBatchLinks] = useState<BatchLinksMap>({ 1: {}, 2: {} });
+  const [batchEditWeek, setBatchEditWeek] = useState<1|2>(1);
+  const [batchEditDay, setBatchEditDay] = useState<string>(() => ['sun','mon','tue','wed','thu','fri','sat'][new Date().getDay()]);
+  const [isSavingBatch, setIsSavingBatch] = useState(false);
+
+  // Smart batch slot detection — which slot is currently active?
+  const getActiveBatchSlot = (): string => {
+    const now = new Date();
+    const cur = now.getHours() * 60 + now.getMinutes();
+    // Each slot activates 20 min before its time
+    const slots = [
+      { slot: '5am',  from: 5*60 - 20 },
+      { slot: '6am',  from: 6*60 - 20 },
+      { slot: '8am',  from: 8*60 - 20 },
+      { slot: '5pm',  from: 17*60 - 20 },
+      { slot: '6pm',  from: 18*60 - 20 },
+      { slot: '7pm',  from: 19*60 - 20 },
+    ];
+    let active = '7pm'; // default to last
+    for (let i = slots.length - 1; i >= 0; i--) {
+      if (cur >= slots[i].from) { active = slots[i].slot; break; }
+      if (i === 0) active = '7pm'; // before all slots, show yesterday's last
+    }
+    return active;
+  };
+
+  const getNextBatchSlot = (): { slot: string; minutesUntil: number } | null => {
+    const now = new Date();
+    const cur = now.getHours() * 60 + now.getMinutes();
+    const slots = [
+      { slot: '5am',  from: 5*60 - 20 },
+      { slot: '6am',  from: 6*60 - 20 },
+      { slot: '8am',  from: 8*60 - 20 },
+      { slot: '5pm',  from: 17*60 - 20 },
+      { slot: '6pm',  from: 18*60 - 20 },
+      { slot: '7pm',  from: 19*60 - 20 },
+    ];
+    for (const s of slots) {
+      if (s.from > cur) return { slot: s.slot, minutesUntil: s.from - cur };
+    }
+    return null;
+  };
 
   // Analytics
   const [selectedDate, setSelectedDate] = useState(new Date().toISOString().split('T')[0]);
@@ -361,6 +415,7 @@ const CRM = () => {
       fetchFollowupReports();
       fetchChatConversations();
       fetchSessionLink();
+      fetchBatchLinks();
     }
   }, []);
 
@@ -757,24 +812,15 @@ const CRM = () => {
         .select('session_link, premium_session_link, pabbly_reminder_url, wa_api_token, wa_phone_number_id, wa_language_code')
         .maybeSingle();
 
-      if (error) {
-        console.error('Error fetching session settings:', error);
-        return;
-      }
+      if (error) { console.error('Error fetching session settings:', error); return; }
 
       if (data) {
         let parsedLinks: any = {};
-        try {
-          if (data.session_link && data.session_link.startsWith('{')) {
-            parsedLinks = JSON.parse(data.session_link);
-          }
-        } catch (e) {}
-
+        try { if (data.session_link && data.session_link.startsWith('{')) parsedLinks = JSON.parse(data.session_link); } catch (e) {}
         setActiveWeek(parsedLinks.active_week || 1);
         setNewActiveWeek(parsedLinks.active_week || 1);
         setWeeklyLinks(parsedLinks || {});
         setNewWeeklyLinks(parsedLinks || {});
-
         setSessionLink(data.session_link || "");
         setNewLink(data.session_link || "");
         setPremiumSessionLink(data.premium_session_link || "");
@@ -784,57 +830,74 @@ const CRM = () => {
         setWaPhoneNumberId(data.wa_phone_number_id || "808910018982018");
         setWaLanguageCode(data.wa_language_code || "en");
       }
-    } catch (error) {
-      console.error('Error fetching session link:', error);
-    }
+    } catch (error) { console.error('Error fetching session link:', error); }
+  };
+
+  // Fetch batch links from new table
+  const fetchBatchLinks = async () => {
+    try {
+      const { data, error } = await supabase
+        .from('session_batch_links')
+        .select('week, day, batch_slot, link');
+      if (error) { console.error('Error fetching batch links:', error); return; }
+      // Build nested map: { 1: { mon: { '5am': '...', ... }, ... }, 2: { ... } }
+      const map: BatchLinksMap = { 1: {}, 2: {} };
+      for (const row of (data || [])) {
+        const w = row.week as 1 | 2;
+        if (!map[w][row.day]) map[w][row.day] = {};
+        map[w][row.day][row.batch_slot] = row.link || '';
+      }
+      setBatchLinks(map);
+      setEditBatchLinks(JSON.parse(JSON.stringify(map))); // deep clone
+    } catch (e) { console.error('fetchBatchLinks error:', e); }
+  };
+
+  // Save batch links for the currently selected week+day
+  const saveBatchLinks = async () => {
+    setIsSavingBatch(true);
+    try {
+      const daySlots = editBatchLinks[batchEditWeek]?.[batchEditDay] || {};
+      const upserts = BATCH_SLOTS.map(slot => ({
+        week: batchEditWeek,
+        day: batchEditDay,
+        batch_slot: slot,
+        link: daySlots[slot] || '',
+        updated_at: new Date().toISOString(),
+      }));
+      const { error } = await supabase
+        .from('session_batch_links')
+        .upsert(upserts, { onConflict: 'week,day,batch_slot' });
+      if (error) throw error;
+      // Update local state
+      setBatchLinks(prev => {
+        const next = JSON.parse(JSON.stringify(prev));
+        if (!next[batchEditWeek][batchEditDay]) next[batchEditWeek][batchEditDay] = {};
+        BATCH_SLOTS.forEach(slot => { next[batchEditWeek][batchEditDay][slot] = daySlots[slot] || ''; });
+        return next;
+      });
+      toast({ title: "Batch Links Saved! ✅", description: `Week ${batchEditWeek} — ${DAY_LABELS[batchEditDay]} links updated.` });
+    } catch (e: any) {
+      toast({ title: "Error", description: e.message || "Failed to save", variant: "destructive" });
+    } finally { setIsSavingBatch(false); }
   };
 
   const updateSessionLink = async () => {
     try {
-      // Check if a row exists
-      const { data: existingData, error: fetchError } = await supabase
-        .from('session_settings')
-        .select('id')
-        .maybeSingle();
-
+      const { data: existingData, error: fetchError } = await supabase.from('session_settings').select('id').maybeSingle();
       if (fetchError) throw fetchError;
-
-      const payload = JSON.stringify({
-        active_week: newActiveWeek,
-        ...newWeeklyLinks
-      });
-
+      const payload = JSON.stringify({ active_week: newActiveWeek, ...newWeeklyLinks });
       if (!existingData) {
-        // Create new row
-        const { error: insertError } = await supabase
-          .from('session_settings')
-          .insert({
-            session_link: payload,
-            premium_session_link: "",
-            updated_by: username,
-            updated_at: new Date().toISOString()
-          });
+        const { error: insertError } = await supabase.from('session_settings').insert({ session_link: payload, premium_session_link: "", updated_by: username, updated_at: new Date().toISOString() });
         if (insertError) throw insertError;
       } else {
-        // Update existing row
-        const { error: updateError } = await supabase
-          .from('session_settings')
-          .update({
-            session_link: payload,
-            premium_session_link: "",
-            updated_at: new Date().toISOString(),
-            updated_by: username
-          })
-          .eq('id', existingData.id);
+        const { error: updateError } = await supabase.from('session_settings').update({ session_link: payload, premium_session_link: "", updated_at: new Date().toISOString(), updated_by: username }).eq('id', existingData.id);
         if (updateError) throw updateError;
       }
-
       setActiveWeek(newActiveWeek);
       setWeeklyLinks(newWeeklyLinks);
       setEditingLink(false);
       toast({ title: "Links Updated! ✅", description: "Your class session links are now live." });
     } catch (error: any) {
-      console.error('Update error:', error);
       toast({ title: "Error", description: error.message || "Failed to update links", variant: "destructive" });
     }
   };
@@ -909,23 +972,49 @@ const CRM = () => {
   // --- Filtered Data ---
   const filteredUsers = users.filter((u) => {
     const matchesSearch = u.name.toLowerCase().includes(searchTerm.toLowerCase()) || u.mobile_number.includes(searchTerm);
-    const matchesDaysFilter = filterDays7 ? (u.days_left || 0) <= 7 : true;
+    
+    // Expiry dropdown filter
+    const daysLeft = u.days_left || 0;
+    let matchesDaysFilter = true;
+    if (expiryFilter === 'expiring7')    matchesDaysFilter = daysLeft > 0 && daysLeft <= 7;
+    if (expiryFilter === 'expiring14')   matchesDaysFilter = daysLeft > 0 && daysLeft <= 14;
+    if (expiryFilter === 'expiring30')   matchesDaysFilter = daysLeft > 0 && daysLeft <= 30;
+    if (expiryFilter === 'all_expiring') matchesDaysFilter = daysLeft > 0;
+    if (expiryFilter === 'expired')      matchesDaysFilter = daysLeft <= 0;
+
     const normalizePlanStr = (p: string) => (p || 'Free plan').toLowerCase().replace(/ plans?/g, '').replace(/months?/g, 'month').trim();
     const matchesPlan = filterPlan === "all" ? true : normalizePlanStr(getDisplayPlan(u)) === normalizePlanStr(filterPlan);
 
-    // Date range filter on created_at
+    // Join Date range filter on created_at
     let matchesDateRange = true;
     if (dateFrom) {
       matchesDateRange = matchesDateRange && new Date(u.created_at) >= new Date(dateFrom);
     }
     if (dateTo) {
-      // Include the entire "to" day by comparing against end-of-day
       const toEnd = new Date(dateTo);
       toEnd.setHours(23, 59, 59, 999);
       matchesDateRange = matchesDateRange && new Date(u.created_at) <= toEnd;
     }
 
-    return matchesSearch && matchesDaysFilter && matchesPlan && matchesDateRange;
+    // Expiry Date range filter (based on days_left → projected expiry date)
+    let matchesExpiryDateRange = true;
+    if (expiryDateFrom || expiryDateTo) {
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+      // Compute the user's projected expiry date
+      const expiryDate = new Date(today);
+      expiryDate.setDate(today.getDate() + daysLeft);
+      if (expiryDateFrom) {
+        matchesExpiryDateRange = matchesExpiryDateRange && expiryDate >= new Date(expiryDateFrom);
+      }
+      if (expiryDateTo) {
+        const expToEnd = new Date(expiryDateTo);
+        expToEnd.setHours(23, 59, 59, 999);
+        matchesExpiryDateRange = matchesExpiryDateRange && expiryDate <= expToEnd;
+      }
+    }
+
+    return matchesSearch && matchesDaysFilter && matchesPlan && matchesDateRange && matchesExpiryDateRange;
   });
 
   // --- Render ---
@@ -1274,7 +1363,7 @@ const CRM = () => {
                 {/* Filters and Search */}
                 <Card className="border-none shadow-sm bg-white">
                   <CardContent className="p-4 flex flex-col gap-4">
-                    {/* Row 1: Search + Expiring Soon */}
+                    {/* Row 1: Search + Plan + Expiry Dropdown */}
                     <div className="flex flex-col md:flex-row gap-4 items-center">
                       <div className="relative flex-1 w-full">
                         <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
@@ -1285,7 +1374,7 @@ const CRM = () => {
                           onChange={(e) => setSearchTerm(e.target.value)}
                         />
                       </div>
-                      <div className="w-full md:w-32 flex-shrink-0">
+                      <div className="w-full md:w-36 flex-shrink-0">
                         <select
                           className="flex h-10 w-full rounded-md border border-gray-200 bg-white px-3 py-2 text-sm focus-visible:outline-none focus:ring-1 focus:ring-blue-500"
                           value={filterPlan}
@@ -1299,22 +1388,40 @@ const CRM = () => {
                           <option value="12 months plan">12 months plan</option>
                         </select>
                       </div>
-                      <div className="flex gap-2">
-                        <Button
-                          variant={filterDays7 ? "default" : "outline"}
-                          onClick={() => setFilterDays7(!filterDays7)}
-                          className={filterDays7 ? "bg-red-100 text-red-700 hover:bg-red-200 border-red-200" : ""}
+                      {/* Expiry Status Dropdown */}
+                      <div className="w-full md:w-52 flex-shrink-0">
+                        <select
+                          className={`flex h-10 w-full rounded-md border px-3 py-2 text-sm focus-visible:outline-none focus:ring-1 focus:ring-amber-400 font-medium ${
+                            expiryFilter !== 'all'
+                              ? 'border-amber-300 bg-amber-50 text-amber-800'
+                              : 'border-gray-200 bg-white text-gray-700'
+                          }`}
+                          value={expiryFilter}
+                          onChange={(e) => setExpiryFilter(e.target.value)}
                         >
-                          Expiring Soon (≤7 Days)
-                        </Button>
+                          <option value="all">🧑‍🤝‍🧑 All Users</option>
+                          <option value="all_expiring">✅ All Expiring Users</option>
+                          <option value="expiring7">⚠️ Expiring Soon (≤7 Days)</option>
+                          <option value="expiring14">🕐 Expiring in 14 Days</option>
+                          <option value="expiring30">📅 Expiring in 30 Days</option>
+                          <option value="expired">❌ Expired Users</option>
+                        </select>
                       </div>
+                      {expiryFilter !== 'all' && (
+                        <button
+                          onClick={() => setExpiryFilter('all')}
+                          className="text-xs text-gray-400 hover:text-red-500 flex items-center gap-1 whitespace-nowrap"
+                        >
+                          <X className="h-3 w-3" /> Clear
+                        </button>
+                      )}
                     </div>
 
-                    {/* Row 2: Date Range Filter */}
+                    {/* Row 2: Join Date Filter */}
                     <div className="flex flex-col md:flex-row gap-3 items-center">
-                      <div className="flex items-center gap-2 text-sm font-medium text-gray-600">
+                      <div className="flex items-center gap-2 text-sm font-medium text-gray-600 w-36 flex-shrink-0">
                         <Calendar className="h-4 w-4 text-blue-500" />
-                        <span>Date Filter:</span>
+                        <span>Join Date:</span>
                       </div>
                       <div className="flex items-center gap-2 flex-wrap">
                         <Input
@@ -1343,12 +1450,68 @@ const CRM = () => {
                           </Button>
                         )}
                       </div>
-                      {(dateFrom || dateTo) && (
-                        <span className="text-xs text-blue-600 bg-blue-50 px-2 py-1 rounded-full ml-auto">
-                          {filteredUsers.length} user{filteredUsers.length !== 1 ? 's' : ''} found
+                    </div>
+
+                    {/* Row 3: Expiry Date Filter */}
+                    <div className="flex flex-col md:flex-row gap-3 items-center">
+                      <div className="flex items-center gap-2 text-sm font-medium text-gray-600 w-36 flex-shrink-0">
+                        <Calendar className="h-4 w-4 text-red-400" />
+                        <span>Expiry Date:</span>
+                      </div>
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <Input
+                          type="date"
+                          value={expiryDateFrom}
+                          onChange={(e) => setExpiryDateFrom(e.target.value)}
+                          className="h-9 w-[160px] bg-red-50 border-red-200 text-sm"
+                          placeholder="Expires From"
+                        />
+                        <span className="text-gray-400 text-sm">to</span>
+                        <Input
+                          type="date"
+                          value={expiryDateTo}
+                          onChange={(e) => setExpiryDateTo(e.target.value)}
+                          className="h-9 w-[160px] bg-red-50 border-red-200 text-sm"
+                          placeholder="Expires To"
+                        />
+                        {(expiryDateFrom || expiryDateTo) && (
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => { setExpiryDateFrom(""); setExpiryDateTo(""); }}
+                            className="text-gray-500 hover:text-red-600 h-8 px-2"
+                          >
+                            <X className="h-4 w-4 mr-1" /> Clear
+                          </Button>
+                        )}
+                      </div>
+                      {(expiryDateFrom || expiryDateTo) && (
+                        <span className="text-xs text-red-600 bg-red-50 px-2 py-1 rounded-full ml-auto">
+                          {filteredUsers.length} user{filteredUsers.length !== 1 ? 's' : ''} expiring in range
                         </span>
                       )}
                     </div>
+
+                    {/* Active filter summary */}
+                    {(expiryFilter !== 'all' || dateFrom || dateTo || expiryDateFrom || expiryDateTo) && (
+                      <div className="flex items-center gap-2 pt-1 border-t border-gray-100">
+                        <span className="text-xs text-gray-500">Showing</span>
+                        <span className="text-xs font-semibold text-blue-700 bg-blue-50 px-2 py-0.5 rounded-full">
+                          {filteredUsers.length} of {users.length} users
+                        </span>
+                        <button
+                          onClick={() => {
+                            setExpiryFilter('all');
+                            setDateFrom(''); setDateTo('');
+                            setExpiryDateFrom(''); setExpiryDateTo('');
+                            setSearchTerm(''); setFilterPlan('all');
+                          }}
+                          className="ml-auto text-xs text-gray-400 hover:text-red-500 flex items-center gap-1"
+                        >
+                          <X className="h-3 w-3" /> Clear All Filters
+                        </button>
+                      </div>
+                    )}
                   </CardContent>
                 </Card>
 
@@ -1460,97 +1623,93 @@ const CRM = () => {
             {currentSection === 'session-links' && !selectedUser && (
               <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="space-y-6">
                 <h1 className="text-2xl font-bold text-gray-900">Session Settings</h1>
+
                 <Card className="shadow-sm border-gray-100">
-                  <CardHeader><CardTitle>Update Daily Links</CardTitle></CardHeader>
-                  <CardContent className="space-y-6">
-                    <div className="flex items-center space-x-4 mb-4">
-                      <label className="text-sm font-bold text-gray-700">Active Week:</label>
-                      <select 
-                        value={editingLink ? newActiveWeek : activeWeek}
-                        disabled={!editingLink}
-                        onChange={e => setNewActiveWeek(Number(e.target.value))}
-                        className="p-2 border rounded-md"
-                      >
-                        <option value={1}>Week 1</option>
-                        <option value={2}>Week 2</option>
-                      </select>
-
-                      {!editingLink && (
-                        <div className="ml-6 flex flex-col">
-                          <span className="text-xs text-gray-500 uppercase font-semibold">Today's Active Link ({['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'][new Date().getDay()]})</span>
-                          <span className="text-sm font-medium text-green-700 break-all bg-green-50 px-2 py-1 rounded">
-                            {weeklyLinks[`w${activeWeek}_${['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'][new Date().getDay()]}`] || "No link set for today"}
-                          </span>
+                  <CardHeader>
+                    <CardTitle className="flex items-center gap-2">
+                      <Calendar className="w-5 h-5 text-blue-500" />
+                      Update Daily Batch Links
+                    </CardTitle>
+                    <p className="text-sm text-gray-500 mt-1">Each day has 6 session links — one per batch time. The correct link is auto-served 20 min before each session.</p>
+                  </CardHeader>
+                  <CardContent className="space-y-5">
+                    <div className="flex flex-wrap items-center gap-3">
+                      <div className="flex items-center gap-2">
+                        <label className="text-sm font-semibold text-gray-700">Week:</label>
+                        <div className="flex rounded-lg overflow-hidden border border-gray-200">
+                          {([1, 2] as const).map(w => (
+                            <button key={w} onClick={() => setBatchEditWeek(w)} className={`px-4 py-1.5 text-sm font-medium transition-colors ${batchEditWeek === w ? 'bg-blue-600 text-white' : 'bg-white text-gray-600 hover:bg-gray-50'}`}>
+                              Week {w}
+                            </button>
+                          ))}
                         </div>
-                      )}
-                    </div>
-
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
-                      {/* Week 1 Links */}
-                      <div className="space-y-3">
-                        <h3 className="font-bold text-md border-b pb-2">Week 1 Links</h3>
-                        {['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun'].map((day) => {
-                          const isToday = day === ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'][new Date().getDay()];
-                          const isActiveCol = isToday && (editingLink ? newActiveWeek : activeWeek) === 1;
-                          return (
-                            <div key={`w1_${day}`} className="space-y-1">
-                              <label className="text-xs font-semibold uppercase">{day} {isActiveCol && <span className="text-green-600 font-bold ml-1">(Today)</span>}</label>
-                              <Input 
-                                placeholder={`Week 1 ${day} link`}
-                                value={editingLink ? (newWeeklyLinks[`w1_${day}`] || '') : (weeklyLinks[`w1_${day}`] || '')} 
-                                disabled={!editingLink} 
-                                onChange={e => setNewWeeklyLinks({...newWeeklyLinks, [`w1_${day}`]: e.target.value})} 
-                                className={isActiveCol ? "border-green-500 bg-green-50 focus-visible:ring-green-500" : ""}
-                              />
-                            </div>
-                          );
-                        })}
                       </div>
-
-                      {/* Week 2 Links */}
-                      <div className="space-y-3">
-                        <h3 className="font-bold text-md border-b pb-2">Week 2 Links</h3>
-                        {['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun'].map((day) => {
-                          const isToday = day === ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'][new Date().getDay()];
-                          const isActiveCol = isToday && (editingLink ? newActiveWeek : activeWeek) === 2;
-                          return (
-                            <div key={`w2_${day}`} className="space-y-1">
-                              <label className="text-xs font-semibold uppercase">{day} {isActiveCol && <span className="text-green-600 font-bold ml-1">(Today)</span>}</label>
-                              <Input 
-                                placeholder={`Week 2 ${day} link`}
-                                value={editingLink ? (newWeeklyLinks[`w2_${day}`] || '') : (weeklyLinks[`w2_${day}`] || '')} 
-                                disabled={!editingLink} 
-                                onChange={e => setNewWeeklyLinks({...newWeeklyLinks, [`w2_${day}`]: e.target.value})} 
-                                className={isActiveCol ? "border-green-500 bg-green-50 focus-visible:ring-green-500" : ""}
-                              />
-                            </div>
-                          );
-                        })}
+                      <div className="flex items-center gap-2 ml-auto text-xs bg-green-50 border border-green-200 rounded-full px-3 py-1.5">
+                        <span className="w-2 h-2 rounded-full bg-green-500 animate-pulse" />
+                        <span className="text-green-700 font-medium">Active Now: {BATCH_SLOT_LABELS[getActiveBatchSlot()]}</span>
+                        {getNextBatchSlot() && <span className="text-gray-400 ml-1">· Next: {BATCH_SLOT_LABELS[getNextBatchSlot()!.slot]} in {getNextBatchSlot()!.minutesUntil}m</span>}
                       </div>
                     </div>
 
-                    <div className="pt-4 border-t">
-                      {editingLink ? (
-                        <div className="flex gap-2">
-                          <Button onClick={updateSessionLink}>Save Changes</Button>
-                          <Button variant="outline" onClick={() => {
-                            setEditingLink(false);
-                            setNewWeeklyLinks(weeklyLinks);
-                            setNewActiveWeek(activeWeek);
-                          }}>Cancel</Button>
-                        </div>
-                      ) : (
-                        <Button onClick={() => {
-                          setNewWeeklyLinks({...weeklyLinks});
-                          setNewActiveWeek(activeWeek);
-                          setEditingLink(true);
-                        }}>Edit Links</Button>
-                      )}
+                    <div className="flex gap-1 flex-wrap border-b border-gray-100">
+                      {DAYS.map(day => {
+                        const todayStr = ['sun','mon','tue','wed','thu','fri','sat'][new Date().getDay()];
+                        const isToday = day === todayStr;
+                        const isSelected = batchEditDay === day;
+                        const hasLinks = BATCH_SLOTS.some(s => batchLinks[batchEditWeek]?.[day]?.[s]);
+                        return (
+                          <button key={day} onClick={() => setBatchEditDay(day)} className={`relative px-4 py-2 text-sm font-semibold rounded-t-lg border-b-2 transition-all ${isSelected ? 'border-blue-500 text-blue-700 bg-blue-50' : 'border-transparent text-gray-500 hover:text-gray-700 hover:bg-gray-50'}`}>
+                            {DAY_LABELS[day]}
+                            {isToday && <span className="absolute -top-1 -right-1 w-2 h-2 rounded-full bg-green-500 border border-white" />}
+                            {hasLinks && !isSelected && <span className="absolute bottom-1 left-1/2 -translate-x-1/2 w-1 h-1 rounded-full bg-blue-400" />}
+                          </button>
+                        );
+                      })}
+                    </div>
+
+                    <div className="space-y-3">
+                      {(() => {
+                        const todayStr = ['sun','mon','tue','wed','thu','fri','sat'][new Date().getDay()];
+                        const isToday = batchEditDay === todayStr;
+                        const activeslot = getActiveBatchSlot();
+                        const nextInfo = getNextBatchSlot();
+                        return (
+                          <>
+                            {isToday && (
+                              <div className="flex items-center gap-2 p-2 rounded-lg bg-amber-50 border border-amber-200 text-xs text-amber-700">
+                                <span>Today is <strong>{DAY_LABELS[batchEditDay]}</strong>. Active: <strong>{BATCH_SLOT_LABELS[activeslot]}</strong>. Update today links to keep sessions live.</span>
+                              </div>
+                            )}
+                            {BATCH_SLOTS.map(slot => {
+                              const isActive = isToday && slot === activeslot;
+                              const isNext = isToday && nextInfo?.slot === slot;
+                              const val = editBatchLinks[batchEditWeek]?.[batchEditDay]?.[slot] ?? batchLinks[batchEditWeek]?.[batchEditDay]?.[slot] ?? '';
+                              return (
+                                <div key={slot} className={`flex items-center gap-3 p-3 rounded-xl border transition-all ${isActive ? 'border-green-300 bg-green-50' : isNext ? 'border-blue-200 bg-blue-50/50' : 'border-gray-100 bg-white'}`}>
+                                  <div className="w-20 flex-shrink-0">
+                                    <span className={`text-sm font-bold ${isActive ? 'text-green-700' : isNext ? 'text-blue-600' : 'text-gray-700'}`}>{BATCH_SLOT_LABELS[slot]}</span>
+                                    {isActive && <div className="text-[10px] font-semibold text-green-600 mt-0.5 flex items-center gap-1"><span className="w-1.5 h-1.5 rounded-full bg-green-500 inline-block animate-pulse" /> LIVE</div>}
+                                    {isNext && <div className="text-[10px] font-semibold text-blue-500 mt-0.5">NEXT</div>}
+                                  </div>
+                                  <Input placeholder={`Paste ${BATCH_SLOT_LABELS[slot]} session link...`} value={val} onChange={e => { setEditBatchLinks(prev => { const next = JSON.parse(JSON.stringify(prev)); if (!next[batchEditWeek]) next[batchEditWeek] = {}; if (!next[batchEditWeek][batchEditDay]) next[batchEditWeek][batchEditDay] = {}; next[batchEditWeek][batchEditDay][slot] = e.target.value; return next; }); }} className={`flex-1 text-sm ${isActive ? 'border-green-300 focus-visible:ring-green-400' : isNext ? 'border-blue-200' : 'border-gray-200'}`} />
+                                  {val && <a href={val} target="_blank" rel="noopener noreferrer" className="text-blue-500 hover:text-blue-700 text-xs whitespace-nowrap flex items-center gap-1"><Eye className="w-3.5 h-3.5" /> Test</a>}
+                                </div>
+                              );
+                            })}
+                          </>
+                        );
+                      })()}
+                    </div>
+
+                    <div className="flex items-center gap-3 pt-2 border-t border-gray-100">
+                      <Button onClick={saveBatchLinks} disabled={isSavingBatch} className="bg-blue-600 hover:bg-blue-700 text-white shadow-md">
+                        {isSavingBatch ? 'Saving...' : `Save Week ${batchEditWeek} — ${DAY_LABELS[batchEditDay]} Links`}
+                      </Button>
+                      <span className="text-xs text-gray-400">Links are live immediately after saving.</span>
                     </div>
                   </CardContent>
                 </Card>
 
-                {/* ===== LINK ANALYTICS PANEL ===== */}
                 <LinkAnalyticsPanel users={users} />
               </motion.div>
             )}
