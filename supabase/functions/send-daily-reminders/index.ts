@@ -68,7 +68,7 @@ Deno.serve(async (req) => {
         }
 
         // Resolve settings: prefer DB schedule, fall back to defaults
-        const audience: string        = schedule?.audience        || "active";
+        const audience: string        = schedule?.audience        || "batch";
         const customUsers: any[]      = schedule?.custom_users    || [];
         const templateNameCfg: string = schedule?.template_name   || "daily_reminder";
         const templateIdCfg: string   = schedule?.template_id     || "";

@@ -31,10 +31,10 @@ CREATE POLICY "Allow service role all" ON reminder_schedules
 -- Seed the 6 default time slots so they exist even without editing
 INSERT INTO reminder_schedules (slot, enabled, audience, template_params)
 VALUES
-  ('5 AM',  true, 'active', 'name,slug'),
-  ('6 AM',  true, 'active', 'name,slug'),
-  ('8 AM',  true, 'active', 'name,slug'),
-  ('5 PM',  true, 'active', 'name,slug'),
-  ('6 PM',  true, 'active', 'name,slug'),
-  ('7 PM',  true, 'active', 'name,slug')
+  ('5 AM',  true, 'batch', 'name,slug'),
+  ('6 AM',  true, 'batch', 'name,slug'),
+  ('8 AM',  true, 'batch', 'name,slug'),
+  ('5 PM',  true, 'batch', 'name,slug'),
+  ('6 PM',  true, 'batch', 'name,slug'),
+  ('7 PM',  true, 'batch', 'name,slug')
 ON CONFLICT (slot) DO NOTHING;
