@@ -32,6 +32,7 @@ import { Sidebar } from "./crm/Sidebar";
 import { UserDetail } from "./crm/UserDetail";
 import { RetentionDashboard } from "./crm/RetentionDashboard";
 import { WhatsAppChat } from "./crm/WhatsAppChat";
+import { LeadsManagement } from "./crm/LeadsManagement";
 import { formatPhone } from "@/lib/utils";
 
 // Helper functions for formatting records
@@ -2760,6 +2761,18 @@ const CRM = () => {
                 exit={{ opacity: 0, y: -10 }}
               >
                 <WhatsAppChat />
+              </motion.div>
+            )}
+
+            {/* LEADS MANAGEMENT SECTION */}
+            {currentSection === 'followup' && !selectedUser && (
+              <motion.div
+                key="followup-section"
+                initial={{ opacity: 0, y: 10 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: -10 }}
+              >
+                <LeadsManagement />
               </motion.div>
             )}
 

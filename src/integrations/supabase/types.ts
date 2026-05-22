@@ -157,6 +157,48 @@ export type Database = {
         }
         Relationships: []
       }
+      leads: {
+        Row: {
+          id: string
+          admission_date: string | null
+          calling_date: string | null
+          sr_no: string | null
+          client_name: string
+          contact: string
+          lead_type: string | null
+          lead_existing_plan: string | null
+          lead_status: string
+          remark: string | null
+          created_at: string | null
+        }
+        Insert: {
+          id?: string
+          admission_date?: string | null
+          calling_date?: string | null
+          sr_no?: string | null
+          client_name: string
+          contact: string
+          lead_type?: string | null
+          lead_existing_plan?: string | null
+          lead_status?: string
+          remark?: string | null
+          created_at?: string | null
+        }
+        Update: {
+          id?: string
+          admission_date?: string | null
+          calling_date?: string | null
+          sr_no?: string | null
+          client_name?: string
+          contact?: string
+          lead_type?: string | null
+          lead_existing_plan?: string | null
+          lead_status?: string
+          remark?: string | null
+          created_at?: string | null
+        }
+        Relationships: []
+      }
       gift_boxes: {
         Row: {
           box_number: number
