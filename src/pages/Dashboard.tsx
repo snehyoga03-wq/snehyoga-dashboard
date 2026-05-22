@@ -466,13 +466,13 @@ const Dashboard = () => {
           </div>
         ) : (
           <div className="bg-[#18181a] rounded-[24px] shadow-[0_8px_30px_rgba(0,0,0,0.12)] overflow-hidden relative mb-8">
-            
+
             {/* Background Image with Curved Mask */}
             <div className="absolute top-0 right-0 w-[60%] h-full pointer-events-none">
               <div className="absolute inset-0 bg-gradient-to-r from-[#18181a] via-[#18181a]/90 to-transparent z-10 w-full h-full"></div>
-              <img 
-                src="https://images.unsplash.com/photo-1544367567-0f2fcb009e0b?q=80&w=1000&auto=format&fit=crop" 
-                alt="Yoga Background" 
+              <img
+                src="https://images.unsplash.com/photo-1544367567-0f2fcb009e0b?q=80&w=1000&auto=format&fit=crop"
+                alt="Yoga Background"
                 className="w-full h-full object-cover opacity-60"
                 style={{ maskImage: 'radial-gradient(150% 150% at 0% 50%, transparent 35%, black 55%)', WebkitMaskImage: 'radial-gradient(150% 150% at 0% 50%, transparent 35%, black 55%)' }}
               />
@@ -488,7 +488,7 @@ const Dashboard = () => {
 
             {/* Main Content Area */}
             <div className="relative z-20 p-6 md:p-8">
-              
+
               <div className="flex flex-col md:flex-row gap-6 md:items-center">
                 {/* Circle Badge */}
                 <div className="w-[100px] h-[100px] rounded-full border border-gray-500 bg-[#161c2d] flex flex-col items-center justify-center shrink-0 shadow-lg relative">
@@ -497,14 +497,14 @@ const Dashboard = () => {
                     <line x1="4.93" y1="4.93" x2="19.07" y2="19.07"></line>
                   </svg>
                   <span className="text-white text-[11px] font-bold leading-tight text-center">
-                    No Yoga<br/>Sessions<br/>
+                    No Yoga<br />Sessions<br />
                     <span className="text-[#fdbd2c]">Right Now</span>
                   </span>
-                  
+
                   {/* Golden leaves decoration SVG */}
                   <div className="absolute -bottom-6 -left-6 w-14 h-14 text-[#9a7b4f] pointer-events-none opacity-80 -z-10">
                     <svg viewBox="0 0 24 24" fill="currentColor" transform="rotate(-30)">
-                       <path d="M12 21C12 21 7 16 7 10C7 6 10 3 12 3C14 3 17 6 17 10C17 16 12 21 12 21Z" />
+                      <path d="M12 21C12 21 7 16 7 10C7 6 10 3 12 3C14 3 17 6 17 10C17 16 12 21 12 21Z" />
                     </svg>
                   </div>
                 </div>
@@ -512,21 +512,21 @@ const Dashboard = () => {
                 {/* Typography */}
                 <div className="pt-2">
                   <h2 className="text-3xl md:text-4xl font-black text-white leading-tight tracking-wide mb-1">
-                    Next Session Live<br/>
+                    Next Session Live<br />
                     <span className="text-[#fdbd2c]">at {getNextSessionText()}</span>
                   </h2>
-                  
+
                   <div className="flex items-center gap-3 my-4">
                     <div className="h-px bg-gray-600/60 w-16"></div>
                     {/* Lotus Icon */}
                     <div className="text-[#fdbd2c]">
                       <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
-                        <path d="M12 2C12 2 15 8 15 12C15 16 12 22 12 22C12 22 9 16 9 12C9 8 12 2 12 2ZM12 4.5C12 4.5 13.5 9 13.5 12C13.5 15 12 19.5 12 19.5C12 19.5 10.5 15 10.5 12C10.5 9 12 4.5 12 4.5Z"/>
+                        <path d="M12 2C12 2 15 8 15 12C15 16 12 22 12 22C12 22 9 16 9 12C9 8 12 2 12 2ZM12 4.5C12 4.5 13.5 9 13.5 12C13.5 15 12 19.5 12 19.5C12 19.5 10.5 15 10.5 12C10.5 9 12 4.5 12 4.5Z" />
                       </svg>
                     </div>
                     <div className="h-px bg-gray-600/60 w-16"></div>
                   </div>
-                  
+
                   <p className="text-gray-300 text-[15px] font-medium">Open the link during live timings</p>
                 </div>
               </div>
@@ -534,7 +534,7 @@ const Dashboard = () => {
 
             {/* Bottom White Container with 3 Timings */}
             <div className="relative z-20 bg-white rounded-[20px] mx-4 mb-4 p-5 flex items-center justify-between">
-              
+
               {/* Time Slot 1 */}
               <div className="flex flex-col items-center flex-1">
                 <div className="w-12 h-12 rounded-full bg-amber-50 flex items-center justify-center mb-2">
@@ -569,9 +569,9 @@ const Dashboard = () => {
               <div className="flex flex-col items-center flex-1">
                 <div className="w-12 h-12 rounded-full bg-amber-50 flex items-center justify-center mb-2">
                   {new Date().getHours() < 12 ? (
-                     <Sun className="w-6 h-6 text-amber-500" strokeWidth={1.5} />
+                    <Sun className="w-6 h-6 text-amber-500" strokeWidth={1.5} />
                   ) : (
-                     <Moon className="w-6 h-6 text-amber-500" strokeWidth={1.5} />
+                    <Moon className="w-6 h-6 text-amber-500" strokeWidth={1.5} />
                   )}
                 </div>
                 <span className="text-[#fdbd2c] font-black text-sm md:text-base">{new Date().getHours() < 12 ? '8:00 AM' : '7:00 PM'}</span>

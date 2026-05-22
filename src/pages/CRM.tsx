@@ -31,6 +31,7 @@ import { motion, AnimatePresence } from "framer-motion";
 import { Sidebar } from "./crm/Sidebar";
 import { UserDetail } from "./crm/UserDetail";
 import { RetentionDashboard } from "./crm/RetentionDashboard";
+import { WhatsAppChat } from "./crm/WhatsAppChat";
 import { formatPhone } from "@/lib/utils";
 
 // Helper functions for formatting records
@@ -2748,6 +2749,18 @@ const CRM = () => {
             {/* RETENTION OS SECTION */}
             {currentSection === 'retention' && !selectedUser && (
               <RetentionDashboard />
+            )}
+
+            {/* WHATSAPP CHATS SECTION */}
+            {currentSection === 'chats' && !selectedUser && (
+              <motion.div
+                key="chats-section"
+                initial={{ opacity: 0, y: 10 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: -10 }}
+              >
+                <WhatsAppChat />
+              </motion.div>
             )}
 
             {/* Report Dialog Handling */}
