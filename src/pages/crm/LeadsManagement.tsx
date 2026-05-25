@@ -8,12 +8,14 @@ import { useToast } from "@/hooks/use-toast";
 import { motion } from "framer-motion";
 import { 
   ClipboardList, Search, RefreshCw, Plus, Download, Upload, 
-  Trash2, Edit, Save, X, Calendar, User, Phone, CheckCircle 
+  Trash2, Edit, Save, X, Calendar, User, Phone, CheckCircle, History
 } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Label } from "@/components/ui/label";
 import * as XLSX from "xlsx";
+
+const ASSIGNED_USERS = ["Mayuri K", "Ragini K", "Shreya K"];
 
 // Dropdown Constants
 const LEAD_TYPES = [
@@ -45,6 +47,7 @@ const EXISTING_PLANS = [
 ];
 
 const LEAD_STATUSES = [
+  { id: "Select Option", label: "Select Option", bg: "bg-gray-100 hover:bg-gray-200", text: "text-gray-700" },
   { id: "Deal Done", label: "Deal Done", bg: "bg-[#14532d] hover:bg-[#166534]", text: "text-white" },
   { id: "Follow Up", label: "Follow Up", bg: "bg-[#991b1b] hover:bg-[#b91c1c]", text: "text-white" },
   { id: "Dead", label: "Dead", bg: "bg-[#fef08a] hover:bg-[#fde047]", text: "text-[#854d0e]" }
@@ -61,6 +64,8 @@ interface Lead {
   lead_existing_plan: string | null;
   lead_status: string;
   remark: string | null;
+  assigned_to: string | null;
+  follow_up_date: string | null;
   created_at: string | null;
 }
 
@@ -77,6 +82,12 @@ export function LeadsManagement() {
   // Dialog States
   const [isOpenAddEditDialog, setIsOpenAddEditDialog] = useState(false);
   const [editingLead, setEditingLead] = useState<Lead | null>(null);
+  
+  // History States
+  const [showHistoryDialog, setShowHistoryDialog] = useState(false);
+  const [selectedLeadHistory, setSelectedLeadHistory] = useState<any[]>([]);
+  const [selectedLeadForHistory, setSelectedLeadForHistory] = useState<Lead | null>(null);
+
   const [leadForm, setLeadForm] = useState<Partial<Lead>>({
     admission_date: "",
     calling_date: "",
@@ -85,8 +96,10 @@ export function LeadsManagement() {
     contact: "",
     lead_type: "",
     lead_existing_plan: "",
-    lead_status: "Follow Up",
-    remark: ""
+    lead_status: "Select Option",
+    remark: "",
+    assigned_to: null,
+    follow_up_date: ""
   });
 
   useEffect(() => {
@@ -115,6 +128,34 @@ export function LeadsManagement() {
     }
   };
 
+  const getLastAssignedIndex = (leadsArray: Lead[]) => {
+    const lastAssignedLead = leadsArray.find(l => l.assigned_to && ASSIGNED_USERS.includes(l.assigned_to));
+    if (lastAssignedLead && lastAssignedLead.assigned_to) {
+      return ASSIGNED_USERS.indexOf(lastAssignedLead.assigned_to);
+    }
+    return -1;
+  };
+
+  const logHistory = async (leadId: string, action_type: string, description: string) => {
+    try {
+      await supabase.from("lead_history").insert([{
+        lead_id: leadId,
+        action_type,
+        description,
+        created_by: "CRM User"
+      }]);
+    } catch (e) {
+      console.error("Failed to log history", e);
+    }
+  };
+
+  const handleOpenHistory = async (lead: Lead) => {
+    setSelectedLeadForHistory(lead);
+    setShowHistoryDialog(true);
+    const { data } = await supabase.from("lead_history").select("*").eq("lead_id", lead.id).order("created_at", { ascending: false });
+    setSelectedLeadHistory(data || []);
+  };
+
   const handleOpenAddDialog = () => {
     setEditingLead(null);
     setLeadForm({
@@ -125,8 +166,9 @@ export function LeadsManagement() {
       contact: "",
       lead_type: LEAD_TYPES[0],
       lead_existing_plan: EXISTING_PLANS[0],
-      lead_status: "Follow Up",
-      remark: ""
+      lead_status: "Select Option",
+      remark: "",
+      follow_up_date: ""
     });
     setIsOpenAddEditDialog(true);
   };
@@ -142,7 +184,9 @@ export function LeadsManagement() {
       lead_type: lead.lead_type || "",
       lead_existing_plan: lead.lead_existing_plan || "",
       lead_status: lead.lead_status,
-      remark: lead.remark || ""
+      remark: lead.remark || "",
+      assigned_to: lead.assigned_to,
+      follow_up_date: lead.follow_up_date || ""
     });
     setIsOpenAddEditDialog(true);
   };
@@ -170,16 +214,21 @@ export function LeadsManagement() {
             contact: leadForm.contact,
             lead_type: leadForm.lead_type || null,
             lead_existing_plan: leadForm.lead_existing_plan || null,
-            lead_status: leadForm.lead_status || "Follow Up",
-            remark: leadForm.remark || null
+            lead_status: leadForm.lead_status || "Select Option",
+            remark: leadForm.remark || null,
+            follow_up_date: leadForm.follow_up_date || null
           })
           .eq("id", editingLead.id);
 
         if (error) throw error;
+        await logHistory(editingLead.id, "Updated", "Lead details were updated manually.");
         toast({ title: "Success", description: "Lead updated successfully" });
       } else {
         // Create
-        const { error } = await supabase
+        let nextUserIndex = (getLastAssignedIndex(leads) + 1) % 3;
+        const assignedTo = ASSIGNED_USERS[nextUserIndex];
+
+        const { data, error } = await supabase
           .from("leads")
           .insert([{
             admission_date: leadForm.admission_date || null,
@@ -189,11 +238,16 @@ export function LeadsManagement() {
             contact: leadForm.contact,
             lead_type: leadForm.lead_type || null,
             lead_existing_plan: leadForm.lead_existing_plan || null,
-            lead_status: leadForm.lead_status || "Follow Up",
-            remark: leadForm.remark || null
-          }]);
+            lead_status: leadForm.lead_status || "Select Option",
+            remark: leadForm.remark || null,
+            assigned_to: assignedTo,
+            follow_up_date: leadForm.follow_up_date || null
+          }]).select();
 
         if (error) throw error;
+        if (data && data.length > 0) {
+           await logHistory(data[0].id, "Created", `Lead created and auto-assigned to ${assignedTo}`);
+        }
         toast({ title: "Success", description: "Lead added successfully" });
       }
       setIsOpenAddEditDialog(false);
@@ -216,6 +270,7 @@ export function LeadsManagement() {
         .eq("id", leadId);
 
       if (error) throw error;
+      await logHistory(leadId, "Status Changed", `Lead status changed to ${status}`);
       setLeads(prev => prev.map(lead => lead.id === leadId ? { ...lead, lead_status: status } : lead));
       toast({ title: "Status Updated", description: `Lead status changed to ${status}` });
     } catch (err: any) {
@@ -236,6 +291,7 @@ export function LeadsManagement() {
         .eq("id", leadId);
 
       if (error) throw error;
+      await logHistory(leadId, "Type Changed", `Lead type changed to ${type}`);
       setLeads(prev => prev.map(lead => lead.id === leadId ? { ...lead, lead_type: type } : lead));
       toast({ title: "Lead Type Updated", description: `Lead type changed to ${type}` });
     } catch (err: any) {
@@ -256,12 +312,34 @@ export function LeadsManagement() {
         .eq("id", leadId);
 
       if (error) throw error;
+      await logHistory(leadId, "Plan Changed", `Plan changed to ${plan}`);
       setLeads(prev => prev.map(lead => lead.id === leadId ? { ...lead, lead_existing_plan: plan } : lead));
       toast({ title: "Plan Updated", description: `Plan changed to ${plan}` });
     } catch (err: any) {
       console.error("Error updating plan:", err);
       toast({
         title: "Error updating plan",
+        description: err.message,
+        variant: "destructive"
+      });
+    }
+  };
+
+  const handleUpdateAssignedTo = async (leadId: string, assignedTo: string) => {
+    try {
+      const { error } = await supabase
+        .from("leads")
+        .update({ assigned_to: assignedTo })
+        .eq("id", leadId);
+
+      if (error) throw error;
+      await logHistory(leadId, "Reassigned", `Lead reassigned to ${assignedTo}`);
+      setLeads(prev => prev.map(lead => lead.id === leadId ? { ...lead, assigned_to: assignedTo } : lead));
+      toast({ title: "Assigned To Updated", description: `Lead assigned to ${assignedTo}` });
+    } catch (err: any) {
+      console.error("Error updating assigned to:", err);
+      toast({
+        title: "Error updating assignment",
         description: err.message,
         variant: "destructive"
       });
@@ -399,6 +477,7 @@ export function LeadsManagement() {
           return;
         }
 
+        let currentIndex = getLastAssignedIndex(leads);
         const validLeads: Partial<Lead>[] = [];
         for (const row of rows) {
           // Normalize keys case-insensitively
@@ -424,11 +503,12 @@ export function LeadsManagement() {
           const remark = normalizedRow["remark"] || normalizedRow["remarks"] || normalizedRow["note"];
 
           // Clean Lead Status
-          let finalStatus = "Follow Up";
+          let finalStatus = "Select Option";
           if (leadStatus) {
             const statusStr = String(leadStatus).trim().toLowerCase();
             if (statusStr.includes("done") || statusStr.includes("deal")) finalStatus = "Deal Done";
             else if (statusStr.includes("dead")) finalStatus = "Dead";
+            else if (statusStr.includes("follow")) finalStatus = "Follow Up";
           }
 
           // Clean Lead Type
@@ -447,6 +527,7 @@ export function LeadsManagement() {
             else finalPlan = String(existingPlan).trim();
           }
 
+          currentIndex = (currentIndex + 1) % 3;
           validLeads.push({
             admission_date: parseDate(admissionDateRaw),
             calling_date: parseDate(callingDateRaw),
@@ -456,7 +537,8 @@ export function LeadsManagement() {
             lead_type: finalType,
             lead_existing_plan: finalPlan,
             lead_status: finalStatus,
-            remark: remark ? String(remark).trim() : null
+            remark: remark ? String(remark).trim() : null,
+            assigned_to: ASSIGNED_USERS[currentIndex]
           });
         }
 
@@ -471,8 +553,18 @@ export function LeadsManagement() {
         }
 
         // Bulk insert to Supabase
-        const { error } = await supabase.from("leads").insert(validLeads);
+        const { data: insertedLeads, error } = await supabase.from("leads").insert(validLeads).select('id, client_name, assigned_to');
         if (error) throw error;
+
+        if (insertedLeads && insertedLeads.length > 0) {
+          const historyLogs = insertedLeads.map(l => ({
+            lead_id: l.id,
+            action_type: "Imported",
+            description: `Lead imported and assigned to ${l.assigned_to}`,
+            created_by: "System"
+          }));
+          await supabase.from("lead_history").insert(historyLogs);
+        }
 
         toast({
           title: "Import Successful",
@@ -508,6 +600,15 @@ export function LeadsManagement() {
     const matchesType = typeFilter === "all" || lead.lead_type === typeFilter;
 
     return matchesSearch && matchesStatus && matchesType;
+  });
+
+  const todayStr = new Date().toISOString().split("T")[0];
+  const sortedFilteredLeads = [...filteredLeads].sort((a, b) => {
+    const aIsToday = a.follow_up_date === todayStr;
+    const bIsToday = b.follow_up_date === todayStr;
+    if (aIsToday && !bIsToday) return -1;
+    if (!aIsToday && bIsToday) return 1;
+    return 0; 
   });
 
   return (
@@ -590,6 +691,7 @@ export function LeadsManagement() {
           <Table>
             <TableHeader className="bg-[#2e5a44] border-b border-[#2e5a44]">
               <TableRow className="hover:bg-[#2e5a44]">
+                <TableHead className="text-white font-semibold">Added Date</TableHead>
                 <TableHead className="text-white font-semibold">Admission Date</TableHead>
                 <TableHead className="text-white font-semibold">Calling Date</TableHead>
                 <TableHead className="text-white font-semibold w-16">SR NO</TableHead>
@@ -598,16 +700,27 @@ export function LeadsManagement() {
                 <TableHead className="text-white font-semibold min-w-[180px]">LEAD TYPE</TableHead>
                 <TableHead className="text-white font-semibold min-w-[180px]">LEAD EXISTING PLAN</TableHead>
                 <TableHead className="text-white font-semibold min-w-[140px]">LEAD STATUS</TableHead>
+                <TableHead className="text-white font-semibold min-w-[140px]">ASSIGNED TO</TableHead>
+                <TableHead className="text-white font-semibold min-w-[140px]">FOLLOW-UP DATE</TableHead>
                 <TableHead className="text-white font-semibold min-w-[200px]">REMARK</TableHead>
                 <TableHead className="text-white font-semibold text-center w-24">ACTIONS</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
-              {filteredLeads.map((lead) => {
-                const curStatus = LEAD_STATUSES.find(s => s.id === lead.lead_status) || LEAD_STATUSES[1];
+              {sortedFilteredLeads.map((lead) => {
+                const curStatus = LEAD_STATUSES.find(s => s.id === lead.lead_status) || LEAD_STATUSES[0];
                 
                 return (
                   <TableRow key={lead.id} className="hover:bg-gray-50 border-b border-gray-100">
+                    {/* Added Date */}
+                    <TableCell className="font-medium text-gray-700 text-sm">
+                      {lead.created_at ? new Date(lead.created_at).toLocaleDateString("en-IN", {
+                        day: "numeric",
+                        month: "short",
+                        year: "numeric"
+                      }) : "—"}
+                    </TableCell>
+
                     {/* Admission Date */}
                     <TableCell className="font-medium text-gray-700 text-sm">
                       {lead.admission_date ? new Date(lead.admission_date).toLocaleDateString("en-IN", {
@@ -692,6 +805,32 @@ export function LeadsManagement() {
                       </Select>
                     </TableCell>
 
+                    {/* ASSIGNED TO */}
+                    <TableCell>
+                      <Select
+                        value={lead.assigned_to || ""}
+                        onValueChange={(val) => handleUpdateAssignedTo(lead.id, val)}
+                      >
+                        <SelectTrigger className="h-8 border-none bg-gray-100 hover:bg-gray-200 text-xs rounded-full px-3 py-1 font-semibold text-gray-700 w-full focus:ring-0 focus:ring-offset-0">
+                          <SelectValue placeholder="Select user" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {ASSIGNED_USERS.map(u => (
+                            <SelectItem key={u} value={u} className="text-xs font-medium">
+                              {u}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </TableCell>
+
+                    {/* FOLLOW-UP DATE */}
+                    <TableCell className="text-sm font-medium text-gray-700">
+                      {lead.follow_up_date ? new Date(lead.follow_up_date).toLocaleDateString("en-IN", {
+                        day: "numeric", month: "short", year: "numeric"
+                      }) : "—"}
+                    </TableCell>
+
                     {/* REMARK */}
                     <TableCell className="text-sm text-gray-600 max-w-[250px] truncate" title={lead.remark || ""}>
                       {lead.remark || <span className="text-gray-300 italic">No remark</span>}
@@ -700,6 +839,14 @@ export function LeadsManagement() {
                     {/* ACTIONS */}
                     <TableCell className="text-center">
                       <div className="flex justify-center items-center gap-1">
+                        <Button 
+                          variant="ghost" 
+                          size="icon" 
+                          className="h-8 w-8 text-indigo-600 hover:text-indigo-800 hover:bg-indigo-50"
+                          onClick={() => handleOpenHistory(lead)}
+                        >
+                          <History className="w-4 h-4" />
+                        </Button>
                         <Button 
                           variant="ghost" 
                           size="icon" 
@@ -724,7 +871,7 @@ export function LeadsManagement() {
 
               {filteredLeads.length === 0 && (
                 <TableRow>
-                  <TableCell colSpan={10} className="text-center py-12 text-gray-400">
+                  <TableCell colSpan={13} className="text-center py-12 text-gray-400">
                     {loading ? (
                       <div className="flex justify-center items-center gap-2">
                         <RefreshCw className="animate-spin w-4 h-4" /> Fetching leads...
@@ -862,14 +1009,27 @@ export function LeadsManagement() {
               </Select>
             </div>
 
-            <div>
-              <Label htmlFor="remark" className="text-gray-700">Remark / Notes</Label>
-              <Input
-                id="remark"
-                placeholder="Details of followup discussion..."
-                value={leadForm.remark || ""}
-                onChange={e => setLeadForm(prev => ({ ...prev, remark: e.target.value }))}
-              />
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <Label htmlFor="remark" className="text-gray-700">Remark / Notes</Label>
+                <Input
+                  id="remark"
+                  placeholder="Details of followup discussion..."
+                  value={leadForm.remark || ""}
+                  onChange={e => setLeadForm(prev => ({ ...prev, remark: e.target.value }))}
+                />
+              </div>
+              <div>
+                <Label htmlFor="follow_up_date" className="flex items-center gap-1 text-gray-700">
+                  <Calendar className="w-3.5 h-3.5" /> Follow-Up Date
+                </Label>
+                <Input
+                  id="follow_up_date"
+                  type="date"
+                  value={leadForm.follow_up_date || ""}
+                  onChange={e => setLeadForm(prev => ({ ...prev, follow_up_date: e.target.value }))}
+                />
+              </div>
             </div>
           </div>
           <DialogFooter className="gap-2">
@@ -880,6 +1040,36 @@ export function LeadsManagement() {
               Save Changes
             </Button>
           </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Lead History Dialog */}
+      <Dialog open={showHistoryDialog} onOpenChange={setShowHistoryDialog}>
+        <DialogContent className="max-w-lg bg-white">
+          <DialogHeader>
+            <DialogTitle className="text-[#2e5a44] font-bold">
+              Lead History - {selectedLeadForHistory?.client_name}
+            </DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4 py-4 max-h-[60vh] overflow-y-auto pr-2">
+            {selectedLeadHistory.length > 0 ? (
+              selectedLeadHistory.map((history) => (
+                <div key={history.id} className="bg-gray-50 p-3 rounded-lg border border-gray-100">
+                  <div className="flex justify-between items-start mb-1">
+                    <span className="font-semibold text-sm text-[#2e5a44]">{history.action_type}</span>
+                    <span className="text-xs text-gray-400">
+                      {new Date(history.created_at).toLocaleString("en-IN", {
+                        day: "numeric", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit"
+                      })}
+                    </span>
+                  </div>
+                  <p className="text-sm text-gray-600 mt-1">{history.description}</p>
+                </div>
+              ))
+            ) : (
+              <p className="text-center text-gray-500 py-8">No history available for this lead.</p>
+            )}
+          </div>
         </DialogContent>
       </Dialog>
     </div>

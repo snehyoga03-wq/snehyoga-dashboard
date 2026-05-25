@@ -33,6 +33,7 @@ import { UserDetail } from "./crm/UserDetail";
 import { RetentionDashboard } from "./crm/RetentionDashboard";
 import { WhatsAppChat } from "./crm/WhatsAppChat";
 import { LeadsManagement } from "./crm/LeadsManagement";
+import WeeklyReportDashboard from "./crm/WeeklyReportDashboard";
 import { formatPhone } from "@/lib/utils";
 
 // Helper functions for formatting records
@@ -411,8 +412,12 @@ const CRM = () => {
 
   useEffect(() => {
     const isAuth = sessionStorage.getItem("crm_admin_auth") === "true";
+    const role = sessionStorage.getItem("crm_user_role");
     if (isAuth) {
       setIsAuthenticated(true);
+      if (role === "staff") {
+        setCurrentSection('users');
+      }
       fetchUsers();
       fetchFollowupReports();
       fetchChatConversations();
@@ -576,12 +581,23 @@ const CRM = () => {
     e.preventDefault();
     if (username === "YOG" && password === "ABC@yog123") {
       sessionStorage.setItem("crm_admin_auth", "true");
+      sessionStorage.setItem("crm_user_role", "admin");
       setIsAuthenticated(true);
       fetchUsers();
       fetchFollowupReports();
       fetchChatConversations();
       fetchSessionLink();
       toast({ title: "Login Successful", description: "Welcome to CRM Dashboard" });
+    } else if (["Mayuri K", "Ragini K", "Shreya K"].includes(username) && password === "ABC@yoga123") {
+      sessionStorage.setItem("crm_admin_auth", "true");
+      sessionStorage.setItem("crm_user_role", "staff");
+      setIsAuthenticated(true);
+      setCurrentSection('users');
+      fetchUsers();
+      fetchFollowupReports();
+      fetchChatConversations();
+      fetchSessionLink();
+      toast({ title: "Login Successful", description: `Welcome ${username}` });
     } else {
       toast({ title: "Invalid Credentials", description: "Please try again", variant: "destructive" });
     }
@@ -1154,6 +1170,8 @@ const CRM = () => {
                     </CardContent>
                   </Card>
                 </div>
+
+                <WeeklyReportDashboard />
 
                 <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
                   {/* Left Column: Alerts & Recent Activity */}

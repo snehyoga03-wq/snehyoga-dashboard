@@ -169,6 +169,8 @@ export type Database = {
           lead_existing_plan: string | null
           lead_status: string
           remark: string | null
+          assigned_to: string | null
+          follow_up_date: string | null
           created_at: string | null
         }
         Insert: {
@@ -182,6 +184,8 @@ export type Database = {
           lead_existing_plan?: string | null
           lead_status?: string
           remark?: string | null
+          assigned_to?: string | null
+          follow_up_date?: string | null
           created_at?: string | null
         }
         Update: {
@@ -195,9 +199,46 @@ export type Database = {
           lead_existing_plan?: string | null
           lead_status?: string
           remark?: string | null
+          assigned_to?: string | null
+          follow_up_date?: string | null
           created_at?: string | null
         }
         Relationships: []
+      }
+      lead_history: {
+        Row: {
+          id: string
+          lead_id: string | null
+          action_type: string
+          description: string
+          created_at: string | null
+          created_by: string | null
+        }
+        Insert: {
+          id?: string
+          lead_id?: string | null
+          action_type: string
+          description: string
+          created_at?: string | null
+          created_by?: string | null
+        }
+        Update: {
+          id?: string
+          lead_id?: string | null
+          action_type?: string
+          description?: string
+          created_at?: string | null
+          created_by?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "lead_history_lead_id_fkey"
+            columns: ["lead_id"]
+            isOneToOne: false
+            referencedRelation: "leads"
+            referencedColumns: ["id"]
+          }
+        ]
       }
       gift_boxes: {
         Row: {

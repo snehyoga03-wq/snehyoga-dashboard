@@ -80,7 +80,10 @@ export function Sidebar({
 
                 {/* Menu Items */}
                 <div className="flex-1 py-4 overflow-y-auto space-y-1 px-2">
-                    {menuItems.map((item) => (
+                    {(sessionStorage.getItem("crm_user_role") === "staff" 
+                        ? menuItems.filter(item => ['users', 'chats', 'followup', 'session-links'].includes(item.id)) 
+                        : menuItems
+                    ).map((item) => (
                         <button
                             key={item.id}
                             onClick={() => setCurrentSection(item.id)}
