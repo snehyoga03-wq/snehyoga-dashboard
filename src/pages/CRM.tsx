@@ -35,6 +35,7 @@ import { WhatsAppChat } from "./crm/WhatsAppChat";
 import { LeadsManagement } from "./crm/LeadsManagement";
 import WeeklyReportDashboard from "./crm/WeeklyReportDashboard";
 import { formatPhone } from "@/lib/utils";
+import WhatsAppFlowManager from "./crm/flow-builder/WhatsAppFlowManager";
 
 // Helper functions for formatting records
 const formatPhoneNumber = (phone: string) => {
@@ -128,7 +129,7 @@ interface ChatMessage {
   attachment_type?: string;
 }
 
-type Section = 'users' | 'session-links' | 'analytics' | 'followup' | 'chats' | 'dashboard' | 'message-queue' | 'sap-portal' | 'retention';
+type Section = 'users' | 'session-links' | 'analytics' | 'followup' | 'chats' | 'dashboard' | 'message-queue' | 'sap-portal' | 'retention' | 'whatsapp-flow';
 
 const CRM = () => {
   const navigate = useNavigate();
@@ -322,7 +323,7 @@ const CRM = () => {
   // Constants
   const BATCH_TIMINGS = ["5:00 AM", "6:00 AM", "8:00 AM", "5:00 PM", "6:00 PM", "7:00 PM"];
 
-  type Section = 'users' | 'session-links' | 'analytics' | 'followup' | 'chats' | 'dashboard' | 'reminders' | 'message-queue' | 'sap-portal' | 'retention';
+  type Section = 'users' | 'session-links' | 'analytics' | 'followup' | 'chats' | 'dashboard' | 'reminders' | 'message-queue' | 'sap-portal' | 'retention' | 'whatsapp-flow';
 
   // Message Queue (Pub/Sub)
   const [messageBatches, setMessageBatches] = useState<any[]>([]);
@@ -1616,6 +1617,11 @@ const CRM = () => {
                   }
                 }}
               />
+            )}
+
+            {/* WHATSAPP FLOW BUILDER SECTION */}
+            {currentSection === 'whatsapp-flow' && !selectedUser && (
+              <WhatsAppFlowManager />
             )}
 
             {/* OTHER SECTIONS */}
