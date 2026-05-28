@@ -6,8 +6,8 @@ import { Input } from "@/components/ui/input";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { useToast } from "@/hooks/use-toast";
 import { motion } from "framer-motion";
-import { 
-  ClipboardList, Search, RefreshCw, Plus, Download, Upload, 
+import {
+  ClipboardList, Search, RefreshCw, Plus, Download, Upload,
   Trash2, Edit, Save, X, Calendar, User, Phone, CheckCircle, History
 } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
@@ -69,20 +69,36 @@ interface Lead {
   created_at: string | null;
 }
 
+const EditableCell = ({ value, onUpdate, type = "text", placeholder = "", className = "" }: { value: string | null, onUpdate: (val: string) => void, type?: string, placeholder?: string, className?: string }) => {
+  const [val, setVal] = useState(value || "");
+  useEffect(() => { setVal(value || ""); }, [value]);
+  const handleBlur = () => { if (val !== (value || "")) onUpdate(val); };
+  return (
+    <Input
+      type={type}
+      value={val}
+      onChange={(e) => setVal(e.target.value)}
+      onBlur={handleBlur}
+      placeholder={placeholder}
+      className={`h-8 text-sm bg-transparent border-transparent hover:border-gray-200 focus:bg-white focus:border-[#2e5a44] focus:ring-1 focus:ring-[#2e5a44] w-full px-2 py-1 shadow-none ${className}`}
+    />
+  );
+};
+
 export function LeadsManagement() {
   const { toast } = useToast();
   const fileInputRef = useRef<HTMLInputElement>(null);
-  
+
   const [leads, setLeads] = useState<Lead[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState("all");
   const [typeFilter, setTypeFilter] = useState("all");
-  
+
   // Dialog States
   const [isOpenAddEditDialog, setIsOpenAddEditDialog] = useState(false);
   const [editingLead, setEditingLead] = useState<Lead | null>(null);
-  
+
   // History States
   const [showHistoryDialog, setShowHistoryDialog] = useState(false);
   const [selectedLeadHistory, setSelectedLeadHistory] = useState<any[]>([]);
@@ -246,7 +262,7 @@ export function LeadsManagement() {
 
         if (error) throw error;
         if (data && data.length > 0) {
-           await logHistory(data[0].id, "Created", `Lead created and auto-assigned to ${assignedTo}`);
+          await logHistory(data[0].id, "Created", `Lead created and auto-assigned to ${assignedTo}`);
         }
         toast({ title: "Success", description: "Lead added successfully" });
       }
@@ -346,6 +362,26 @@ export function LeadsManagement() {
     }
   };
 
+  const handleUpdateField = async (leadId: string, field: string, value: any) => {
+    try {
+      const { error } = await supabase
+        .from("leads")
+        .update({ [field]: value })
+        .eq("id", leadId);
+
+      if (error) throw error;
+      await logHistory(leadId, "Updated", `${field} updated manually.`);
+      setLeads(prev => prev.map(lead => lead.id === leadId ? { ...lead, [field]: value } : lead));
+    } catch (err: any) {
+      console.error(`Error updating ${field}:`, err);
+      toast({
+        title: `Error updating ${field}`,
+        description: err.message,
+        variant: "destructive"
+      });
+    }
+  };
+
   const handleDeleteLead = async (leadId: string) => {
     if (!confirm("Are you sure you want to delete this lead?")) return;
     try {
@@ -389,7 +425,7 @@ export function LeadsManagement() {
     const worksheet = XLSX.utils.json_to_sheet(formattedData);
     const workbook = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(workbook, worksheet, "Leads");
-    
+
     // Auto-fit column widths
     const maxColsWidth = formattedData.reduce((acc, row) => {
       Object.keys(row).forEach((key, idx) => {
@@ -412,7 +448,7 @@ export function LeadsManagement() {
 
   const parseDate = (val: any): string | null => {
     if (!val) return null;
-    
+
     // Check if Excel serial date number
     if (typeof val === "number") {
       try {
@@ -448,7 +484,7 @@ export function LeadsManagement() {
       if (!isNaN(date.getTime())) {
         return date.toISOString().split("T")[0];
       }
-    } catch (_) {}
+    } catch (_) { }
 
     return null;
   };
@@ -582,7 +618,7 @@ export function LeadsManagement() {
       }
     };
     reader.readAsBinaryString(file);
-    
+
     // Reset file input value to allow uploading the same file again
     if (fileInputRef.current) {
       fileInputRef.current.value = "";
@@ -590,12 +626,12 @@ export function LeadsManagement() {
   };
 
   const filteredLeads = leads.filter(lead => {
-    const matchesSearch = !searchQuery || 
+    const matchesSearch = !searchQuery ||
       (lead.client_name || "").toLowerCase().includes(searchQuery.toLowerCase()) ||
       (lead.contact || "").includes(searchQuery) ||
       (lead.remark || "").toLowerCase().includes(searchQuery.toLowerCase()) ||
       (lead.sr_no || "").toLowerCase().includes(searchQuery.toLowerCase());
-      
+
     const matchesStatus = statusFilter === "all" || lead.lead_status === statusFilter;
     const matchesType = typeFilter === "all" || lead.lead_type === typeFilter;
 
@@ -608,7 +644,7 @@ export function LeadsManagement() {
     const bIsToday = b.follow_up_date === todayStr;
     if (aIsToday && !bIsToday) return -1;
     if (!aIsToday && bIsToday) return 1;
-    return 0; 
+    return 0;
   });
 
   return (
@@ -657,7 +693,7 @@ export function LeadsManagement() {
                 onChange={e => setSearchQuery(e.target.value)}
               />
             </div>
-            
+
             <Select value={typeFilter} onValueChange={setTypeFilter}>
               <SelectTrigger className="bg-white">
                 <SelectValue placeholder="All Lead Types" />
@@ -686,75 +722,54 @@ export function LeadsManagement() {
       </Card>
 
       {/* Leads Table Card */}
-      <Card className="border-none shadow-md overflow-hidden bg-white">
-        <div className="overflow-x-auto">
-          <Table>
-            <TableHeader className="bg-[#2e5a44] border-b border-[#2e5a44]">
-              <TableRow className="hover:bg-[#2e5a44]">
-                <TableHead className="text-white font-semibold">Added Date</TableHead>
-                <TableHead className="text-white font-semibold">Admission Date</TableHead>
-                <TableHead className="text-white font-semibold">Calling Date</TableHead>
+      <Card className="border-none shadow-md overflow-hidden bg-white w-full max-w-full min-w-0">
+        <div className="w-full overflow-x-auto max-w-full min-w-0 rounded-b-lg">
+          <Table className="w-full min-w-max sm:min-w-[1600px] relative">
+            <TableHeader className="bg-[#2e5a44] shadow-md">
+              <TableRow className="hover:bg-[#2e5a44] border-none">
                 <TableHead className="text-white font-semibold w-16">SR NO</TableHead>
-                <TableHead className="text-white font-semibold min-w-[150px]">CLIENT NAME</TableHead>
-                <TableHead className="text-white font-semibold">CONTACT</TableHead>
-                <TableHead className="text-white font-semibold min-w-[180px]">LEAD TYPE</TableHead>
+                <TableHead className="text-white font-semibold min-w-[160px]">CLIENT NAME</TableHead>
+                <TableHead className="text-white font-semibold min-w-[140px]">CONTACT</TableHead>
+                <TableHead className="text-white font-semibold min-w-[160px]">LEAD TYPE</TableHead>
                 <TableHead className="text-white font-semibold min-w-[180px]">LEAD EXISTING PLAN</TableHead>
                 <TableHead className="text-white font-semibold min-w-[140px]">LEAD STATUS</TableHead>
                 <TableHead className="text-white font-semibold min-w-[140px]">ASSIGNED TO</TableHead>
                 <TableHead className="text-white font-semibold min-w-[140px]">FOLLOW-UP DATE</TableHead>
                 <TableHead className="text-white font-semibold min-w-[200px]">REMARK</TableHead>
+                <TableHead className="text-white font-semibold min-w-[120px]">Added Date</TableHead>
+                <TableHead className="text-white font-semibold min-w-[140px]">Admission Date</TableHead>
+                <TableHead className="text-white font-semibold min-w-[140px]">Calling Date</TableHead>
                 <TableHead className="text-white font-semibold text-center w-24">ACTIONS</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
-              {sortedFilteredLeads.map((lead) => {
+              {sortedFilteredLeads.map((lead, index) => {
                 const curStatus = LEAD_STATUSES.find(s => s.id === lead.lead_status) || LEAD_STATUSES[0];
-                
+
                 return (
                   <TableRow key={lead.id} className="hover:bg-gray-50 border-b border-gray-100">
-                    {/* Added Date */}
-                    <TableCell className="font-medium text-gray-700 text-sm">
-                      {lead.created_at ? new Date(lead.created_at).toLocaleDateString("en-IN", {
-                        day: "numeric",
-                        month: "short",
-                        year: "numeric"
-                      }) : "—"}
-                    </TableCell>
-
-                    {/* Admission Date */}
-                    <TableCell className="font-medium text-gray-700 text-sm">
-                      {lead.admission_date ? new Date(lead.admission_date).toLocaleDateString("en-IN", {
-                        day: "numeric",
-                        month: "short",
-                        year: "numeric"
-                      }) : "—"}
-                    </TableCell>
-
-                    {/* Calling Date */}
-                    <TableCell className="font-medium text-gray-700 text-sm">
-                      {lead.calling_date ? new Date(lead.calling_date).toLocaleDateString("en-IN", {
-                        day: "numeric",
-                        month: "short",
-                        year: "numeric"
-                      }) : "—"}
-                    </TableCell>
-
                     {/* SR NO */}
-                    <TableCell className="text-sm font-medium text-gray-500">{lead.sr_no || "—"}</TableCell>
+                    <TableCell className="p-2 text-center text-sm font-medium text-gray-500">
+                      {index + 1}
+                    </TableCell>
 
                     {/* CLIENT NAME */}
-                    <TableCell className="font-semibold text-gray-800 text-sm">{lead.client_name}</TableCell>
+                    <TableCell className="p-1">
+                      <EditableCell value={lead.client_name} onUpdate={(val) => handleUpdateField(lead.id, 'client_name', val)} className="font-semibold text-gray-800" />
+                    </TableCell>
 
                     {/* CONTACT */}
-                    <TableCell className="text-sm text-gray-600 font-medium">{lead.contact}</TableCell>
+                    <TableCell className="p-1">
+                      <EditableCell value={lead.contact} onUpdate={(val) => handleUpdateField(lead.id, 'contact', val)} />
+                    </TableCell>
 
                     {/* LEAD TYPE */}
-                    <TableCell>
+                    <TableCell className="p-1">
                       <Select
                         value={lead.lead_type || ""}
                         onValueChange={(val) => handleUpdateLeadType(lead.id, val)}
                       >
-                        <SelectTrigger className="h-8 border-none bg-gray-100 hover:bg-gray-200 text-xs rounded-full px-3 py-1 font-semibold text-gray-700 w-full focus:ring-0 focus:ring-offset-0">
+                        <SelectTrigger className="h-8 border-none bg-transparent hover:bg-gray-200 text-xs rounded-md px-3 py-1 font-semibold text-gray-700 w-full focus:ring-1 focus:ring-[#2e5a44] focus:bg-white shadow-none">
                           <SelectValue placeholder="Select type" />
                         </SelectTrigger>
                         <SelectContent>
@@ -768,12 +783,12 @@ export function LeadsManagement() {
                     </TableCell>
 
                     {/* LEAD EXISTING PLAN */}
-                    <TableCell>
+                    <TableCell className="p-1">
                       <Select
                         value={lead.lead_existing_plan || ""}
                         onValueChange={(val) => handleUpdateExistingPlan(lead.id, val)}
                       >
-                        <SelectTrigger className="h-8 border-none bg-gray-100 hover:bg-gray-200 text-xs rounded-full px-3 py-1 font-semibold text-gray-700 w-full focus:ring-0 focus:ring-offset-0">
+                        <SelectTrigger className="h-8 border-none bg-transparent hover:bg-gray-200 text-xs rounded-md px-3 py-1 font-semibold text-gray-700 w-full focus:ring-1 focus:ring-[#2e5a44] focus:bg-white shadow-none">
                           <SelectValue placeholder="Select plan" />
                         </SelectTrigger>
                         <SelectContent>
@@ -787,12 +802,12 @@ export function LeadsManagement() {
                     </TableCell>
 
                     {/* LEAD STATUS */}
-                    <TableCell>
+                    <TableCell className="p-1">
                       <Select
                         value={lead.lead_status}
                         onValueChange={(val) => handleUpdateStatus(lead.id, val)}
                       >
-                        <SelectTrigger className={`h-8 border-none text-xs rounded-full px-3 py-1 font-bold text-center w-full focus:ring-0 focus:ring-offset-0 ${curStatus.bg} ${curStatus.text}`}>
+                        <SelectTrigger className={`h-8 border-none text-xs rounded-full px-3 py-1 font-bold text-center w-full focus:ring-1 focus:ring-offset-1 focus:ring-[#2e5a44] shadow-none ${curStatus.bg} ${curStatus.text}`}>
                           <SelectValue />
                         </SelectTrigger>
                         <SelectContent>
@@ -806,12 +821,12 @@ export function LeadsManagement() {
                     </TableCell>
 
                     {/* ASSIGNED TO */}
-                    <TableCell>
+                    <TableCell className="p-1">
                       <Select
                         value={lead.assigned_to || ""}
                         onValueChange={(val) => handleUpdateAssignedTo(lead.id, val)}
                       >
-                        <SelectTrigger className="h-8 border-none bg-gray-100 hover:bg-gray-200 text-xs rounded-full px-3 py-1 font-semibold text-gray-700 w-full focus:ring-0 focus:ring-offset-0">
+                        <SelectTrigger className="h-8 border-none bg-transparent hover:bg-gray-200 text-xs rounded-md px-3 py-1 font-semibold text-gray-700 w-full focus:ring-1 focus:ring-[#2e5a44] focus:bg-white shadow-none">
                           <SelectValue placeholder="Select user" />
                         </SelectTrigger>
                         <SelectContent>
@@ -825,43 +840,52 @@ export function LeadsManagement() {
                     </TableCell>
 
                     {/* FOLLOW-UP DATE */}
-                    <TableCell className="text-sm font-medium text-gray-700">
-                      {lead.follow_up_date ? new Date(lead.follow_up_date).toLocaleDateString("en-IN", {
-                        day: "numeric", month: "short", year: "numeric"
-                      }) : "—"}
+                    <TableCell className="p-1">
+                      <EditableCell type="date" value={lead.follow_up_date} onUpdate={(val) => handleUpdateField(lead.id, 'follow_up_date', val)} />
                     </TableCell>
 
                     {/* REMARK */}
-                    <TableCell className="text-sm text-gray-600 max-w-[250px] truncate" title={lead.remark || ""}>
-                      {lead.remark || <span className="text-gray-300 italic">No remark</span>}
+                    <TableCell className="p-1">
+                      <EditableCell value={lead.remark} onUpdate={(val) => handleUpdateField(lead.id, 'remark', val)} placeholder="No remark" />
+                    </TableCell>
+
+                    {/* Added Date (created_at - uneditable) */}
+                    <TableCell className="p-2 font-medium text-gray-700 text-sm">
+                      {lead.created_at ? new Date(lead.created_at).toLocaleDateString("en-IN", {
+                        day: "numeric",
+                        month: "short",
+                        year: "numeric"
+                      }) : "—"}
+                    </TableCell>
+
+                    {/* Admission Date */}
+                    <TableCell className="p-1">
+                      <EditableCell type="date" value={lead.admission_date} onUpdate={(val) => handleUpdateField(lead.id, 'admission_date', val)} />
+                    </TableCell>
+
+                    {/* Calling Date */}
+                    <TableCell className="p-1">
+                      <EditableCell type="date" value={lead.calling_date} onUpdate={(val) => handleUpdateField(lead.id, 'calling_date', val)} />
                     </TableCell>
 
                     {/* ACTIONS */}
-                    <TableCell className="text-center">
+                    <TableCell className="text-center p-2">
                       <div className="flex justify-center items-center gap-1">
-                        <Button 
-                          variant="ghost" 
-                          size="icon" 
+                        <Button
+                          variant="ghost"
+                          size="icon"
                           className="h-8 w-8 text-indigo-600 hover:text-indigo-800 hover:bg-indigo-50"
                           onClick={() => handleOpenHistory(lead)}
                         >
                           <History className="w-4 h-4" />
                         </Button>
-                        <Button 
-                          variant="ghost" 
-                          size="icon" 
+                        <Button
+                          variant="ghost"
+                          size="icon"
                           className="h-8 w-8 text-blue-600 hover:text-blue-800 hover:bg-blue-50"
                           onClick={() => handleOpenEditDialog(lead)}
                         >
                           <Edit className="w-4 h-4" />
-                        </Button>
-                        <Button 
-                          variant="ghost" 
-                          size="icon" 
-                          className="h-8 w-8 text-red-600 hover:text-red-800 hover:bg-red-50"
-                          onClick={() => handleDeleteLead(lead.id)}
-                        >
-                          <Trash2 className="w-4 h-4" />
                         </Button>
                       </div>
                     </TableCell>
@@ -921,27 +945,16 @@ export function LeadsManagement() {
               </div>
             </div>
 
-            <div className="grid grid-cols-3 gap-3">
-              <div className="col-span-1">
-                <Label htmlFor="sr_no" className="text-gray-700">SR NO</Label>
-                <Input
-                  id="sr_no"
-                  placeholder="e.g. 1"
-                  value={leadForm.sr_no || ""}
-                  onChange={e => setLeadForm(prev => ({ ...prev, sr_no: e.target.value }))}
-                />
-              </div>
-              <div className="col-span-2">
-                <Label htmlFor="client_name" className="flex items-center gap-1 text-gray-700">
-                  <User className="w-3.5 h-3.5" /> Client Name *
-                </Label>
-                <Input
-                  id="client_name"
-                  placeholder="John Doe"
-                  value={leadForm.client_name || ""}
-                  onChange={e => setLeadForm(prev => ({ ...prev, client_name: e.target.value }))}
-                />
-              </div>
+            <div>
+              <Label htmlFor="client_name" className="flex items-center gap-1 text-gray-700">
+                <User className="w-3.5 h-3.5" /> Client Name *
+              </Label>
+              <Input
+                id="client_name"
+                placeholder="John Doe"
+                value={leadForm.client_name || ""}
+                onChange={e => setLeadForm(prev => ({ ...prev, client_name: e.target.value }))}
+              />
             </div>
 
             <div>

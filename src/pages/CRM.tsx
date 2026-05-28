@@ -185,7 +185,7 @@ const CRM = () => {
   const [premiumSessionLink, setPremiumSessionLink] = useState("");
   const [newPremiumLink, setNewPremiumLink] = useState("");
   const [editingLink, setEditingLink] = useState(false);
-  
+
   // Weekly Links state
   const [activeWeek, setActiveWeek] = useState(1);
   const [newActiveWeek, setNewActiveWeek] = useState(1);
@@ -201,8 +201,8 @@ const CRM = () => {
   type BatchLinksMap = Record<number, Record<string, Record<string, string>>>;
   const [batchLinks, setBatchLinks] = useState<BatchLinksMap>({ 1: {}, 2: {} });
   const [editBatchLinks, setEditBatchLinks] = useState<BatchLinksMap>({ 1: {}, 2: {} });
-  const [batchEditWeek, setBatchEditWeek] = useState<1|2>(1);
-  const [batchEditDay, setBatchEditDay] = useState<string>(() => ['sun','mon','tue','wed','thu','fri','sat'][new Date().getDay()]);
+  const [batchEditWeek, setBatchEditWeek] = useState<1 | 2>(1);
+  const [batchEditDay, setBatchEditDay] = useState<string>(() => ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'][new Date().getDay()]);
   const [isSavingBatch, setIsSavingBatch] = useState(false);
 
   // Smart batch slot detection — which slot is currently active?
@@ -211,12 +211,12 @@ const CRM = () => {
     const cur = now.getHours() * 60 + now.getMinutes();
     // Each slot activates 20 min before its time
     const slots = [
-      { slot: '5am',  from: 5*60 - 20 },
-      { slot: '6am',  from: 6*60 - 20 },
-      { slot: '8am',  from: 8*60 - 20 },
-      { slot: '5pm',  from: 17*60 - 20 },
-      { slot: '6pm',  from: 18*60 - 20 },
-      { slot: '7pm',  from: 19*60 - 20 },
+      { slot: '5am', from: 5 * 60 - 20 },
+      { slot: '6am', from: 6 * 60 - 20 },
+      { slot: '8am', from: 8 * 60 - 20 },
+      { slot: '5pm', from: 17 * 60 - 20 },
+      { slot: '6pm', from: 18 * 60 - 20 },
+      { slot: '7pm', from: 19 * 60 - 20 },
     ];
     let active = '7pm'; // default to last
     for (let i = slots.length - 1; i >= 0; i--) {
@@ -230,12 +230,12 @@ const CRM = () => {
     const now = new Date();
     const cur = now.getHours() * 60 + now.getMinutes();
     const slots = [
-      { slot: '5am',  from: 5*60 - 20 },
-      { slot: '6am',  from: 6*60 - 20 },
-      { slot: '8am',  from: 8*60 - 20 },
-      { slot: '5pm',  from: 17*60 - 20 },
-      { slot: '6pm',  from: 18*60 - 20 },
-      { slot: '7pm',  from: 19*60 - 20 },
+      { slot: '5am', from: 5 * 60 - 20 },
+      { slot: '6am', from: 6 * 60 - 20 },
+      { slot: '8am', from: 8 * 60 - 20 },
+      { slot: '5pm', from: 17 * 60 - 20 },
+      { slot: '6pm', from: 18 * 60 - 20 },
+      { slot: '7pm', from: 19 * 60 - 20 },
     ];
     for (const s of slots) {
       if (s.from > cur) return { slot: s.slot, minutesUntil: s.from - cur };
@@ -309,14 +309,14 @@ const CRM = () => {
   const [pabblyToken, setPabblyToken] = useState("");
   const [waPhoneNumberId, setWaPhoneNumberId] = useState("808910018982018");
   const [waLanguageCode, setWaLanguageCode] = useState("en");
-  const [fetchedTemplates, setFetchedTemplates] = useState<{id: string, name: string, category: string, status: string, body: string}[]>([]);
+  const [fetchedTemplates, setFetchedTemplates] = useState<{ id: string, name: string, category: string, status: string, body: string }[]>([]);
   const [isFetchingTemplates, setIsFetchingTemplates] = useState(false);
   const [metaBalanceInfo, setMetaBalanceInfo] = useState<any>(null);
   const [isFetchingBalance, setIsFetchingBalance] = useState(false);
-  
+
   // Target Audience settings
   const [targetAudience, setTargetAudience] = useState("batch"); // batch, all, active, inactive, custom
-  const [customUsers, setCustomUsers] = useState<{name: string, phone: string}[]>([]);
+  const [customUsers, setCustomUsers] = useState<{ name: string, phone: string }[]>([]);
   const [customUserName, setCustomUserName] = useState("");
   const [customUserPhone, setCustomUserPhone] = useState("");
 
@@ -639,7 +639,7 @@ const CRM = () => {
     setIsAddingUser(true);
     try {
       const normalizedPhone = formatPhone(newUserNumber);
-      
+
       const cleanName = newUserName.toLowerCase().replace(/\s+/g, '');
       const randomNumber = Math.floor(Math.random() * 100).toString().padStart(2, '0');
       const referralCode = `sneh${cleanName}${randomNumber}`;
@@ -667,7 +667,7 @@ const CRM = () => {
         referral_link: referralLink
       });
       if (error) throw error;
-      
+
       toast({ title: "Success", description: "User added successfully" });
       setShowAddUserDialog(false);
       setNewUserName("");
@@ -722,7 +722,7 @@ const CRM = () => {
       const wsname = wb.SheetNames[0];
       const ws = wb.Sheets[wsname];
       const data = utils.sheet_to_json(ws);
-      
+
       const formattedData = data.map((row: any) => ({
         ...row,
         mobile_number: formatPhone(String(row.mobile_number || row.phone || '')),
@@ -835,7 +835,7 @@ const CRM = () => {
 
       if (data) {
         let parsedLinks: any = {};
-        try { if (data.session_link && data.session_link.startsWith('{')) parsedLinks = JSON.parse(data.session_link); } catch (e) {}
+        try { if (data.session_link && data.session_link.startsWith('{')) parsedLinks = JSON.parse(data.session_link); } catch (e) { }
         setActiveWeek(parsedLinks.active_week || 1);
         setNewActiveWeek(parsedLinks.active_week || 1);
         setWeeklyLinks(parsedLinks || {});
@@ -991,15 +991,15 @@ const CRM = () => {
   // --- Filtered Data ---
   const filteredUsers = users.filter((u) => {
     const matchesSearch = u.name.toLowerCase().includes(searchTerm.toLowerCase()) || u.mobile_number.includes(searchTerm);
-    
+
     // Expiry dropdown filter
     const daysLeft = u.days_left || 0;
     let matchesDaysFilter = true;
-    if (expiryFilter === 'expiring7')    matchesDaysFilter = daysLeft > 0 && daysLeft <= 7;
-    if (expiryFilter === 'expiring14')   matchesDaysFilter = daysLeft > 0 && daysLeft <= 14;
-    if (expiryFilter === 'expiring30')   matchesDaysFilter = daysLeft > 0 && daysLeft <= 30;
+    if (expiryFilter === 'expiring7') matchesDaysFilter = daysLeft > 0 && daysLeft <= 7;
+    if (expiryFilter === 'expiring14') matchesDaysFilter = daysLeft > 0 && daysLeft <= 14;
+    if (expiryFilter === 'expiring30') matchesDaysFilter = daysLeft > 0 && daysLeft <= 30;
     if (expiryFilter === 'all_expiring') matchesDaysFilter = daysLeft > 0;
-    if (expiryFilter === 'expired')      matchesDaysFilter = daysLeft <= 0;
+    if (expiryFilter === 'expired') matchesDaysFilter = daysLeft <= 0;
 
     const normalizePlanStr = (p: string) => (p || 'Free plan').toLowerCase().replace(/ plans?/g, '').replace(/months?/g, 'month').trim();
     const matchesPlan = filterPlan === "all" ? true : normalizePlanStr(getDisplayPlan(u)) === normalizePlanStr(filterPlan);
@@ -1412,11 +1412,10 @@ const CRM = () => {
                       {/* Expiry Status Dropdown */}
                       <div className="w-full md:w-52 flex-shrink-0">
                         <select
-                          className={`flex h-10 w-full rounded-md border px-3 py-2 text-sm focus-visible:outline-none focus:ring-1 focus:ring-amber-400 font-medium ${
-                            expiryFilter !== 'all'
+                          className={`flex h-10 w-full rounded-md border px-3 py-2 text-sm focus-visible:outline-none focus:ring-1 focus:ring-amber-400 font-medium ${expiryFilter !== 'all'
                               ? 'border-amber-300 bg-amber-50 text-amber-800'
                               : 'border-gray-200 bg-white text-gray-700'
-                          }`}
+                            }`}
                           value={expiryFilter}
                           onChange={(e) => setExpiryFilter(e.target.value)}
                         >
@@ -1679,7 +1678,7 @@ const CRM = () => {
 
                     <div className="flex gap-1 flex-wrap border-b border-gray-100">
                       {DAYS.map(day => {
-                        const todayStr = ['sun','mon','tue','wed','thu','fri','sat'][new Date().getDay()];
+                        const todayStr = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'][new Date().getDay()];
                         const isToday = day === todayStr;
                         const isSelected = batchEditDay === day;
                         const hasLinks = BATCH_SLOTS.some(s => batchLinks[batchEditWeek]?.[day]?.[s]);
@@ -1695,7 +1694,7 @@ const CRM = () => {
 
                     <div className="space-y-3">
                       {(() => {
-                        const todayStr = ['sun','mon','tue','wed','thu','fri','sat'][new Date().getDay()];
+                        const todayStr = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'][new Date().getDay()];
                         const isToday = batchEditDay === todayStr;
                         const activeslot = getActiveBatchSlot();
                         const nextInfo = getNextBatchSlot();
@@ -1790,16 +1789,15 @@ const CRM = () => {
                                   <span className="font-bold text-gray-900">{slot}</span>
                                   {!isEnabled && <span className="text-xs bg-gray-200 text-gray-600 px-1.5 py-0.5 rounded-full">Disabled</span>}
                                   {cfg && isEnabled && (
-                                    <span className={`text-xs px-1.5 py-0.5 rounded-full font-medium ${
-                                      cfg.audience === 'active' ? 'bg-green-100 text-green-700' :
-                                      cfg.audience === 'all'    ? 'bg-blue-100 text-blue-700' :
-                                      cfg.audience === 'inactive' ? 'bg-yellow-100 text-yellow-700' :
-                                      'bg-purple-100 text-purple-700'
-                                    }`}>
+                                    <span className={`text-xs px-1.5 py-0.5 rounded-full font-medium ${cfg.audience === 'active' ? 'bg-green-100 text-green-700' :
+                                        cfg.audience === 'all' ? 'bg-blue-100 text-blue-700' :
+                                          cfg.audience === 'inactive' ? 'bg-yellow-100 text-yellow-700' :
+                                            'bg-purple-100 text-purple-700'
+                                      }`}>
                                       {cfg.audience === 'active' ? '👥 Active Users' :
-                                       cfg.audience === 'all' ? '👥 All Users' :
-                                       cfg.audience === 'inactive' ? '⏸ Inactive' :
-                                       `🎯 Custom (${cfg.custom_users?.length || 0})`}
+                                        cfg.audience === 'all' ? '👥 All Users' :
+                                          cfg.audience === 'inactive' ? '⏸ Inactive' :
+                                            `🎯 Custom (${cfg.custom_users?.length || 0})`}
                                     </span>
                                   )}
                                   {cfg?.template_name && <span className="text-xs text-gray-500 font-mono">📋 {cfg.template_name}</span>}
@@ -2201,8 +2199,8 @@ const CRM = () => {
                     <div className="pt-4 border-t">
                       <label className="text-sm font-medium">Meta Balance & Limits</label>
                       <div className="flex gap-2 mt-2">
-                        <Button 
-                          variant="secondary" 
+                        <Button
+                          variant="secondary"
                           disabled={isFetchingBalance || !pabblyToken}
                           onClick={async () => {
                             setIsFetchingBalance(true);
@@ -2283,7 +2281,7 @@ const CRM = () => {
                     {fetchedTemplates.length > 0 && (
                       <div className="space-y-2 pt-2">
                         <label className="text-sm font-medium text-green-700">Select Extracted Template</label>
-                        <select 
+                        <select
                           className="flex h-10 w-full rounded-md border border-input bg-green-50 px-3 py-2 text-sm"
                           onChange={(e) => {
                             const t = fetchedTemplates.find(x => x.name === e.target.value);
@@ -2310,37 +2308,37 @@ const CRM = () => {
                       </div>
                       <div className="grid grid-cols-2 gap-4">
                         <div className="space-y-2">
-                           <label className="text-xs font-semibold uppercase text-gray-500 tracking-wider">Template ID</label>
-                           <Input placeholder="e.g. tpl_12345" value={templateId} onChange={e => setTemplateId(e.target.value)} />
+                          <label className="text-xs font-semibold uppercase text-gray-500 tracking-wider">Template ID</label>
+                          <Input placeholder="e.g. tpl_12345" value={templateId} onChange={e => setTemplateId(e.target.value)} />
                         </div>
                         <div className="space-y-2">
-                           <label className="text-xs font-semibold uppercase text-gray-500 tracking-wider">Template Name</label>
-                           <Input placeholder="e.g. daily_reminder_1" value={templateName} onChange={e => setTemplateName(e.target.value)} />
+                          <label className="text-xs font-semibold uppercase text-gray-500 tracking-wider">Template Name</label>
+                          <Input placeholder="e.g. daily_reminder_1" value={templateName} onChange={e => setTemplateName(e.target.value)} />
                         </div>
                         <div className="space-y-2">
-                           <label className="text-xs font-semibold uppercase text-gray-500 tracking-wider">Category</label>
-                           <Input placeholder="e.g. MARKETING" value={templateCategory} onChange={e => setTemplateCategory(e.target.value)} />
+                          <label className="text-xs font-semibold uppercase text-gray-500 tracking-wider">Category</label>
+                          <Input placeholder="e.g. MARKETING" value={templateCategory} onChange={e => setTemplateCategory(e.target.value)} />
                         </div>
                         <div className="space-y-2">
-                           <label className="text-xs font-semibold uppercase text-gray-500 tracking-wider">Status</label>
-                           <Input placeholder="e.g. APPROVED" value={templateStatus} onChange={e => setTemplateStatus(e.target.value)} />
+                          <label className="text-xs font-semibold uppercase text-gray-500 tracking-wider">Status</label>
+                          <Input placeholder="e.g. APPROVED" value={templateStatus} onChange={e => setTemplateStatus(e.target.value)} />
                         </div>
                       </div>
                       <div className="space-y-2">
-                         <label className="text-xs font-semibold uppercase text-gray-500 tracking-wider">Template Body</label>
-                         <textarea 
-                           className="flex min-h-[80px] w-full rounded-md border border-input bg-background px-3 py-2 text-sm placeholder:text-gray-400 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
-                           placeholder="Hello {{1}}, its time for yoga. You have {{2}} days left..."
-                           value={templateBody}
-                           onChange={e => setTemplateBody(e.target.value)}
-                         />
+                        <label className="text-xs font-semibold uppercase text-gray-500 tracking-wider">Template Body</label>
+                        <textarea
+                          className="flex min-h-[80px] w-full rounded-md border border-input bg-background px-3 py-2 text-sm placeholder:text-gray-400 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
+                          placeholder="Hello {{1}}, its time for yoga. You have {{2}} days left..."
+                          value={templateBody}
+                          onChange={e => setTemplateBody(e.target.value)}
+                        />
                       </div>
                       <div className="space-y-2">
-                         <label className="text-xs font-semibold uppercase text-gray-500 tracking-wider">Template Parameters (Comma-separated)</label>
-                         <Input placeholder="e.g. name, days_left, Morning Batch" value={templateVariables} onChange={e => setTemplateVariables(e.target.value)} />
-                         <p className="text-xs text-gray-500">
-                           Map values to placeholders <code className="bg-gray-100 px-1 rounded">{`{{1}}, {{2}}`}</code> in order. Available dynamic fields: <strong>name, mobile_number, days_left, batch_timing, slug, personal_link</strong>. Any other text will be sent exactly as typed.
-                         </p>
+                        <label className="text-xs font-semibold uppercase text-gray-500 tracking-wider">Template Parameters (Comma-separated)</label>
+                        <Input placeholder="e.g. name, days_left, Morning Batch" value={templateVariables} onChange={e => setTemplateVariables(e.target.value)} />
+                        <p className="text-xs text-gray-500">
+                          Map values to placeholders <code className="bg-gray-100 px-1 rounded">{`{{1}}, {{2}}`}</code> in order. Available dynamic fields: <strong>name, mobile_number, days_left, batch_timing, slug, personal_link</strong>. Any other text will be sent exactly as typed.
+                        </p>
                       </div>
                     </div>
                   </CardContent>
@@ -2351,7 +2349,7 @@ const CRM = () => {
                   <CardHeader><CardTitle>Manual Trigger</CardTitle></CardHeader>
                   <CardContent className="space-y-4">
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4 items-end">
-                      
+
                       <div className="space-y-2">
                         <label className="text-sm font-medium">Target Audience</label>
                         <select
@@ -2394,12 +2392,12 @@ const CRM = () => {
                             <label className="text-xs font-medium text-gray-600">Mobile Number</label>
                             <Input placeholder="Enter mobile" value={customUserPhone} onChange={e => setCustomUserPhone(e.target.value)} />
                           </div>
-                          <Button 
-                            variant="secondary" 
+                          <Button
+                            variant="secondary"
                             className="bg-white"
                             onClick={() => {
-                              if(customUserName && customUserPhone) {
-                                setCustomUsers([...customUsers, {name: customUserName, phone: customUserPhone}]);
+                              if (customUserName && customUserPhone) {
+                                setCustomUsers([...customUsers, { name: customUserName, phone: customUserPhone }]);
                                 setCustomUserName("");
                                 setCustomUserPhone("");
                               }
@@ -2408,16 +2406,16 @@ const CRM = () => {
                             Add
                           </Button>
                         </div>
-                        
+
                         {customUsers.length > 0 && (
                           <div className="bg-white rounded-md border p-2 space-y-2 max-h-40 overflow-y-auto">
                             {customUsers.map((cu, idx) => (
                               <div key={idx} className="flex justify-between items-center text-sm py-1 px-2 hover:bg-gray-50 rounded">
                                 <span>{cu.name} ({cu.phone})</span>
-                                <Button 
-                                  variant="ghost" 
-                                  size="sm" 
-                                  className="h-6 w-6 p-0 text-red-500" 
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
+                                  className="h-6 w-6 p-0 text-red-500"
                                   onClick={() => setCustomUsers(customUsers.filter((_, i) => i !== idx))}
                                 >
                                   <X className="h-4 w-4" />
@@ -2446,7 +2444,7 @@ const CRM = () => {
                           try {
                             // 1. Filter Users Based on Audience Type
                             let targetUsers: any[] = [];
-                            
+
                             if (targetAudience === 'batch') {
                               targetUsers = users.filter(u => u.batch_timing === selectedBatchTime && !u.subscription_paused);
                             } else if (targetAudience === 'all') {
@@ -2480,8 +2478,8 @@ const CRM = () => {
                             }
 
                             // 2. Prepare users array for pub/sub queue
-                            const batchLabel = targetAudience === 'batch' 
-                              ? `${selectedBatchTime} batch` 
+                            const batchLabel = targetAudience === 'batch'
+                              ? `${selectedBatchTime} batch`
                               : `Manual: ${targetAudience.toUpperCase()}`;
 
                             const queueUsers = targetUsers.map(u => ({
@@ -2501,12 +2499,12 @@ const CRM = () => {
 
                             if (rpcError) throw rpcError;
 
-                            toast({ 
-                              title: "📨 Messages Queued!", 
-                              description: `${targetUsers.length} messages published to queue. They will be delivered automatically.` 
+                            toast({
+                              title: "📨 Messages Queued!",
+                              description: `${targetUsers.length} messages published to queue. They will be delivered automatically.`
                             });
 
-                            if(targetAudience === 'custom') {
+                            if (targetAudience === 'custom') {
                               setCustomUsers([]); // clear after sending
                             }
 
@@ -2621,16 +2619,15 @@ const CRM = () => {
                                   <span className={batch.failed_count > 0 ? "text-red-600 font-medium" : "text-gray-400"}>{batch.failed_count}</span>
                                 </TableCell>
                                 <TableCell>
-                                  <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${
-                                    batch.status === 'completed' ? 'bg-green-100 text-green-800' :
-                                    batch.status === 'processing' ? 'bg-blue-100 text-blue-800' :
-                                    batch.status === 'partial_failure' ? 'bg-amber-100 text-amber-800' :
-                                    'bg-gray-100 text-gray-800'
-                                  }`}>
+                                  <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${batch.status === 'completed' ? 'bg-green-100 text-green-800' :
+                                      batch.status === 'processing' ? 'bg-blue-100 text-blue-800' :
+                                        batch.status === 'partial_failure' ? 'bg-amber-100 text-amber-800' :
+                                          'bg-gray-100 text-gray-800'
+                                    }`}>
                                     {batch.status === 'completed' ? '✅ Completed' :
-                                     batch.status === 'processing' ? '⚙️ Processing' :
-                                     batch.status === 'partial_failure' ? '⚠️ Partial Failure' :
-                                     '📋 Queued'}
+                                      batch.status === 'processing' ? '⚙️ Processing' :
+                                        batch.status === 'partial_failure' ? '⚠️ Partial Failure' :
+                                          '📋 Queued'}
                                   </span>
                                 </TableCell>
                                 <TableCell className="text-gray-500 text-sm">
@@ -2907,8 +2904,8 @@ const CRM = () => {
             <span className="text-sm text-gray-600 font-medium">{bulkPreviewUsers.length} users ready to import</span>
             <div className="flex gap-2">
               <Button variant="outline" onClick={() => setShowBulkPreviewDialog(false)}>Cancel</Button>
-              <Button 
-                onClick={handleConfirmBulkUpload} 
+              <Button
+                onClick={handleConfirmBulkUpload}
                 disabled={isUploadingBulk || bulkPreviewUsers.length === 0}
                 className="bg-blue-600 hover:bg-blue-700 text-white shadow-md"
               >
@@ -2929,10 +2926,10 @@ const CRM = () => {
             </div>
             <div className="space-y-2">
               <label className="text-sm font-medium">Mobile Number</label>
-              <Input 
-                placeholder="Enter mobile number" 
-                value={newUserNumber} 
-                onChange={e => setNewUserNumber(e.target.value.replace(/[^\d+]/g, ''))} 
+              <Input
+                placeholder="Enter mobile number"
+                value={newUserNumber}
+                onChange={e => setNewUserNumber(e.target.value.replace(/[^\d+]/g, ''))}
                 onBlur={() => setNewUserNumber(formatPhone(newUserNumber))}
                 maxLength={13}
               />
@@ -2988,12 +2985,11 @@ const CRM = () => {
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
               📨 Batch: {selectedBatchDetail?.label}
-              <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ml-2 ${
-                selectedBatchDetail?.status === 'completed' ? 'bg-green-100 text-green-800' :
-                selectedBatchDetail?.status === 'processing' ? 'bg-blue-100 text-blue-800' :
-                selectedBatchDetail?.status === 'partial_failure' ? 'bg-amber-100 text-amber-800' :
-                'bg-gray-100 text-gray-800'
-              }`}>
+              <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ml-2 ${selectedBatchDetail?.status === 'completed' ? 'bg-green-100 text-green-800' :
+                  selectedBatchDetail?.status === 'processing' ? 'bg-blue-100 text-blue-800' :
+                    selectedBatchDetail?.status === 'partial_failure' ? 'bg-amber-100 text-amber-800' :
+                      'bg-gray-100 text-gray-800'
+                }`}>
                 {selectedBatchDetail?.status}
               </span>
             </DialogTitle>
@@ -3016,13 +3012,12 @@ const CRM = () => {
                     <TableCell className="font-medium text-gray-900">{msg.phone}</TableCell>
                     <TableCell className="text-gray-500">{msg.user_name || '—'}</TableCell>
                     <TableCell>
-                      <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${
-                        msg.status === 'delivered' ? 'bg-green-100 text-green-800' :
-                        msg.status === 'pending' ? 'bg-gray-100 text-gray-800' :
-                        msg.status === 'processing' ? 'bg-blue-100 text-blue-800' :
-                        msg.status === 'failed' ? 'bg-red-100 text-red-800' :
-                        'bg-gray-200 text-gray-600'
-                      }`}>
+                      <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${msg.status === 'delivered' ? 'bg-green-100 text-green-800' :
+                          msg.status === 'pending' ? 'bg-gray-100 text-gray-800' :
+                            msg.status === 'processing' ? 'bg-blue-100 text-blue-800' :
+                              msg.status === 'failed' ? 'bg-red-100 text-red-800' :
+                                'bg-gray-200 text-gray-600'
+                        }`}>
                         {msg.status === 'delivered' ? '✅' : msg.status === 'pending' ? '⏳' : msg.status === 'processing' ? '⚙️' : msg.status === 'failed' ? '❌' : '💀'} {msg.status}
                       </span>
                     </TableCell>
