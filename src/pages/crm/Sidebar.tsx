@@ -83,7 +83,7 @@ export function Sidebar({
                 {/* Menu Items */}
                 <div className="flex-1 py-4 overflow-y-auto space-y-1 px-2">
                     {(sessionStorage.getItem("crm_user_role") === "staff" 
-                        ? menuItems.filter(item => ['users', 'chats', 'whatsapp-flow', 'followup', 'session-links'].includes(item.id)) 
+                        ? menuItems.filter(item => ['dashboard', 'followup', 'session-links'].includes(item.id)) 
                         : menuItems
                     ).map((item) => (
                         <button

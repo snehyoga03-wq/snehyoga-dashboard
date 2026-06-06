@@ -24,7 +24,13 @@ export default function WeeklyReportDashboard() {
     return d.toISOString().split('T')[0];
   });
   const [endDate, setEndDate] = useState(() => new Date().toISOString().split('T')[0]);
-  const [selectedMember, setSelectedMember] = useState<string>("all");
+  const userRole = sessionStorage.getItem("crm_user_role");
+  const username = sessionStorage.getItem("crm_username");
+
+  const [selectedMember, setSelectedMember] = useState<string>(() => {
+    if (userRole === "staff" && username) return username;
+    return "all";
+  });
   const [selectedStatus, setSelectedStatus] = useState<string>("all");
 
   const fetchData = async () => {
@@ -93,7 +99,8 @@ export default function WeeklyReportDashboard() {
   ).length;
 
   // Analytics Chart Data
-  const chartData = ASSIGNED_USERS.map(user => {
+  const displayedUsers = selectedMember === 'all' ? ASSIGNED_USERS : [selectedMember];
+  const chartData = displayedUsers.map(user => {
     const userLeads = leads.filter(l => l.assigned_to === user);
     const userHistory = history.filter(h => h.leads?.assigned_to === user);
     
@@ -134,18 +141,20 @@ export default function WeeklyReportDashboard() {
               <label className="text-xs font-semibold text-gray-500 mb-1 block">End Date</label>
               <Input type="date" value={endDate} onChange={e => setEndDate(e.target.value)} />
             </div>
-            <div>
-              <label className="text-xs font-semibold text-gray-500 mb-1 block">Team Member</label>
-              <Select value={selectedMember} onValueChange={setSelectedMember}>
-                <SelectTrigger>
-                  <SelectValue placeholder="All Members" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">All Members</SelectItem>
-                  {ASSIGNED_USERS.map(u => <SelectItem key={u} value={u}>{u}</SelectItem>)}
-                </SelectContent>
-              </Select>
-            </div>
+            {userRole !== "staff" && (
+              <div>
+                <label className="text-xs font-semibold text-gray-500 mb-1 block">Team Member</label>
+                <Select value={selectedMember} onValueChange={setSelectedMember}>
+                  <SelectTrigger>
+                    <SelectValue placeholder="All Members" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">All Members</SelectItem>
+                    {ASSIGNED_USERS.map(u => <SelectItem key={u} value={u}>{u}</SelectItem>)}
+                  </SelectContent>
+                </Select>
+              </div>
+            )}
             <div>
               <label className="text-xs font-semibold text-gray-500 mb-1 block">Lead Status</label>
               <Select value={selectedStatus} onValueChange={setSelectedStatus}>

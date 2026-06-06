@@ -733,12 +733,12 @@ export function LeadsManagement() {
                 <TableHead className="text-white font-semibold min-w-[160px]">LEAD TYPE</TableHead>
                 <TableHead className="text-white font-semibold min-w-[180px]">LEAD EXISTING PLAN</TableHead>
                 <TableHead className="text-white font-semibold min-w-[140px]">LEAD STATUS</TableHead>
-                <TableHead className="text-white font-semibold min-w-[140px]">ASSIGNED TO</TableHead>
                 <TableHead className="text-white font-semibold min-w-[140px]">FOLLOW-UP DATE</TableHead>
                 <TableHead className="text-white font-semibold min-w-[200px]">REMARK</TableHead>
                 <TableHead className="text-white font-semibold min-w-[120px]">Added Date</TableHead>
                 <TableHead className="text-white font-semibold min-w-[140px]">Admission Date</TableHead>
                 <TableHead className="text-white font-semibold min-w-[140px]">Calling Date</TableHead>
+                <TableHead className="text-white font-semibold min-w-[140px]">ASSIGNED TO</TableHead>
                 <TableHead className="text-white font-semibold text-center w-24">ACTIONS</TableHead>
               </TableRow>
             </TableHeader>
@@ -820,25 +820,6 @@ export function LeadsManagement() {
                       </Select>
                     </TableCell>
 
-                    {/* ASSIGNED TO */}
-                    <TableCell className="p-1">
-                      <Select
-                        value={lead.assigned_to || ""}
-                        onValueChange={(val) => handleUpdateAssignedTo(lead.id, val)}
-                      >
-                        <SelectTrigger className="h-8 border-none bg-transparent hover:bg-gray-200 text-xs rounded-md px-3 py-1 font-semibold text-gray-700 w-full focus:ring-1 focus:ring-[#2e5a44] focus:bg-white shadow-none">
-                          <SelectValue placeholder="Select user" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {ASSIGNED_USERS.map(u => (
-                            <SelectItem key={u} value={u} className="text-xs font-medium">
-                              {u}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                    </TableCell>
-
                     {/* FOLLOW-UP DATE */}
                     <TableCell className="p-1">
                       <EditableCell type="date" value={lead.follow_up_date} onUpdate={(val) => handleUpdateField(lead.id, 'follow_up_date', val)} />
@@ -866,6 +847,25 @@ export function LeadsManagement() {
                     {/* Calling Date */}
                     <TableCell className="p-1">
                       <EditableCell type="date" value={lead.calling_date} onUpdate={(val) => handleUpdateField(lead.id, 'calling_date', val)} />
+                    </TableCell>
+
+                    {/* ASSIGNED TO */}
+                    <TableCell className="p-1">
+                      <Select
+                        value={lead.assigned_to || ""}
+                        onValueChange={(val) => handleUpdateAssignedTo(lead.id, val)}
+                      >
+                        <SelectTrigger className="h-8 border-none bg-transparent hover:bg-gray-200 text-xs rounded-md px-3 py-1 font-semibold text-gray-700 w-full focus:ring-1 focus:ring-[#2e5a44] focus:bg-white shadow-none">
+                          <SelectValue placeholder="Select user" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {ASSIGNED_USERS.map(u => (
+                            <SelectItem key={u} value={u} className="text-xs font-medium">
+                              {u}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
                     </TableCell>
 
                     {/* ACTIONS */}

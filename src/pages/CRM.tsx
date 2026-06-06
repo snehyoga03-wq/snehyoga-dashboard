@@ -417,7 +417,7 @@ const CRM = () => {
     if (isAuth) {
       setIsAuthenticated(true);
       if (role === "staff") {
-        setCurrentSection('users');
+        setCurrentSection('dashboard');
       }
       fetchUsers();
       fetchFollowupReports();
@@ -583,6 +583,7 @@ const CRM = () => {
     if (username === "YOG" && password === "ABC@yog123") {
       sessionStorage.setItem("crm_admin_auth", "true");
       sessionStorage.setItem("crm_user_role", "admin");
+      sessionStorage.setItem("crm_username", "admin");
       setIsAuthenticated(true);
       fetchUsers();
       fetchFollowupReports();
@@ -592,8 +593,9 @@ const CRM = () => {
     } else if (["Mayuri K", "Ragini K", "Shreya K"].includes(username) && password === "ABC@yoga123") {
       sessionStorage.setItem("crm_admin_auth", "true");
       sessionStorage.setItem("crm_user_role", "staff");
+      sessionStorage.setItem("crm_username", username);
       setIsAuthenticated(true);
-      setCurrentSection('users');
+      setCurrentSection('dashboard');
       fetchUsers();
       fetchFollowupReports();
       fetchChatConversations();
@@ -606,6 +608,8 @@ const CRM = () => {
 
   const handleLogout = () => {
     sessionStorage.removeItem("crm_admin_auth");
+    sessionStorage.removeItem("crm_user_role");
+    sessionStorage.removeItem("crm_username");
     setIsAuthenticated(false);
     toast({ title: "Logged Out", description: "See you soon!" });
   };
@@ -1114,6 +1118,7 @@ const CRM = () => {
                 </div>
 
                 {/* Key Metrics Row */}
+                {sessionStorage.getItem("crm_user_role") !== "staff" && (
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
                   <Card className="border-none shadow-sm bg-blue-50/50">
                     <CardContent className="p-6">
@@ -1171,9 +1176,11 @@ const CRM = () => {
                     </CardContent>
                   </Card>
                 </div>
+                )}
 
                 <WeeklyReportDashboard />
 
+                {sessionStorage.getItem("crm_user_role") !== "staff" && (
                 <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
                   {/* Left Column: Alerts & Recent Activity */}
                   <div className="col-span-1 lg:col-span-2 space-y-6">
@@ -1350,6 +1357,7 @@ const CRM = () => {
                     </Card>
                   </div>
                 </div>
+                )}
               </motion.div>
             )}
 
