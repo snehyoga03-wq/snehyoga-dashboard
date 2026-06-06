@@ -179,3 +179,32 @@ All colors MUST be HSL.
 .gradient-bg:hover:not(:disabled) .icon-transition {
   transform: translateX(4px);
 }
+
+/* Custom Table Scrollbar for Leads Management */
+.table-container {
+  scrollbar-width: thin;
+}
+
+.table-container::-webkit-scrollbar {
+  height: 10px;
+  width: 10px;
+}
+
+.table-container::-webkit-scrollbar-track {
+  background: #f1f1f1; 
+  border-radius: 5px;
+}
+
+.table-container::-webkit-scrollbar-thumb {
+  background: #cbd5e1; 
+  border-radius: 5px;
+}
+
+.table-container::-webkit-scrollbar-thumb:hover {
+  background: #94a3b8; 
+}
+
+/* Add subtle shadow when scrolling */
+.table-container {
+  box-shadow: inset -10px 0 10px -10px rgba(0,0,0,0.05), inset 10px 0 10px -10px rgba(0,0,0,0.05);
+}

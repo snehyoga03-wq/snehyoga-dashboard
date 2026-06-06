@@ -99,6 +99,44 @@ export function LeadsManagement() {
   const [isOpenAddEditDialog, setIsOpenAddEditDialog] = useState(false);
   const [editingLead, setEditingLead] = useState<Lead | null>(null);
 
+  const topScrollRef = useRef<HTMLDivElement>(null);
+  const tableContainerRef = useRef<HTMLDivElement>(null);
+  const tableRef = useRef<HTMLTableElement>(null);
+  const isScrollingTop = useRef(false);
+  const isScrollingBottom = useRef(false);
+  const [tableWidth, setTableWidth] = useState(2200);
+
+  useEffect(() => {
+    if (tableRef.current) {
+      const resizeObserver = new ResizeObserver(entries => {
+        for (let entry of entries) {
+          setTableWidth(entry.target.scrollWidth);
+        }
+      });
+      resizeObserver.observe(tableRef.current);
+      return () => resizeObserver.disconnect();
+    }
+  }, []);
+
+  const handleTopScroll = (e: React.UIEvent<HTMLDivElement>) => {
+    if (isScrollingBottom.current) return;
+    isScrollingTop.current = true;
+    if (tableContainerRef.current && tableContainerRef.current.scrollLeft !== e.currentTarget.scrollLeft) {
+      tableContainerRef.current.scrollLeft = e.currentTarget.scrollLeft;
+    }
+    // Simple debounce to reset the flag
+    setTimeout(() => { isScrollingTop.current = false; }, 50);
+  };
+
+  const handleTableScroll = (e: React.UIEvent<HTMLDivElement>) => {
+    if (isScrollingTop.current) return;
+    isScrollingBottom.current = true;
+    if (topScrollRef.current && topScrollRef.current.scrollLeft !== e.currentTarget.scrollLeft) {
+      topScrollRef.current.scrollLeft = e.currentTarget.scrollLeft;
+    }
+    setTimeout(() => { isScrollingBottom.current = false; }, 50);
+  };
+
   // History States
   const [showHistoryDialog, setShowHistoryDialog] = useState(false);
   const [selectedLeadHistory, setSelectedLeadHistory] = useState<any[]>([]);
@@ -723,23 +761,38 @@ export function LeadsManagement() {
 
       {/* Leads Table Card */}
       <Card className="border-none shadow-md overflow-hidden bg-white w-full max-w-full min-w-0">
-        <div className="w-full overflow-x-auto max-w-full min-w-0 rounded-b-lg">
-          <Table className="w-full min-w-max sm:min-w-[1600px] relative">
-            <TableHeader className="bg-[#2e5a44] shadow-md">
+        
+        {/* Top Horizontal Scrollbar Container */}
+        <div 
+          ref={topScrollRef}
+          onScroll={handleTopScroll}
+          className="w-full overflow-x-auto overflow-y-hidden table-container border-b border-gray-100"
+        >
+          <div style={{ width: `${tableWidth}px`, height: '1px' }}></div>
+        </div>
+
+        {/* Main Table Container */}
+        <div 
+          ref={tableContainerRef}
+          onScroll={handleTableScroll}
+          className="w-full max-w-full min-w-0 rounded-b-lg table-container max-h-[calc(100vh-260px)] overflow-auto relative"
+        >
+          <table ref={tableRef} className="w-full min-w-[2200px] relative border-collapse caption-bottom text-sm" style={{ tableLayout: 'auto' }}>
+            <TableHeader className="bg-[#2e5a44] shadow-md sticky top-0 z-20">
               <TableRow className="hover:bg-[#2e5a44] border-none">
-                <TableHead className="text-white font-semibold w-16">SR NO</TableHead>
-                <TableHead className="text-white font-semibold min-w-[160px]">CLIENT NAME</TableHead>
-                <TableHead className="text-white font-semibold min-w-[140px]">CONTACT</TableHead>
-                <TableHead className="text-white font-semibold min-w-[160px]">LEAD TYPE</TableHead>
-                <TableHead className="text-white font-semibold min-w-[180px]">LEAD EXISTING PLAN</TableHead>
-                <TableHead className="text-white font-semibold min-w-[140px]">LEAD STATUS</TableHead>
-                <TableHead className="text-white font-semibold min-w-[140px]">FOLLOW-UP DATE</TableHead>
-                <TableHead className="text-white font-semibold min-w-[200px]">REMARK</TableHead>
-                <TableHead className="text-white font-semibold min-w-[120px]">Added Date</TableHead>
-                <TableHead className="text-white font-semibold min-w-[140px]">Admission Date</TableHead>
-                <TableHead className="text-white font-semibold min-w-[140px]">Calling Date</TableHead>
-                <TableHead className="text-white font-semibold min-w-[140px]">ASSIGNED TO</TableHead>
-                <TableHead className="text-white font-semibold text-center w-24">ACTIONS</TableHead>
+                <TableHead className="text-white font-semibold w-16 sticky top-0 left-0 z-30 bg-[#2e5a44]">SR NO</TableHead>
+                <TableHead className="text-white font-semibold w-[160px] sticky top-0 left-[64px] z-30 bg-[#2e5a44] border-r border-[#3a6e54]">CLIENT NAME</TableHead>
+                <TableHead className="text-white font-semibold min-w-[140px] sticky top-0 z-20 bg-[#2e5a44]">CONTACT</TableHead>
+                <TableHead className="text-white font-semibold min-w-[160px] sticky top-0 z-20 bg-[#2e5a44]">LEAD TYPE</TableHead>
+                <TableHead className="text-white font-semibold min-w-[180px] sticky top-0 z-20 bg-[#2e5a44]">LEAD EXISTING PLAN</TableHead>
+                <TableHead className="text-white font-semibold min-w-[140px] sticky top-0 z-20 bg-[#2e5a44]">LEAD STATUS</TableHead>
+                <TableHead className="text-white font-semibold min-w-[140px] sticky top-0 z-20 bg-[#2e5a44]">FOLLOW-UP DATE</TableHead>
+                <TableHead className="text-white font-semibold min-w-[200px] sticky top-0 z-20 bg-[#2e5a44]">REMARK</TableHead>
+                <TableHead className="text-white font-semibold min-w-[120px] sticky top-0 z-20 bg-[#2e5a44]">Added Date</TableHead>
+                <TableHead className="text-white font-semibold min-w-[140px] sticky top-0 z-20 bg-[#2e5a44]">Admission Date</TableHead>
+                <TableHead className="text-white font-semibold min-w-[140px] sticky top-0 z-20 bg-[#2e5a44]">Calling Date</TableHead>
+                <TableHead className="text-white font-semibold w-[140px] sticky top-0 right-[96px] z-30 bg-[#2e5a44] border-l border-[#3a6e54]">ASSIGNED TO</TableHead>
+                <TableHead className="text-white font-semibold text-center w-24 sticky top-0 right-0 z-30 bg-[#2e5a44]">ACTIONS</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -749,12 +802,12 @@ export function LeadsManagement() {
                 return (
                   <TableRow key={lead.id} className="hover:bg-gray-50 border-b border-gray-100">
                     {/* SR NO */}
-                    <TableCell className="p-2 text-center text-sm font-medium text-gray-500">
+                    <TableCell className="p-2 text-center text-sm font-medium text-gray-500 sticky left-0 z-10 bg-white">
                       {index + 1}
                     </TableCell>
 
                     {/* CLIENT NAME */}
-                    <TableCell className="p-1">
+                    <TableCell className="p-1 sticky left-[64px] z-10 bg-white border-r border-gray-200">
                       <EditableCell value={lead.client_name} onUpdate={(val) => handleUpdateField(lead.id, 'client_name', val)} className="font-semibold text-gray-800" />
                     </TableCell>
 
@@ -850,7 +903,7 @@ export function LeadsManagement() {
                     </TableCell>
 
                     {/* ASSIGNED TO */}
-                    <TableCell className="p-1">
+                    <TableCell className="p-1 sticky right-[96px] z-10 bg-white border-l border-gray-200">
                       <Select
                         value={lead.assigned_to || ""}
                         onValueChange={(val) => handleUpdateAssignedTo(lead.id, val)}
@@ -869,7 +922,7 @@ export function LeadsManagement() {
                     </TableCell>
 
                     {/* ACTIONS */}
-                    <TableCell className="text-center p-2">
+                    <TableCell className="text-center p-2 sticky right-0 z-10 bg-white">
                       <div className="flex justify-center items-center gap-1">
                         <Button
                           variant="ghost"
@@ -907,7 +960,7 @@ export function LeadsManagement() {
                 </TableRow>
               )}
             </TableBody>
-          </Table>
+          </table>
         </div>
       </Card>
 
