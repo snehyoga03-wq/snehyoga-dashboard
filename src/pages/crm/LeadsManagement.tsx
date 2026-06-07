@@ -791,8 +791,8 @@ export function LeadsManagement() {
                 <TableHead className="text-white font-semibold min-w-[120px] sticky top-0 z-20 bg-[#2e5a44]">Added Date</TableHead>
                 <TableHead className="text-white font-semibold min-w-[140px] sticky top-0 z-20 bg-[#2e5a44]">Admission Date</TableHead>
                 <TableHead className="text-white font-semibold min-w-[140px] sticky top-0 z-20 bg-[#2e5a44]">Calling Date</TableHead>
-                <TableHead className="text-white font-semibold w-[140px] sticky top-0 right-[96px] z-30 bg-[#2e5a44] border-l border-[#3a6e54]">ASSIGNED TO</TableHead>
-                <TableHead className="text-white font-semibold text-center w-24 sticky top-0 right-0 z-30 bg-[#2e5a44]">ACTIONS</TableHead>
+                <TableHead className="text-white font-semibold min-w-[140px] sticky top-0 z-20 bg-[#2e5a44]">ASSIGNED TO</TableHead>
+                <TableHead className="text-white font-semibold text-center min-w-24 sticky top-0 z-20 bg-[#2e5a44]">ACTIONS</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -903,7 +903,7 @@ export function LeadsManagement() {
                     </TableCell>
 
                     {/* ASSIGNED TO */}
-                    <TableCell className="p-1 sticky right-[96px] z-10 bg-white border-l border-gray-200">
+                    <TableCell className="p-1">
                       <Select
                         value={lead.assigned_to || ""}
                         onValueChange={(val) => handleUpdateAssignedTo(lead.id, val)}
@@ -922,7 +922,7 @@ export function LeadsManagement() {
                     </TableCell>
 
                     {/* ACTIONS */}
-                    <TableCell className="text-center p-2 sticky right-0 z-10 bg-white">
+                    <TableCell className="text-center p-2">
                       <div className="flex justify-center items-center gap-1">
                         <Button
                           variant="ghost"
