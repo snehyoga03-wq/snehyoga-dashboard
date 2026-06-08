@@ -595,7 +595,7 @@ const CRM = () => {
       sessionStorage.setItem("crm_user_role", "staff");
       sessionStorage.setItem("crm_username", username);
       setIsAuthenticated(true);
-      setCurrentSection('dashboard');
+      setCurrentSection('followup');
       fetchUsers();
       fetchFollowupReports();
       fetchChatConversations();

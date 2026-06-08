@@ -94,6 +94,7 @@ export function LeadsManagement() {
   const [searchQuery, setSearchQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState("all");
   const [typeFilter, setTypeFilter] = useState("all");
+  const [addedDateFilter, setAddedDateFilter] = useState("");
 
   // Dialog States
   const [isOpenAddEditDialog, setIsOpenAddEditDialog] = useState(false);
@@ -672,8 +673,18 @@ export function LeadsManagement() {
 
     const matchesStatus = statusFilter === "all" || lead.lead_status === statusFilter;
     const matchesType = typeFilter === "all" || lead.lead_type === typeFilter;
+    
+    let matchesAddedDate = true;
+    if (addedDateFilter) {
+      if (!lead.created_at) {
+        matchesAddedDate = false;
+      } else {
+        const leadDate = new Date(lead.created_at).toISOString().split('T')[0];
+        matchesAddedDate = leadDate === addedDateFilter;
+      }
+    }
 
-    return matchesSearch && matchesStatus && matchesType;
+    return matchesSearch && matchesStatus && matchesType && matchesAddedDate;
   });
 
   const todayStr = new Date().toISOString().split("T")[0];
@@ -721,19 +732,19 @@ export function LeadsManagement() {
       {/* Filters Card */}
       <Card className="border-none shadow-sm bg-white">
         <CardContent className="pt-6">
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-4 gap-4">
             <div className="relative">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
               <Input
                 placeholder="Search name, contact, remark..."
-                className="pl-10"
+                className="pl-10 h-10"
                 value={searchQuery}
                 onChange={e => setSearchQuery(e.target.value)}
               />
             </div>
 
             <Select value={typeFilter} onValueChange={setTypeFilter}>
-              <SelectTrigger className="bg-white">
+              <SelectTrigger className="bg-white h-10">
                 <SelectValue placeholder="All Lead Types" />
               </SelectTrigger>
               <SelectContent>
@@ -745,7 +756,7 @@ export function LeadsManagement() {
             </Select>
 
             <Select value={statusFilter} onValueChange={setStatusFilter}>
-              <SelectTrigger className="bg-white">
+              <SelectTrigger className="bg-white h-10">
                 <SelectValue placeholder="All Statuses" />
               </SelectTrigger>
               <SelectContent>
@@ -755,6 +766,26 @@ export function LeadsManagement() {
                 ))}
               </SelectContent>
             </Select>
+
+            <div className="relative">
+              <div className="absolute inset-y-0 left-3 flex items-center pointer-events-none">
+                <Calendar className="w-4 h-4 text-gray-400" />
+              </div>
+              <Input
+                type="date"
+                className="pl-10 bg-white text-gray-700 h-10"
+                value={addedDateFilter}
+                onChange={e => setAddedDateFilter(e.target.value)}
+              />
+              {addedDateFilter && (
+                <button 
+                  onClick={() => setAddedDateFilter("")}
+                  className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              )}
+            </div>
           </div>
         </CardContent>
       </Card>

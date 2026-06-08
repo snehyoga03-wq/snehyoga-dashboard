@@ -29,6 +29,7 @@ interface SidebarProps {
 }
 
 const menuItems = [
+    { id: 'followup', label: 'Leads Management', icon: ClipboardList },
     { id: 'dashboard', label: 'Dashboard', icon: BarChart3 },
     { id: 'users', label: 'User Management', icon: Users },
     { id: 'retention', label: 'User Retention', icon: HeartPulse },
@@ -36,7 +37,6 @@ const menuItems = [
     { id: 'whatsapp-flow', label: 'WhatsApp Flow', icon: Workflow },
     { id: 'reminders', label: 'Reminders', icon: Calendar },
     { id: 'message-queue', label: 'Message Queue', icon: SendHorizonal },
-    { id: 'followup', label: 'Leads Management', icon: ClipboardList },
     { id: 'session-links', label: 'Session Settings', icon: Link2 },
     { id: 'sap-portal', label: 'SAP Portal', icon: LayoutDashboard },
     { id: 'others', label: 'Others', icon: Settings },
@@ -83,7 +83,11 @@ export function Sidebar({
                 {/* Menu Items */}
                 <div className="flex-1 py-4 overflow-y-auto space-y-1 px-2">
                     {(sessionStorage.getItem("crm_user_role") === "staff" 
-                        ? menuItems.filter(item => ['dashboard', 'followup', 'session-links'].includes(item.id)) 
+                        ? menuItems.filter(item => {
+                            if (['dashboard', 'followup'].includes(item.id)) return true;
+                            if (item.id === 'session-links' && sessionStorage.getItem("crm_username") === "Shreya K") return true;
+                            return false;
+                        }) 
                         : menuItems
                     ).map((item) => (
                         <button
