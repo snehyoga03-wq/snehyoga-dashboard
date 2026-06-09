@@ -94,7 +94,7 @@ export function LeadsManagement() {
   const [searchQuery, setSearchQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState("all");
   const [typeFilter, setTypeFilter] = useState("all");
-  const [addedDateFilter, setAddedDateFilter] = useState("");
+  const [addedDateFilter, setAddedDateFilter] = useState(new Date().toISOString().split("T")[0]);
 
   // Dialog States
   const [isOpenAddEditDialog, setIsOpenAddEditDialog] = useState(false);
