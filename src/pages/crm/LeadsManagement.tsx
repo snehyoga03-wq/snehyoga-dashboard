@@ -280,8 +280,8 @@ export function LeadsManagement() {
         toast({ title: "Success", description: "Lead updated successfully" });
       } else {
         // Create
-        let nextUserIndex = (getLastAssignedIndex(leads) + 1) % 3;
-        const assignedTo = ASSIGNED_USERS[nextUserIndex];
+        // let nextUserIndex = (getLastAssignedIndex(leads) + 1) % 3;
+        // const assignedTo = ASSIGNED_USERS[nextUserIndex];
 
         const { data, error } = await supabase
           .from("leads")
@@ -295,13 +295,13 @@ export function LeadsManagement() {
             lead_existing_plan: leadForm.lead_existing_plan || null,
             lead_status: leadForm.lead_status || "Select Option",
             remark: leadForm.remark || null,
-            assigned_to: assignedTo,
+            assigned_to: null,
             follow_up_date: leadForm.follow_up_date || null
           }]).select();
 
         if (error) throw error;
         if (data && data.length > 0) {
-          await logHistory(data[0].id, "Created", `Lead created and auto-assigned to ${assignedTo}`);
+          await logHistory(data[0].id, "Created", `Lead created manually.`);
         }
         toast({ title: "Success", description: "Lead added successfully" });
       }
@@ -552,7 +552,7 @@ export function LeadsManagement() {
           return;
         }
 
-        let currentIndex = getLastAssignedIndex(leads);
+        // let currentIndex = getLastAssignedIndex(leads);
         const validLeads: Partial<Lead>[] = [];
         for (const row of rows) {
           // Normalize keys case-insensitively
@@ -602,7 +602,7 @@ export function LeadsManagement() {
             else finalPlan = String(existingPlan).trim();
           }
 
-          currentIndex = (currentIndex + 1) % 3;
+          // currentIndex = (currentIndex + 1) % 3;
           validLeads.push({
             admission_date: parseDate(admissionDateRaw),
             calling_date: parseDate(callingDateRaw),
@@ -613,7 +613,7 @@ export function LeadsManagement() {
             lead_existing_plan: finalPlan,
             lead_status: finalStatus,
             remark: remark ? String(remark).trim() : null,
-            assigned_to: ASSIGNED_USERS[currentIndex]
+            assigned_to: null
           });
         }
 
@@ -635,7 +635,7 @@ export function LeadsManagement() {
           const historyLogs = insertedLeads.map(l => ({
             lead_id: l.id,
             action_type: "Imported",
-            description: `Lead imported and assigned to ${l.assigned_to}`,
+            description: `Lead imported from bulk upload.`,
             created_by: "System"
           }));
           await supabase.from("lead_history").insert(historyLogs);
