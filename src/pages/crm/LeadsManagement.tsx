@@ -540,7 +540,28 @@ export function LeadsManagement() {
         const workbook = XLSX.read(data, { type: "binary" });
         const sheetName = workbook.SheetNames[0];
         const sheet = workbook.Sheets[sheetName];
-        const rows = XLSX.utils.sheet_to_json(sheet) as any[];
+        const rawData = XLSX.utils.sheet_to_json(sheet, { header: 1 }) as any[][];
+        
+        let headerRowIndex = -1;
+        for (let i = 0; i < rawData.length; i++) {
+          const rowStr = rawData[i].map(c => String(c || '').toLowerCase()).join(' ');
+          if (rowStr.includes('name') || rowStr.includes('client')) {
+            headerRowIndex = i;
+            break;
+          }
+        }
+
+        if (headerRowIndex === -1) {
+          toast({
+            title: "Empty or Invalid File",
+            description: "Could not find a header row with a Client Name column.",
+            variant: "destructive"
+          });
+          setLoading(false);
+          return;
+        }
+
+        const rows = XLSX.utils.sheet_to_json(sheet, { range: headerRowIndex }) as any[];
 
         if (rows.length === 0) {
           toast({
@@ -563,10 +584,10 @@ export function LeadsManagement() {
 
           // Extract Client Name (required)
           const clientName = normalizedRow["client name"] || normalizedRow["clientname"] || normalizedRow["name"];
-          // Extract Contact (required)
+          // Extract Contact (optional now)
           const contact = normalizedRow["contact"] || normalizedRow["phone"] || normalizedRow["mobile"] || normalizedRow["contact number"];
 
-          if (!clientName || !contact) continue; // Skip invalid row
+          if (!clientName) continue; // Skip if no client name
 
           // Map other columns
           const admissionDateRaw = normalizedRow["admission date"] || normalizedRow["admissiondate"] || normalizedRow["date"];
@@ -589,9 +610,11 @@ export function LeadsManagement() {
           // Clean Lead Type
           let finalType = null;
           if (leadType) {
-            const match = LEAD_TYPES.find(t => t.toLowerCase() === String(leadType).trim().toLowerCase());
+            const typeStr = String(leadType).trim().toUpperCase();
+            const match = LEAD_TYPES.find(t => t.toUpperCase() === typeStr);
             if (match) finalType = match;
-            else finalType = String(leadType).trim().toUpperCase(); // Fallback raw text capitalized
+            else if (typeStr === "SY 365") finalType = "SNEHYOGA 365";
+            else finalType = typeStr; // Fallback raw text capitalized
           }
 
           // Clean Plan
@@ -608,7 +631,7 @@ export function LeadsManagement() {
             calling_date: parseDate(callingDateRaw),
             sr_no: srNo ? String(srNo).trim() : null,
             client_name: String(clientName).trim(),
-            contact: String(contact).trim(),
+            contact: contact ? String(contact).trim() : "-",
             lead_type: finalType,
             lead_existing_plan: finalPlan,
             lead_status: finalStatus,
