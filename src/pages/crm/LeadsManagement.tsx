@@ -8,11 +8,13 @@ import { useToast } from "@/hooks/use-toast";
 import { motion } from "framer-motion";
 import {
   ClipboardList, Search, RefreshCw, Plus, Download, Upload,
-  Trash2, Edit, Save, X, Calendar, User, Phone, CheckCircle, History
+  Trash2, Edit, Save, X, Calendar, User, Phone, CheckCircle, History,
+  Users, CheckSquare, FileSpreadsheet
 } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Label } from "@/components/ui/label";
+import { Checkbox } from "@/components/ui/checkbox";
 import * as XLSX from "xlsx";
 
 const ASSIGNED_USERS = ["Mayuri K", "Ragini K", "Shreya K"];
@@ -95,6 +97,15 @@ export function LeadsManagement() {
   const [statusFilter, setStatusFilter] = useState("all");
   const [typeFilter, setTypeFilter] = useState("all");
   const [addedDateFilter, setAddedDateFilter] = useState(new Date().toISOString().split("T")[0]);
+  const [assignedToFilter, setAssignedToFilter] = useState("all");
+
+  // Bulk Selection & Assignment States
+  const [selectedLeadIds, setSelectedLeadIds] = useState<string[]>([]);
+  const [isBulkAssignOpen, setIsBulkAssignOpen] = useState(false);
+  const [bulkAssignMode, setBulkAssignMode] = useState<"single" | "split">("single");
+  const [bulkSingleUser, setBulkSingleUser] = useState<string>(ASSIGNED_USERS[0]);
+  const [bulkSplitUsers, setBulkSplitUsers] = useState<string[]>(ASSIGNED_USERS);
+  const [isBulkAssigning, setIsBulkAssigning] = useState(false);
 
   // Dialog States
   const [isOpenAddEditDialog, setIsOpenAddEditDialog] = useState(false);
@@ -442,6 +453,118 @@ export function LeadsManagement() {
     }
   };
 
+  const handleBulkDelete = async () => {
+    if (selectedLeadIds.length === 0) return;
+    if (!confirm(`Are you sure you want to delete ${selectedLeadIds.length} selected lead(s)?`)) return;
+    try {
+      const { error } = await supabase
+        .from("leads")
+        .delete()
+        .in("id", selectedLeadIds);
+
+      if (error) throw error;
+      setLeads(prev => prev.filter(lead => !selectedLeadIds.includes(lead.id)));
+      setSelectedLeadIds([]);
+      toast({ title: "Deleted", description: `${selectedLeadIds.length} leads deleted successfully` });
+    } catch (err: any) {
+      console.error("Error deleting bulk leads:", err);
+      toast({
+        title: "Error deleting leads",
+        description: err.message,
+        variant: "destructive"
+      });
+    }
+  };
+
+  const handleBulkAssignSubmit = async () => {
+    if (selectedLeadIds.length === 0) return;
+    setIsBulkAssigning(true);
+    try {
+      if (bulkAssignMode === "single") {
+        if (!bulkSingleUser) {
+          toast({ title: "Validation Error", description: "Please select a user to assign.", variant: "destructive" });
+          setIsBulkAssigning(false);
+          return;
+        }
+        const { error } = await supabase
+          .from("leads")
+          .update({ assigned_to: bulkSingleUser })
+          .in("id", selectedLeadIds);
+
+        if (error) throw error;
+
+        const historyLogs = selectedLeadIds.map(id => ({
+          lead_id: id,
+          action_type: "Bulk Assigned",
+          description: `Lead bulk assigned to ${bulkSingleUser}`,
+          created_by: "CRM User"
+        }));
+        await supabase.from("lead_history").insert(historyLogs);
+
+        setLeads(prev => prev.map(lead => selectedLeadIds.includes(lead.id) ? { ...lead, assigned_to: bulkSingleUser } : lead));
+        toast({ title: "Success", description: `${selectedLeadIds.length} leads assigned to ${bulkSingleUser}` });
+      } else {
+        if (bulkSplitUsers.length === 0) {
+          toast({ title: "Validation Error", description: "Please select at least one user for round-robin distribution.", variant: "destructive" });
+          setIsBulkAssigning(false);
+          return;
+        }
+
+        // Group leads by target user for round-robin assignment
+        const groups: Record<string, string[]> = {};
+        bulkSplitUsers.forEach(u => groups[u] = []);
+        selectedLeadIds.forEach((id, idx) => {
+          const targetUser = bulkSplitUsers[idx % bulkSplitUsers.length];
+          groups[targetUser].push(id);
+        });
+
+        const historyLogs: any[] = [];
+        for (const [user, ids] of Object.entries(groups)) {
+          if (ids.length > 0) {
+            const { error } = await supabase
+              .from("leads")
+              .update({ assigned_to: user })
+              .in("id", ids);
+            if (error) throw error;
+
+            ids.forEach(id => {
+              historyLogs.push({
+                lead_id: id,
+                action_type: "Bulk Assigned",
+                description: `Lead bulk assigned to ${user} via round-robin distribution`,
+                created_by: "CRM User"
+              });
+            });
+          }
+        }
+        if (historyLogs.length > 0) {
+          await supabase.from("lead_history").insert(historyLogs);
+        }
+
+        setLeads(prev => prev.map(lead => {
+          const idx = selectedLeadIds.indexOf(lead.id);
+          if (idx !== -1) {
+            return { ...lead, assigned_to: bulkSplitUsers[idx % bulkSplitUsers.length] };
+          }
+          return lead;
+        }));
+        toast({ title: "Success", description: `${selectedLeadIds.length} leads distributed among ${bulkSplitUsers.length} user(s)` });
+      }
+
+      setSelectedLeadIds([]);
+      setIsBulkAssignOpen(false);
+    } catch (err: any) {
+      console.error("Error during bulk assignment:", err);
+      toast({
+        title: "Bulk Assignment Failed",
+        description: err.message,
+        variant: "destructive"
+      });
+    } finally {
+      setIsBulkAssigning(false);
+    }
+  };
+
   // Export to Excel / CSV
   const handleExport = () => {
     if (leads.length === 0) {
@@ -478,6 +601,66 @@ export function LeadsManagement() {
 
     XLSX.writeFile(workbook, `Leads_Export_${new Date().toISOString().split("T")[0]}.xlsx`);
     toast({ title: "Export Success", description: "Leads exported to Excel file." });
+  };
+
+  // Download Sample Template Sheet
+  const handleDownloadSample = () => {
+    const sampleData = [
+      {
+        "Admission Date": "2026-07-01",
+        "Calling Date": "2026-07-01",
+        "SR NO": "SY-001",
+        "Client Name": "John Doe",
+        "Contact": "+91 9876543210",
+        "Lead Type": "SNEHYOGA 365",
+        "Lead Existing Plan": "SY 365 - 399",
+        "Lead Status": "Deal Done",
+        "Remark": "Interested in annual subscription"
+      },
+      {
+        "Admission Date": "2026-07-02",
+        "Calling Date": "2026-07-02",
+        "SR NO": "SY-002",
+        "Client Name": "Priya Sharma",
+        "Contact": "+91 9123456789",
+        "Lead Type": "FACEYOGA",
+        "Lead Existing Plan": "FY - 1200",
+        "Lead Status": "Follow Up",
+        "Remark": "Call back tomorrow evening"
+      },
+      {
+        "Admission Date": "2026-07-02",
+        "Calling Date": "2026-07-02",
+        "SR NO": "SY-003",
+        "Client Name": "Sneha Gupta",
+        "Contact": "+91 9988776655",
+        "Lead Type": "MSP - 9 Days",
+        "Lead Existing Plan": "MWS - 6000",
+        "Lead Status": "Select Option",
+        "Remark": "New inquiry from Instagram"
+      }
+    ];
+
+    const worksheet = XLSX.utils.json_to_sheet(sampleData);
+    const workbook = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(workbook, worksheet, "Leads Sample");
+
+    // Auto-fit column widths
+    const colsWidth = [
+      { wch: 15 }, // Admission Date
+      { wch: 15 }, // Calling Date
+      { wch: 10 }, // SR NO
+      { wch: 20 }, // Client Name
+      { wch: 18 }, // Contact
+      { wch: 18 }, // Lead Type
+      { wch: 20 }, // Lead Existing Plan
+      { wch: 15 }, // Lead Status
+      { wch: 30 }  // Remark
+    ];
+    worksheet["!cols"] = colsWidth;
+
+    XLSX.writeFile(workbook, "Leads_Sample_Template.xlsx");
+    toast({ title: "Sample Downloaded", description: "Sample template sheet downloaded successfully." });
   };
 
   // Import from Excel / CSV
@@ -696,6 +879,8 @@ export function LeadsManagement() {
 
     const matchesStatus = statusFilter === "all" || lead.lead_status === statusFilter;
     const matchesType = typeFilter === "all" || lead.lead_type === typeFilter;
+    const matchesAssignedTo = assignedToFilter === "all" || 
+      (assignedToFilter === "unassigned" ? (!lead.assigned_to || lead.assigned_to === "") : lead.assigned_to === assignedToFilter);
     
     let matchesAddedDate = true;
     if (addedDateFilter) {
@@ -707,7 +892,7 @@ export function LeadsManagement() {
       }
     }
 
-    return matchesSearch && matchesStatus && matchesType && matchesAddedDate;
+    return matchesSearch && matchesStatus && matchesType && matchesAssignedTo && matchesAddedDate;
   });
 
   const todayStr = new Date().toISOString().split("T")[0];
@@ -718,6 +903,26 @@ export function LeadsManagement() {
     if (!aIsToday && bIsToday) return 1;
     return 0;
   });
+
+  const isAllSelected = sortedFilteredLeads.length > 0 && sortedFilteredLeads.every(l => selectedLeadIds.includes(l.id));
+
+  const handleSelectAll = (checked: boolean) => {
+    if (checked) {
+      const currentIds = sortedFilteredLeads.map(l => l.id);
+      setSelectedLeadIds(Array.from(new Set([...selectedLeadIds, ...currentIds])));
+    } else {
+      const currentIds = new Set(sortedFilteredLeads.map(l => l.id));
+      setSelectedLeadIds(selectedLeadIds.filter(id => !currentIds.has(id)));
+    }
+  };
+
+  const handleSelectRow = (leadId: string, checked: boolean) => {
+    if (checked) {
+      setSelectedLeadIds(prev => [...prev, leadId]);
+    } else {
+      setSelectedLeadIds(prev => prev.filter(id => id !== leadId));
+    }
+  };
 
   return (
     <div className="space-y-6">
@@ -743,6 +948,9 @@ export function LeadsManagement() {
             accept=".xlsx,.xls,.csv"
             onChange={handleFileImport}
           />
+          <Button variant="outline" size="sm" className="border-emerald-300 text-[#2e5a44] hover:bg-emerald-50 font-semibold" onClick={handleDownloadSample}>
+            <FileSpreadsheet className="w-4 h-4 mr-1 text-[#2e5a44]" /> Sample Sheet
+          </Button>
           <Button variant="outline" size="sm" className="border-gray-200" onClick={handleImportClick}>
             <Upload className="w-4 h-4 mr-1" /> Import Data
           </Button>
@@ -755,7 +963,7 @@ export function LeadsManagement() {
       {/* Filters Card */}
       <Card className="border-none shadow-sm bg-white">
         <CardContent className="pt-6">
-          <div className="grid grid-cols-1 sm:grid-cols-4 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-5 gap-4">
             <div className="relative">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
               <Input
@@ -790,6 +998,19 @@ export function LeadsManagement() {
               </SelectContent>
             </Select>
 
+            <Select value={assignedToFilter} onValueChange={setAssignedToFilter}>
+              <SelectTrigger className="bg-white h-10">
+                <SelectValue placeholder="All Users / Unassigned" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All Assigned Users</SelectItem>
+                <SelectItem value="unassigned" className="text-amber-700 font-semibold">Unassigned Only</SelectItem>
+                {ASSIGNED_USERS.map(u => (
+                  <SelectItem key={u} value={u}>{u}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+
             <div className="relative">
               <div className="absolute inset-y-0 left-3 flex items-center pointer-events-none">
                 <Calendar className="w-4 h-4 text-gray-400" />
@@ -813,6 +1034,45 @@ export function LeadsManagement() {
         </CardContent>
       </Card>
 
+      {/* Bulk Action Toolbar */}
+      {selectedLeadIds.length > 0 && (
+        <motion.div
+          initial={{ opacity: 0, y: -10 }}
+          animate={{ opacity: 1, y: 0 }}
+          className="bg-[#2e5a44] text-white px-4 py-3 rounded-lg shadow-md flex flex-wrap items-center justify-between gap-4 border border-[#3f7a5d]"
+        >
+          <div className="flex items-center gap-2 font-medium">
+            <CheckSquare className="w-5 h-5 text-green-300" />
+            <span><strong className="text-white text-base">{selectedLeadIds.length}</strong> lead{selectedLeadIds.length > 1 ? "s" : ""} selected</span>
+          </div>
+          <div className="flex items-center gap-2 flex-wrap">
+            <Button
+              size="sm"
+              onClick={() => setIsBulkAssignOpen(true)}
+              className="bg-white text-[#2e5a44] hover:bg-gray-100 font-bold shadow-sm"
+            >
+              <Users className="w-4 h-4 mr-1.5" /> Bulk Assign Users
+            </Button>
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={handleBulkDelete}
+              className="border-red-400 text-red-100 hover:bg-red-800/40 hover:text-white bg-transparent"
+            >
+              <Trash2 className="w-4 h-4 mr-1" /> Delete Selected
+            </Button>
+            <Button
+              size="sm"
+              variant="ghost"
+              onClick={() => setSelectedLeadIds([])}
+              className="text-gray-200 hover:text-white hover:bg-[#203f2f]"
+            >
+              Clear Selection
+            </Button>
+          </div>
+        </motion.div>
+      )}
+
       {/* Leads Table Card */}
       <Card className="border-none shadow-md overflow-hidden bg-white w-full max-w-full min-w-0">
         
@@ -834,8 +1094,15 @@ export function LeadsManagement() {
           <table ref={tableRef} className="w-full min-w-[2200px] relative border-collapse caption-bottom text-sm" style={{ tableLayout: 'auto' }}>
             <TableHeader className="bg-[#2e5a44] shadow-md sticky top-0 z-20">
               <TableRow className="hover:bg-[#2e5a44] border-none">
-                <TableHead className="text-white font-semibold w-16 sticky top-0 left-0 z-30 bg-[#2e5a44]">SR NO</TableHead>
-                <TableHead className="text-white font-semibold w-[160px] sticky top-0 left-[64px] z-30 bg-[#2e5a44] border-r border-[#3a6e54]">CLIENT NAME</TableHead>
+                <TableHead className="w-10 sticky top-0 left-0 z-30 bg-[#2e5a44] p-2 text-center">
+                  <Checkbox
+                    checked={isAllSelected}
+                    onCheckedChange={handleSelectAll}
+                    className="border-white/70 data-[state=checked]:bg-white data-[state=checked]:text-[#2e5a44]"
+                  />
+                </TableHead>
+                <TableHead className="text-white font-semibold w-14 sticky top-0 left-[40px] z-30 bg-[#2e5a44]">SR NO</TableHead>
+                <TableHead className="text-white font-semibold w-[160px] sticky top-0 left-[96px] z-30 bg-[#2e5a44] border-r border-[#3a6e54]">CLIENT NAME</TableHead>
                 <TableHead className="text-white font-semibold min-w-[140px] sticky top-0 z-20 bg-[#2e5a44]">CONTACT</TableHead>
                 <TableHead className="text-white font-semibold min-w-[160px] sticky top-0 z-20 bg-[#2e5a44]">LEAD TYPE</TableHead>
                 <TableHead className="text-white font-semibold min-w-[180px] sticky top-0 z-20 bg-[#2e5a44]">LEAD EXISTING PLAN</TableHead>
@@ -855,13 +1122,22 @@ export function LeadsManagement() {
 
                 return (
                   <TableRow key={lead.id} className="hover:bg-gray-50 border-b border-gray-100">
+                    {/* CHECKBOX */}
+                    <TableCell className="p-2 text-center sticky left-0 z-10 bg-white">
+                      <Checkbox
+                        checked={selectedLeadIds.includes(lead.id)}
+                        onCheckedChange={(val) => handleSelectRow(lead.id, !!val)}
+                        className="border-gray-300 data-[state=checked]:bg-[#2e5a44] data-[state=checked]:border-[#2e5a44]"
+                      />
+                    </TableCell>
+
                     {/* SR NO */}
-                    <TableCell className="p-2 text-center text-sm font-medium text-gray-500 sticky left-0 z-10 bg-white">
+                    <TableCell className="p-2 text-center text-sm font-medium text-gray-500 sticky left-[40px] z-10 bg-white">
                       {index + 1}
                     </TableCell>
 
                     {/* CLIENT NAME */}
-                    <TableCell className="p-1 sticky left-[64px] z-10 bg-white border-r border-gray-200">
+                    <TableCell className="p-1 sticky left-[96px] z-10 bg-white border-r border-gray-200">
                       <EditableCell value={lead.client_name} onUpdate={(val) => handleUpdateField(lead.id, 'client_name', val)} className="font-semibold text-gray-800" />
                     </TableCell>
 
@@ -1158,6 +1434,101 @@ export function LeadsManagement() {
             </Button>
             <Button className="bg-[#2e5a44] hover:bg-[#203f2f] text-white" onClick={handleSaveLead}>
               Save Changes
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Bulk Assign Dialog */}
+      <Dialog open={isBulkAssignOpen} onOpenChange={setIsBulkAssignOpen}>
+        <DialogContent className="max-w-md bg-white">
+          <DialogHeader>
+            <DialogTitle className="text-[#2e5a44] font-bold flex items-center gap-2">
+              <Users className="w-5 h-5" /> Bulk Assign Leads ({selectedLeadIds.length})
+            </DialogTitle>
+          </DialogHeader>
+          <div className="space-y-5 py-3">
+            <div className="flex gap-2 p-1 bg-gray-100 rounded-lg">
+              <button
+                type="button"
+                onClick={() => setBulkAssignMode("single")}
+                className={`flex-1 py-1.5 text-xs font-semibold rounded-md transition-all ${bulkAssignMode === "single" ? "bg-white text-[#2e5a44] shadow-sm" : "text-gray-600 hover:text-gray-900"}`}
+              >
+                Single User Assignment
+              </button>
+              <button
+                type="button"
+                onClick={() => setBulkAssignMode("split")}
+                className={`flex-1 py-1.5 text-xs font-semibold rounded-md transition-all ${bulkAssignMode === "split" ? "bg-white text-[#2e5a44] shadow-sm" : "text-gray-600 hover:text-gray-900"}`}
+              >
+                Round-Robin Distribution
+              </button>
+            </div>
+
+            {bulkAssignMode === "single" ? (
+              <div className="space-y-2">
+                <Label className="text-gray-700 font-medium">Select User to Assign All {selectedLeadIds.length} Leads:</Label>
+                <Select value={bulkSingleUser} onValueChange={setBulkSingleUser}>
+                  <SelectTrigger className="bg-white border-gray-200 h-10 font-medium">
+                    <SelectValue placeholder="Select user" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {ASSIGNED_USERS.map(u => (
+                      <SelectItem key={u} value={u} className="font-medium">{u}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <p className="text-xs text-gray-500 mt-1">All selected leads will be assigned directly to <strong className="text-gray-700">{bulkSingleUser}</strong>.</p>
+              </div>
+            ) : (
+              <div className="space-y-3">
+                <Label className="text-gray-700 font-medium">Select Staff Members for Equal Distribution:</Label>
+                <div className="space-y-2 border border-gray-200 rounded-lg p-3 bg-gray-50/50">
+                  {ASSIGNED_USERS.map(user => {
+                    const isChecked = bulkSplitUsers.includes(user);
+                    return (
+                      <label
+                        key={user}
+                        className="flex items-center gap-3 p-2 rounded-md hover:bg-white cursor-pointer transition-colors border border-transparent hover:border-gray-200"
+                      >
+                        <Checkbox
+                          checked={isChecked}
+                          onCheckedChange={(checked) => {
+                            if (checked) {
+                              setBulkSplitUsers(prev => [...prev, user]);
+                            } else {
+                              setBulkSplitUsers(prev => prev.filter(u => u !== user));
+                            }
+                          }}
+                          className="data-[state=checked]:bg-[#2e5a44] data-[state=checked]:border-[#2e5a44]"
+                        />
+                        <span className="text-sm font-semibold text-gray-800">{user}</span>
+                      </label>
+                    );
+                  })}
+                </div>
+                <p className="text-xs text-gray-500 mt-1">
+                  {selectedLeadIds.length} leads will be distributed equally among the <strong className="text-gray-700">{bulkSplitUsers.length}</strong> selected user(s).
+                </p>
+              </div>
+            )}
+          </div>
+          <DialogFooter className="gap-2">
+            <Button variant="outline" onClick={() => setIsBulkAssignOpen(false)} disabled={isBulkAssigning}>
+              Cancel
+            </Button>
+            <Button
+              className="bg-[#2e5a44] hover:bg-[#203f2f] text-white font-semibold"
+              onClick={handleBulkAssignSubmit}
+              disabled={isBulkAssigning || (bulkAssignMode === "split" && bulkSplitUsers.length === 0)}
+            >
+              {isBulkAssigning ? (
+                <div className="flex items-center gap-2">
+                  <RefreshCw className="animate-spin w-4 h-4" /> Assigning...
+                </div>
+              ) : (
+                `Confirm Assignment (${selectedLeadIds.length})`
+              )}
             </Button>
           </DialogFooter>
         </DialogContent>
