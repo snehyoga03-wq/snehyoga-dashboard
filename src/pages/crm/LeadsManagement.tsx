@@ -35,6 +35,7 @@ const LEAD_TYPES = [
 const EXISTING_PLANS = [
   "SY 365 - 399",
   "SY 365 - 2400",
+  "SY 365 - 2001",
   "MWS - 6000",
   "MWS - 21000",
   "FY - 1200",
