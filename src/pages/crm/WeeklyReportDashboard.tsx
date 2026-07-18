@@ -90,8 +90,8 @@ export default function WeeklyReportDashboard() {
   // Derived Metrics
   const totalAssigned = leads.length;
   
-  // A "Call" or interaction is any history record that is not "Created" or "Imported"
-  const totalCallsDone = history.filter(h => h.action_type !== 'Created' && h.action_type !== 'Imported').length;
+  // A "Call" or interaction is any lead where a status has been selected
+  const totalCallsDone = leads.filter(l => l.lead_status && l.lead_status !== 'Select Option').length;
   
   // "Follow-ups Completed" inferred as any status change or remark update during the period
   const followUpsCompleted = history.filter(h => 
@@ -117,7 +117,7 @@ export default function WeeklyReportDashboard() {
     
     return {
       name: user.split(' ')[0],
-      Calls: userHistory.filter(h => h.action_type !== 'Created' && h.action_type !== 'Imported').length,
+      Calls: userLeads.filter(l => l.lead_status && l.lead_status !== 'Select Option').length,
       Converted: userLeads.filter(l => l.lead_status === 'Deal Done').length,
       Assigned: userLeads.length
     };
