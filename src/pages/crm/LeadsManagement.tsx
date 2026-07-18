@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -88,6 +88,99 @@ const EditableCell = ({ value, onUpdate, type = "text", placeholder = "", classN
   );
 };
 
+const LeadRow = React.memo(({ lead, index, isSelected, handlers }: any) => {
+  const curStatus = LEAD_STATUSES.find(s => s.id === lead.lead_status) || LEAD_STATUSES[0];
+  const { handleSelectRow, handleUpdateField, handleUpdateLeadType, handleUpdateExistingPlan, handleUpdateStatus, handleUpdateAssignedTo, handleOpenHistory, handleOpenEditDialog } = handlers;
+  
+  return (
+    <TableRow className="hover:bg-gray-50 border-b border-gray-100">
+      <TableCell className="p-2 text-center sticky left-0 z-10 bg-white">
+        <Checkbox
+          checked={isSelected}
+          onCheckedChange={(val) => handleSelectRow(lead.id, !!val)}
+          className="border-gray-300 data-[state=checked]:bg-[#2e5a44] data-[state=checked]:border-[#2e5a44]"
+        />
+      </TableCell>
+      <TableCell className="p-2 text-center text-sm font-medium text-gray-500 sticky left-[40px] z-10 bg-white">
+        {index + 1}
+      </TableCell>
+      <TableCell className="p-1 sticky left-[96px] z-10 bg-white border-r border-gray-200">
+        <EditableCell value={lead.client_name} onUpdate={(val) => handleUpdateField(lead.id, 'client_name', val)} className="font-semibold text-gray-800" />
+      </TableCell>
+      <TableCell className="p-1">
+        <EditableCell value={lead.contact} onUpdate={(val) => handleUpdateField(lead.id, 'contact', val)} />
+      </TableCell>
+      <TableCell className="p-1">
+        <Select value={lead.lead_type || ""} onValueChange={(val) => handleUpdateLeadType(lead.id, val)}>
+          <SelectTrigger className="h-8 border-none bg-transparent hover:bg-gray-200 text-xs rounded-md px-3 py-1 font-semibold text-gray-700 w-full focus:ring-1 focus:ring-[#2e5a44] focus:bg-white shadow-none">
+            <SelectValue placeholder="Select type" />
+          </SelectTrigger>
+          <SelectContent>
+            {LEAD_TYPES.map(t => (<SelectItem key={t} value={t} className="text-xs font-medium">{t}</SelectItem>))}
+          </SelectContent>
+        </Select>
+      </TableCell>
+      <TableCell className="p-1">
+        <Select value={lead.lead_existing_plan || ""} onValueChange={(val) => handleUpdateExistingPlan(lead.id, val)}>
+          <SelectTrigger className="h-8 border-none bg-transparent hover:bg-gray-200 text-xs rounded-md px-3 py-1 font-semibold text-gray-700 w-full focus:ring-1 focus:ring-[#2e5a44] focus:bg-white shadow-none">
+            <SelectValue placeholder="Select plan" />
+          </SelectTrigger>
+          <SelectContent>
+            {EXISTING_PLANS.map(p => (<SelectItem key={p} value={p} className="text-xs font-medium">{p}</SelectItem>))}
+          </SelectContent>
+        </Select>
+      </TableCell>
+      <TableCell className="p-1">
+        <Select value={lead.lead_status} onValueChange={(val) => handleUpdateStatus(lead.id, val)}>
+          <SelectTrigger className={`h-8 border-none text-xs rounded-full px-3 py-1 font-bold text-center w-full focus:ring-1 focus:ring-offset-1 focus:ring-[#2e5a44] shadow-none ${curStatus.bg} ${curStatus.text}`}>
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            {LEAD_STATUSES.map(s => (<SelectItem key={s.id} value={s.id} className="text-xs font-bold">{s.label}</SelectItem>))}
+          </SelectContent>
+        </Select>
+      </TableCell>
+      <TableCell className="p-1">
+        <EditableCell type="date" value={lead.follow_up_date} onUpdate={(val) => handleUpdateField(lead.id, 'follow_up_date', val)} />
+      </TableCell>
+      <TableCell className="p-1">
+        <EditableCell value={lead.remark} onUpdate={(val) => handleUpdateField(lead.id, 'remark', val)} placeholder="No remark" />
+      </TableCell>
+      <TableCell className="p-2 font-medium text-gray-700 text-sm">
+        {lead.created_at ? new Date(lead.created_at).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" }) : "—"}
+      </TableCell>
+      <TableCell className="p-1">
+        <EditableCell type="date" value={lead.admission_date} onUpdate={(val) => handleUpdateField(lead.id, 'admission_date', val)} />
+      </TableCell>
+      <TableCell className="p-1">
+        <EditableCell type="date" value={lead.calling_date} onUpdate={(val) => handleUpdateField(lead.id, 'calling_date', val)} />
+      </TableCell>
+      <TableCell className="p-1">
+        <Select value={lead.assigned_to || ""} onValueChange={(val) => handleUpdateAssignedTo(lead.id, val)}>
+          <SelectTrigger className="h-8 border-none bg-transparent hover:bg-gray-200 text-xs rounded-md px-3 py-1 font-semibold text-gray-700 w-full focus:ring-1 focus:ring-[#2e5a44] focus:bg-white shadow-none">
+            <SelectValue placeholder="Select user" />
+          </SelectTrigger>
+          <SelectContent>
+            {ASSIGNED_USERS.map(u => (<SelectItem key={u} value={u} className="text-xs font-medium">{u}</SelectItem>))}
+          </SelectContent>
+        </Select>
+      </TableCell>
+      <TableCell className="text-center p-2">
+        <div className="flex justify-center items-center gap-1">
+          <Button variant="ghost" size="icon" className="h-8 w-8 text-indigo-600 hover:text-indigo-800 hover:bg-indigo-50" onClick={() => handleOpenHistory(lead)}>
+            <History className="w-4 h-4" />
+          </Button>
+          <Button variant="ghost" size="icon" className="h-8 w-8 text-blue-600 hover:text-blue-800 hover:bg-blue-50" onClick={() => handleOpenEditDialog(lead)}>
+            <Edit className="w-4 h-4" />
+          </Button>
+        </div>
+      </TableCell>
+    </TableRow>
+  );
+}, (prevProps, nextProps) => {
+  return prevProps.lead === nextProps.lead && prevProps.isSelected === nextProps.isSelected && prevProps.index === nextProps.index;
+});
+
 export function LeadsManagement() {
   const { toast } = useToast();
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -99,6 +192,13 @@ export function LeadsManagement() {
   const [typeFilter, setTypeFilter] = useState("all");
   const [addedDateFilter, setAddedDateFilter] = useState(new Date().toISOString().split("T")[0]);
   const [assignedToFilter, setAssignedToFilter] = useState("all");
+
+  const [currentPage, setCurrentPage] = useState(1);
+  const itemsPerPage = 50;
+
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [searchQuery, statusFilter, typeFilter, addedDateFilter, assignedToFilter]);
 
   // Bulk Selection & Assignment States
   const [selectedLeadIds, setSelectedLeadIds] = useState<string[]>([]);
@@ -142,12 +242,20 @@ export function LeadsManagement() {
   };
 
   const handleTableScroll = (e: React.UIEvent<HTMLDivElement>) => {
-    if (isScrollingTop.current) return;
-    isScrollingBottom.current = true;
-    if (topScrollRef.current && topScrollRef.current.scrollLeft !== e.currentTarget.scrollLeft) {
-      topScrollRef.current.scrollLeft = e.currentTarget.scrollLeft;
+    // Horizontal Sync
+    if (!isScrollingTop.current) {
+      isScrollingBottom.current = true;
+      if (topScrollRef.current && topScrollRef.current.scrollLeft !== e.currentTarget.scrollLeft) {
+        topScrollRef.current.scrollLeft = e.currentTarget.scrollLeft;
+      }
+      setTimeout(() => { isScrollingBottom.current = false; }, 50);
     }
-    setTimeout(() => { isScrollingBottom.current = false; }, 50);
+    
+    // Infinite Scroll (vertical)
+    const { scrollTop, scrollHeight, clientHeight } = e.currentTarget;
+    if (scrollHeight - scrollTop - clientHeight < 100) {
+      setCurrentPage(prev => prev + 1);
+    }
   };
 
   // History States
@@ -330,6 +438,10 @@ export function LeadsManagement() {
   };
 
   const handleUpdateStatus = async (leadId: string, status: string) => {
+    const targetLead = leads.find(l => l.id === leadId);
+    const previousStatus = targetLead ? targetLead.lead_status : "";
+    setLeads(prev => prev.map(lead => lead.id === leadId ? { ...lead, lead_status: status } : lead));
+
     try {
       const { error } = await supabase
         .from("leads")
@@ -337,10 +449,10 @@ export function LeadsManagement() {
         .eq("id", leadId);
 
       if (error) throw error;
-      await logHistory(leadId, "Status Changed", `Lead status changed to ${status}`);
-      setLeads(prev => prev.map(lead => lead.id === leadId ? { ...lead, lead_status: status } : lead));
+      logHistory(leadId, "Status Changed", `Lead status changed to ${status}`);
       toast({ title: "Status Updated", description: `Lead status changed to ${status}` });
     } catch (err: any) {
+      setLeads(prev => prev.map(lead => lead.id === leadId ? { ...lead, lead_status: previousStatus } : lead));
       console.error("Error updating status:", err);
       toast({
         title: "Error updating status",
@@ -351,6 +463,10 @@ export function LeadsManagement() {
   };
 
   const handleUpdateLeadType = async (leadId: string, type: string) => {
+    const targetLead = leads.find(l => l.id === leadId);
+    const previousType = targetLead ? targetLead.lead_type : "";
+    setLeads(prev => prev.map(lead => lead.id === leadId ? { ...lead, lead_type: type } : lead));
+
     try {
       const { error } = await supabase
         .from("leads")
@@ -358,10 +474,10 @@ export function LeadsManagement() {
         .eq("id", leadId);
 
       if (error) throw error;
-      await logHistory(leadId, "Type Changed", `Lead type changed to ${type}`);
-      setLeads(prev => prev.map(lead => lead.id === leadId ? { ...lead, lead_type: type } : lead));
+      logHistory(leadId, "Type Changed", `Lead type changed to ${type}`);
       toast({ title: "Lead Type Updated", description: `Lead type changed to ${type}` });
     } catch (err: any) {
+      setLeads(prev => prev.map(lead => lead.id === leadId ? { ...lead, lead_type: previousType } : lead));
       console.error("Error updating lead type:", err);
       toast({
         title: "Error updating lead type",
@@ -372,6 +488,10 @@ export function LeadsManagement() {
   };
 
   const handleUpdateExistingPlan = async (leadId: string, plan: string) => {
+    const targetLead = leads.find(l => l.id === leadId);
+    const previousPlan = targetLead ? targetLead.lead_existing_plan : "";
+    setLeads(prev => prev.map(lead => lead.id === leadId ? { ...lead, lead_existing_plan: plan } : lead));
+
     try {
       const { error } = await supabase
         .from("leads")
@@ -379,10 +499,10 @@ export function LeadsManagement() {
         .eq("id", leadId);
 
       if (error) throw error;
-      await logHistory(leadId, "Plan Changed", `Plan changed to ${plan}`);
-      setLeads(prev => prev.map(lead => lead.id === leadId ? { ...lead, lead_existing_plan: plan } : lead));
+      logHistory(leadId, "Plan Changed", `Plan changed to ${plan}`);
       toast({ title: "Plan Updated", description: `Plan changed to ${plan}` });
     } catch (err: any) {
+      setLeads(prev => prev.map(lead => lead.id === leadId ? { ...lead, lead_existing_plan: previousPlan } : lead));
       console.error("Error updating plan:", err);
       toast({
         title: "Error updating plan",
@@ -393,6 +513,10 @@ export function LeadsManagement() {
   };
 
   const handleUpdateAssignedTo = async (leadId: string, assignedTo: string) => {
+    const targetLead = leads.find(l => l.id === leadId);
+    const previousAssignedTo = targetLead ? targetLead.assigned_to : null;
+    setLeads(prev => prev.map(lead => lead.id === leadId ? { ...lead, assigned_to: assignedTo } : lead));
+
     try {
       const { error } = await supabase
         .from("leads")
@@ -400,10 +524,10 @@ export function LeadsManagement() {
         .eq("id", leadId);
 
       if (error) throw error;
-      await logHistory(leadId, "Reassigned", `Lead reassigned to ${assignedTo}`);
-      setLeads(prev => prev.map(lead => lead.id === leadId ? { ...lead, assigned_to: assignedTo } : lead));
+      logHistory(leadId, "Reassigned", `Lead reassigned to ${assignedTo}`);
       toast({ title: "Assigned To Updated", description: `Lead assigned to ${assignedTo}` });
     } catch (err: any) {
+      setLeads(prev => prev.map(lead => lead.id === leadId ? { ...lead, assigned_to: previousAssignedTo } : lead));
       console.error("Error updating assigned to:", err);
       toast({
         title: "Error updating assignment",
@@ -414,6 +538,10 @@ export function LeadsManagement() {
   };
 
   const handleUpdateField = async (leadId: string, field: string, value: any) => {
+    const targetLead = leads.find(l => l.id === leadId);
+    const previousValue = targetLead ? (targetLead as any)[field] : null;
+    setLeads(prev => prev.map(lead => lead.id === leadId ? { ...lead, [field]: value } : lead));
+
     try {
       const { error } = await supabase
         .from("leads")
@@ -421,9 +549,9 @@ export function LeadsManagement() {
         .eq("id", leadId);
 
       if (error) throw error;
-      await logHistory(leadId, "Updated", `${field} updated manually.`);
-      setLeads(prev => prev.map(lead => lead.id === leadId ? { ...lead, [field]: value } : lead));
+      logHistory(leadId, "Updated", `${field} updated manually.`);
     } catch (err: any) {
+      setLeads(prev => prev.map(lead => lead.id === leadId ? { ...lead, [field]: previousValue } : lead));
       console.error(`Error updating ${field}:`, err);
       toast({
         title: `Error updating ${field}`,
@@ -917,6 +1045,9 @@ export function LeadsManagement() {
     return 0;
   });
 
+  const totalPages = Math.ceil(sortedFilteredLeads.length / itemsPerPage);
+  const paginatedLeads = sortedFilteredLeads.slice(0, currentPage * itemsPerPage);
+
   const isAllSelected = sortedFilteredLeads.length > 0 && sortedFilteredLeads.every(l => selectedLeadIds.includes(l.id));
 
   const handleSelectAll = (checked: boolean) => {
@@ -1130,164 +1261,24 @@ export function LeadsManagement() {
               </TableRow>
             </TableHeader>
             <TableBody>
-              {sortedFilteredLeads.map((lead, index) => {
-                const curStatus = LEAD_STATUSES.find(s => s.id === lead.lead_status) || LEAD_STATUSES[0];
-
-                return (
-                  <TableRow key={lead.id} className="hover:bg-gray-50 border-b border-gray-100">
-                    {/* CHECKBOX */}
-                    <TableCell className="p-2 text-center sticky left-0 z-10 bg-white">
-                      <Checkbox
-                        checked={selectedLeadIds.includes(lead.id)}
-                        onCheckedChange={(val) => handleSelectRow(lead.id, !!val)}
-                        className="border-gray-300 data-[state=checked]:bg-[#2e5a44] data-[state=checked]:border-[#2e5a44]"
-                      />
-                    </TableCell>
-
-                    {/* SR NO */}
-                    <TableCell className="p-2 text-center text-sm font-medium text-gray-500 sticky left-[40px] z-10 bg-white">
-                      {index + 1}
-                    </TableCell>
-
-                    {/* CLIENT NAME */}
-                    <TableCell className="p-1 sticky left-[96px] z-10 bg-white border-r border-gray-200">
-                      <EditableCell value={lead.client_name} onUpdate={(val) => handleUpdateField(lead.id, 'client_name', val)} className="font-semibold text-gray-800" />
-                    </TableCell>
-
-                    {/* CONTACT */}
-                    <TableCell className="p-1">
-                      <EditableCell value={lead.contact} onUpdate={(val) => handleUpdateField(lead.id, 'contact', val)} />
-                    </TableCell>
-
-                    {/* LEAD TYPE */}
-                    <TableCell className="p-1">
-                      <Select
-                        value={lead.lead_type || ""}
-                        onValueChange={(val) => handleUpdateLeadType(lead.id, val)}
-                      >
-                        <SelectTrigger className="h-8 border-none bg-transparent hover:bg-gray-200 text-xs rounded-md px-3 py-1 font-semibold text-gray-700 w-full focus:ring-1 focus:ring-[#2e5a44] focus:bg-white shadow-none">
-                          <SelectValue placeholder="Select type" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {LEAD_TYPES.map(t => (
-                            <SelectItem key={t} value={t} className="text-xs font-medium">
-                              {t}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                    </TableCell>
-
-                    {/* LEAD EXISTING PLAN */}
-                    <TableCell className="p-1">
-                      <Select
-                        value={lead.lead_existing_plan || ""}
-                        onValueChange={(val) => handleUpdateExistingPlan(lead.id, val)}
-                      >
-                        <SelectTrigger className="h-8 border-none bg-transparent hover:bg-gray-200 text-xs rounded-md px-3 py-1 font-semibold text-gray-700 w-full focus:ring-1 focus:ring-[#2e5a44] focus:bg-white shadow-none">
-                          <SelectValue placeholder="Select plan" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {EXISTING_PLANS.map(p => (
-                            <SelectItem key={p} value={p} className="text-xs font-medium">
-                              {p}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                    </TableCell>
-
-                    {/* LEAD STATUS */}
-                    <TableCell className="p-1">
-                      <Select
-                        value={lead.lead_status}
-                        onValueChange={(val) => handleUpdateStatus(lead.id, val)}
-                      >
-                        <SelectTrigger className={`h-8 border-none text-xs rounded-full px-3 py-1 font-bold text-center w-full focus:ring-1 focus:ring-offset-1 focus:ring-[#2e5a44] shadow-none ${curStatus.bg} ${curStatus.text}`}>
-                          <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {LEAD_STATUSES.map(s => (
-                            <SelectItem key={s.id} value={s.id} className="text-xs font-bold">
-                              {s.label}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                    </TableCell>
-
-                    {/* FOLLOW-UP DATE */}
-                    <TableCell className="p-1">
-                      <EditableCell type="date" value={lead.follow_up_date} onUpdate={(val) => handleUpdateField(lead.id, 'follow_up_date', val)} />
-                    </TableCell>
-
-                    {/* REMARK */}
-                    <TableCell className="p-1">
-                      <EditableCell value={lead.remark} onUpdate={(val) => handleUpdateField(lead.id, 'remark', val)} placeholder="No remark" />
-                    </TableCell>
-
-                    {/* Added Date (created_at - uneditable) */}
-                    <TableCell className="p-2 font-medium text-gray-700 text-sm">
-                      {lead.created_at ? new Date(lead.created_at).toLocaleDateString("en-IN", {
-                        day: "numeric",
-                        month: "short",
-                        year: "numeric"
-                      }) : "—"}
-                    </TableCell>
-
-                    {/* Admission Date */}
-                    <TableCell className="p-1">
-                      <EditableCell type="date" value={lead.admission_date} onUpdate={(val) => handleUpdateField(lead.id, 'admission_date', val)} />
-                    </TableCell>
-
-                    {/* Calling Date */}
-                    <TableCell className="p-1">
-                      <EditableCell type="date" value={lead.calling_date} onUpdate={(val) => handleUpdateField(lead.id, 'calling_date', val)} />
-                    </TableCell>
-
-                    {/* ASSIGNED TO */}
-                    <TableCell className="p-1">
-                      <Select
-                        value={lead.assigned_to || ""}
-                        onValueChange={(val) => handleUpdateAssignedTo(lead.id, val)}
-                      >
-                        <SelectTrigger className="h-8 border-none bg-transparent hover:bg-gray-200 text-xs rounded-md px-3 py-1 font-semibold text-gray-700 w-full focus:ring-1 focus:ring-[#2e5a44] focus:bg-white shadow-none">
-                          <SelectValue placeholder="Select user" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {ASSIGNED_USERS.map(u => (
-                            <SelectItem key={u} value={u} className="text-xs font-medium">
-                              {u}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                    </TableCell>
-
-                    {/* ACTIONS */}
-                    <TableCell className="text-center p-2">
-                      <div className="flex justify-center items-center gap-1">
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          className="h-8 w-8 text-indigo-600 hover:text-indigo-800 hover:bg-indigo-50"
-                          onClick={() => handleOpenHistory(lead)}
-                        >
-                          <History className="w-4 h-4" />
-                        </Button>
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          className="h-8 w-8 text-blue-600 hover:text-blue-800 hover:bg-blue-50"
-                          onClick={() => handleOpenEditDialog(lead)}
-                        >
-                          <Edit className="w-4 h-4" />
-                        </Button>
-                      </div>
-                    </TableCell>
-                  </TableRow>
-                );
-              })}
+              {paginatedLeads.map((lead, index) => (
+                <LeadRow
+                  key={lead.id}
+                  lead={lead}
+                  index={index}
+                  isSelected={selectedLeadIds.includes(lead.id)}
+                  handlers={{
+                    handleSelectRow,
+                    handleUpdateField,
+                    handleUpdateLeadType,
+                    handleUpdateExistingPlan,
+                    handleUpdateStatus,
+                    handleUpdateAssignedTo,
+                    handleOpenHistory,
+                    handleOpenEditDialog
+                  }}
+                />
+              ))}
 
               {filteredLeads.length === 0 && (
                 <TableRow>
@@ -1305,6 +1296,17 @@ export function LeadsManagement() {
             </TableBody>
           </table>
         </div>
+
+        {/* Infinite Scroll Indicator */}
+        {sortedFilteredLeads.length > 0 && (
+          <div className="flex justify-center items-center px-4 py-3 bg-gray-50 border-t border-gray-200 rounded-b-lg">
+            <div className="text-sm text-gray-500 font-medium">
+              {currentPage < totalPages 
+                ? "Scroll down to load more..." 
+                : `Showing all ${sortedFilteredLeads.length} leads`}
+            </div>
+          </div>
+        )}
       </Card>
 
       {/* Add / Edit Dialog */}
