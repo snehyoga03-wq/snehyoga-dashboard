@@ -40,6 +40,9 @@ export default function WeeklyReportDashboard() {
     const currentFetchId = ++fetchIdRef.current;
     setLoading(true);
     try {
+      const effectiveStartDate = dailyDate || startDate;
+      const effectiveEndDate = dailyDate || endDate;
+
       // 1. Fetch leads
       let leadsQuery = supabase.from('leads').select('*');
       if (selectedMember !== 'all') {
@@ -47,6 +50,12 @@ export default function WeeklyReportDashboard() {
       }
       if (selectedStatus !== 'all') {
         leadsQuery = leadsQuery.eq('lead_status', selectedStatus);
+      }
+      if (effectiveStartDate) {
+        leadsQuery = leadsQuery.gte('created_at', `${effectiveStartDate}T00:00:00.000Z`);
+      }
+      if (effectiveEndDate) {
+        leadsQuery = leadsQuery.lte('created_at', `${effectiveEndDate}T23:59:59.999Z`);
       }
       
       const { data: leadsData, error: leadsError } = await leadsQuery;
@@ -56,9 +65,14 @@ export default function WeeklyReportDashboard() {
       // For tracking "calls" and "follow-ups" completed within this week
       let historyQuery = supabase
         .from('lead_history')
-        .select('*, leads!inner(assigned_to)')
-        .gte('created_at', `${startDate}T00:00:00.000Z`)
-        .lte('created_at', `${endDate}T23:59:59.999Z`);
+        .select('*, leads!inner(assigned_to)');
+        
+      if (effectiveStartDate) {
+        historyQuery = historyQuery.gte('created_at', `${effectiveStartDate}T00:00:00.000Z`);
+      }
+      if (effectiveEndDate) {
+        historyQuery = historyQuery.lte('created_at', `${effectiveEndDate}T23:59:59.999Z`);
+      }
       
       if (selectedMember !== 'all') {
         historyQuery = historyQuery.eq('leads.assigned_to', selectedMember);
@@ -85,7 +99,7 @@ export default function WeeklyReportDashboard() {
 
   useEffect(() => {
     fetchData();
-  }, [startDate, endDate, selectedMember, selectedStatus]);
+  }, [startDate, endDate, dailyDate, selectedMember, selectedStatus]);
 
   // Derived Metrics
   const totalAssigned = leads.length;
@@ -158,8 +172,8 @@ export default function WeeklyReportDashboard() {
                 const d = e.target.value;
                 setDailyDate(d);
                 if (d) {
-                  setStartDate(d);
-                  setEndDate(d);
+                  setStartDate("");
+                  setEndDate("");
                 }
               }} />
             </div>
