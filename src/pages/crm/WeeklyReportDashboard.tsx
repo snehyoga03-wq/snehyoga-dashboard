@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
@@ -24,16 +24,20 @@ export default function WeeklyReportDashboard() {
     return d.toISOString().split('T')[0];
   });
   const [endDate, setEndDate] = useState(() => new Date().toISOString().split('T')[0]);
+  const [dailyDate, setDailyDate] = useState<string>("");
   const userRole = sessionStorage.getItem("crm_user_role");
   const username = sessionStorage.getItem("crm_username");
 
   const [selectedMember, setSelectedMember] = useState<string>(() => {
-    if (userRole === "staff" && username) return username;
+    if (userRole === "staff" && username && username !== "Shreya K") return username;
     return "all";
   });
   const [selectedStatus, setSelectedStatus] = useState<string>("all");
 
+  const fetchIdRef = useRef(0);
+
   const fetchData = async () => {
+    const currentFetchId = ++fetchIdRef.current;
     setLoading(true);
     try {
       // 1. Fetch leads
@@ -63,12 +67,19 @@ export default function WeeklyReportDashboard() {
       const { data: historyData, error: historyError } = await historyQuery;
       if (historyError) throw historyError;
 
-      setLeads(leadsData || []);
-      setHistory(historyData || []);
+      // Only update state if this is still the most recent request
+      if (currentFetchId === fetchIdRef.current) {
+        setLeads(leadsData || []);
+        setHistory(historyData || []);
+      }
     } catch (err) {
-      console.error("Error fetching report data:", err);
+      if (currentFetchId === fetchIdRef.current) {
+        console.error("Error fetching report data:", err);
+      }
     } finally {
-      setLoading(false);
+      if (currentFetchId === fetchIdRef.current) {
+        setLoading(false);
+      }
     }
   };
 
@@ -132,16 +143,27 @@ export default function WeeklyReportDashboard() {
       {/* Filters */}
       <Card className="border-none shadow-sm bg-white">
         <CardContent className="pt-6">
-          <div className="grid grid-cols-1 md:grid-cols-5 gap-4 items-end">
+          <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-6 gap-4 items-end">
             <div>
               <label className="text-xs font-semibold text-gray-500 mb-1 block">Start Date</label>
-              <Input type="date" value={startDate} onChange={e => setStartDate(e.target.value)} />
+              <Input type="date" value={startDate} onChange={e => { setStartDate(e.target.value); setDailyDate(""); }} />
             </div>
             <div>
               <label className="text-xs font-semibold text-gray-500 mb-1 block">End Date</label>
-              <Input type="date" value={endDate} onChange={e => setEndDate(e.target.value)} />
+              <Input type="date" value={endDate} onChange={e => { setEndDate(e.target.value); setDailyDate(""); }} />
             </div>
-            {userRole !== "staff" && (
+            <div>
+              <label className="text-xs font-semibold text-gray-500 mb-1 block">Daily Performance</label>
+              <Input type="date" value={dailyDate} onChange={e => {
+                const d = e.target.value;
+                setDailyDate(d);
+                if (d) {
+                  setStartDate(d);
+                  setEndDate(d);
+                }
+              }} />
+            </div>
+            {(userRole !== "staff" || username === "Shreya K") && (
               <div>
                 <label className="text-xs font-semibold text-gray-500 mb-1 block">Team Member</label>
                 <Select value={selectedMember} onValueChange={setSelectedMember}>

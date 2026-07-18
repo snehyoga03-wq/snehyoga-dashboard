@@ -886,22 +886,34 @@ export function LeadsManagement() {
     let matchesAddedDate = true;
     if (addedDateFilter) {
       if (!lead.created_at) {
-        matchesAddedDate = false;
+        matchesAddedDate = lead.follow_up_date === addedDateFilter;
       } else {
         const leadDate = new Date(lead.created_at).toISOString().split('T')[0];
-        matchesAddedDate = leadDate === addedDateFilter;
+        
+        // 1. Created on the selected date
+        const isCreatedToday = leadDate === addedDateFilter;
+        
+        // 2. Scheduled for follow-up on the selected date
+        const isFollowUpToday = lead.follow_up_date === addedDateFilter;
+        
+        // 3. Carry-forward: Created BEFORE selected date AND untouched (status is "Select Option" AND no follow_up_date)
+        const isUntouchedCarryForward = leadDate < addedDateFilter && 
+                                        lead.lead_status === "Select Option" && 
+                                        !lead.follow_up_date;
+                                        
+        matchesAddedDate = isCreatedToday || isFollowUpToday || isUntouchedCarryForward;
       }
     }
 
     return matchesSearch && matchesStatus && matchesType && matchesAssignedTo && matchesAddedDate;
   });
 
-  const todayStr = new Date().toISOString().split("T")[0];
+  const targetSortDate = addedDateFilter || new Date().toISOString().split("T")[0];
   const sortedFilteredLeads = [...filteredLeads].sort((a, b) => {
-    const aIsToday = a.follow_up_date === todayStr;
-    const bIsToday = b.follow_up_date === todayStr;
-    if (aIsToday && !bIsToday) return -1;
-    if (!aIsToday && bIsToday) return 1;
+    const aIsTargetDate = a.follow_up_date === targetSortDate;
+    const bIsTargetDate = b.follow_up_date === targetSortDate;
+    if (aIsTargetDate && !bIsTargetDate) return -1;
+    if (!aIsTargetDate && bIsTargetDate) return 1;
     return 0;
   });
 

@@ -1118,7 +1118,7 @@ const CRM = () => {
                 </div>
 
                 {/* Key Metrics Row */}
-                {sessionStorage.getItem("crm_user_role") !== "staff" && (
+                {(sessionStorage.getItem("crm_user_role") !== "staff" || sessionStorage.getItem("crm_username") === "Shreya K") && (
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
                   <Card className="border-none shadow-sm bg-blue-50/50">
                     <CardContent className="p-6">
@@ -1180,7 +1180,7 @@ const CRM = () => {
 
                 <WeeklyReportDashboard />
 
-                {sessionStorage.getItem("crm_user_role") !== "staff" && (
+                {(sessionStorage.getItem("crm_user_role") !== "staff" || sessionStorage.getItem("crm_username") === "Shreya K") && (
                 <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
                   {/* Left Column: Alerts & Recent Activity */}
                   <div className="col-span-1 lg:col-span-2 space-y-6">
