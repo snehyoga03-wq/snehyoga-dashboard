@@ -190,7 +190,8 @@ export function LeadsManagement() {
   const [searchQuery, setSearchQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState("all");
   const [typeFilter, setTypeFilter] = useState("all");
-  const [addedDateFilter, setAddedDateFilter] = useState(new Date().toISOString().split("T")[0]);
+  const [autoDateFilter, setAutoDateFilter] = useState(new Date().toISOString().split("T")[0]);
+  const [addedDateFilter, setAddedDateFilter] = useState("");
   const [assignedToFilter, setAssignedToFilter] = useState("all");
 
   const [currentPage, setCurrentPage] = useState(1);
@@ -198,7 +199,7 @@ export function LeadsManagement() {
 
   useEffect(() => {
     setCurrentPage(1);
-  }, [searchQuery, statusFilter, typeFilter, addedDateFilter, assignedToFilter]);
+  }, [searchQuery, statusFilter, typeFilter, autoDateFilter, addedDateFilter, assignedToFilter]);
 
   // Bulk Selection & Assignment States
   const [selectedLeadIds, setSelectedLeadIds] = useState<string[]>([]);
@@ -1011,32 +1012,42 @@ export function LeadsManagement() {
     const matchesAssignedTo = assignedToFilter === "all" || 
       (assignedToFilter === "unassigned" ? (!lead.assigned_to || lead.assigned_to === "") : lead.assigned_to === assignedToFilter);
     
-    let matchesAddedDate = true;
-    if (addedDateFilter) {
+    let matchesAutoDate = true;
+    if (autoDateFilter) {
       if (!lead.created_at) {
-        matchesAddedDate = lead.follow_up_date === addedDateFilter;
+        matchesAutoDate = lead.follow_up_date === autoDateFilter;
       } else {
         const leadDate = new Date(lead.created_at).toISOString().split('T')[0];
         
         // 1. Created on the selected date
-        const isCreatedToday = leadDate === addedDateFilter;
+        const isCreatedToday = leadDate === autoDateFilter;
         
         // 2. Scheduled for follow-up on the selected date
-        const isFollowUpToday = lead.follow_up_date === addedDateFilter;
+        const isFollowUpToday = lead.follow_up_date === autoDateFilter;
         
         // 3. Carry-forward: Created BEFORE selected date AND untouched (status is "Select Option" AND no follow_up_date)
-        const isUntouchedCarryForward = leadDate < addedDateFilter && 
+        const isUntouchedCarryForward = leadDate < autoDateFilter && 
                                         lead.lead_status === "Select Option" && 
                                         !lead.follow_up_date;
                                         
-        matchesAddedDate = isCreatedToday || isFollowUpToday || isUntouchedCarryForward;
+        matchesAutoDate = isCreatedToday || isFollowUpToday || isUntouchedCarryForward;
       }
     }
 
-    return matchesSearch && matchesStatus && matchesType && matchesAssignedTo && matchesAddedDate;
+    let matchesAddedDate = true;
+    if (addedDateFilter) {
+      if (lead.created_at) {
+        const leadDate = new Date(lead.created_at).toISOString().split('T')[0];
+        matchesAddedDate = leadDate === addedDateFilter;
+      } else {
+        matchesAddedDate = false;
+      }
+    }
+
+    return matchesSearch && matchesStatus && matchesType && matchesAssignedTo && matchesAutoDate && matchesAddedDate;
   });
 
-  const targetSortDate = addedDateFilter || new Date().toISOString().split("T")[0];
+  const targetSortDate = autoDateFilter || addedDateFilter || new Date().toISOString().split("T")[0];
   const sortedFilteredLeads = [...filteredLeads].sort((a, b) => {
     const aIsTargetDate = a.follow_up_date === targetSortDate;
     const bIsTargetDate = b.follow_up_date === targetSortDate;
@@ -1107,7 +1118,7 @@ export function LeadsManagement() {
       {/* Filters Card */}
       <Card className="border-none shadow-sm bg-white">
         <CardContent className="pt-6">
-          <div className="grid grid-cols-1 sm:grid-cols-5 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-6 gap-4">
             <div className="relative">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
               <Input
@@ -1155,7 +1166,31 @@ export function LeadsManagement() {
               </SelectContent>
             </Select>
 
-            <div className="relative">
+            <div className="relative" title="Auto Date Filter">
+              <div className="absolute inset-y-0 left-3 flex items-center pointer-events-none">
+                <Calendar className="w-4 h-4 text-[#2e5a44]" />
+              </div>
+              <Input
+                type="date"
+                className="pl-10 bg-white text-gray-700 h-10"
+                value={autoDateFilter}
+                onChange={e => {
+                  setAutoDateFilter(e.target.value);
+                  if (e.target.value) setAddedDateFilter("");
+                }}
+              />
+              {autoDateFilter && (
+                <button 
+                  onClick={() => setAutoDateFilter("")}
+                  className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              )}
+              <span className="absolute -top-2.5 left-2 bg-white px-1 text-[10px] text-gray-500">Auto Date</span>
+            </div>
+
+            <div className="relative" title="Added Date Filter">
               <div className="absolute inset-y-0 left-3 flex items-center pointer-events-none">
                 <Calendar className="w-4 h-4 text-gray-400" />
               </div>
@@ -1163,7 +1198,10 @@ export function LeadsManagement() {
                 type="date"
                 className="pl-10 bg-white text-gray-700 h-10"
                 value={addedDateFilter}
-                onChange={e => setAddedDateFilter(e.target.value)}
+                onChange={e => {
+                  setAddedDateFilter(e.target.value);
+                  if (e.target.value) setAutoDateFilter("");
+                }}
               />
               {addedDateFilter && (
                 <button 
@@ -1173,6 +1211,7 @@ export function LeadsManagement() {
                   <X className="w-4 h-4" />
                 </button>
               )}
+              <span className="absolute -top-2.5 left-2 bg-white px-1 text-[10px] text-gray-500">Added Date</span>
             </div>
           </div>
         </CardContent>
