@@ -378,6 +378,13 @@ export function LeadsManagement() {
     }
 
     try {
+      let finalFollowUpDate = leadForm.follow_up_date || null;
+      if (leadForm.lead_status === "Follow Up" && !finalFollowUpDate) {
+        const tomorrow = new Date();
+        tomorrow.setDate(tomorrow.getDate() + 1);
+        finalFollowUpDate = tomorrow.toISOString().split("T")[0];
+      }
+
       if (editingLead) {
         // Update
         const { error } = await supabase
@@ -392,7 +399,7 @@ export function LeadsManagement() {
             lead_existing_plan: leadForm.lead_existing_plan || null,
             lead_status: leadForm.lead_status || "Select Option",
             remark: leadForm.remark || null,
-            follow_up_date: leadForm.follow_up_date || null
+            follow_up_date: finalFollowUpDate
           })
           .eq("id", editingLead.id);
 
@@ -417,7 +424,7 @@ export function LeadsManagement() {
             lead_status: leadForm.lead_status || "Select Option",
             remark: leadForm.remark || null,
             assigned_to: null,
-            follow_up_date: leadForm.follow_up_date || null
+            follow_up_date: finalFollowUpDate
           }]).select();
 
         if (error) throw error;
@@ -441,19 +448,28 @@ export function LeadsManagement() {
   const handleUpdateStatus = async (leadId: string, status: string) => {
     const targetLead = leads.find(l => l.id === leadId);
     const previousStatus = targetLead ? targetLead.lead_status : "";
-    setLeads(prev => prev.map(lead => lead.id === leadId ? { ...lead, lead_status: status } : lead));
+    const previousFollowUpDate = targetLead ? targetLead.follow_up_date : null;
+    
+    let updatedFollowUpDate = previousFollowUpDate;
+    if (status === "Follow Up" && !updatedFollowUpDate) {
+      const tomorrow = new Date();
+      tomorrow.setDate(tomorrow.getDate() + 1);
+      updatedFollowUpDate = tomorrow.toISOString().split("T")[0];
+    }
+
+    setLeads(prev => prev.map(lead => lead.id === leadId ? { ...lead, lead_status: status, follow_up_date: updatedFollowUpDate } : lead));
 
     try {
       const { error } = await supabase
         .from("leads")
-        .update({ lead_status: status })
+        .update({ lead_status: status, follow_up_date: updatedFollowUpDate })
         .eq("id", leadId);
 
       if (error) throw error;
       logHistory(leadId, "Status Changed", `Lead status changed to ${status}`);
       toast({ title: "Status Updated", description: `Lead status changed to ${status}` });
     } catch (err: any) {
-      setLeads(prev => prev.map(lead => lead.id === leadId ? { ...lead, lead_status: previousStatus } : lead));
+      setLeads(prev => prev.map(lead => lead.id === leadId ? { ...lead, lead_status: previousStatus, follow_up_date: previousFollowUpDate } : lead));
       console.error("Error updating status:", err);
       toast({
         title: "Error updating status",

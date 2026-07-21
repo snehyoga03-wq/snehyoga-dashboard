@@ -7,6 +7,7 @@ import { Button } from '@/components/ui/button';
 import { Calendar, Users, PhoneCall, CheckCircle, Clock, ListTodo, XCircle, TrendingUp, RefreshCw, ChevronUp, ChevronDown } from 'lucide-react';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip, Legend, ResponsiveContainer } from 'recharts';
 import type { Lead } from '@/integrations/supabase/types';
+import { motion } from 'framer-motion';
 
 const ASSIGNED_USERS = ["Mayuri K", "Ragini K", "Shreya K"];
 const LEAD_STATUSES = ["Select Option", "Follow Up", "Deal Done", "Dead"];
@@ -142,7 +143,7 @@ export default function WeeklyReportDashboard() {
       <div className="flex justify-between items-center bg-white p-4 rounded-xl shadow-sm cursor-pointer border border-transparent hover:border-gray-200 transition-all" onClick={() => setIsExpanded(!isExpanded)}>
         <div>
           <h2 className="text-xl font-bold text-gray-900 flex items-center gap-2">
-            <TrendingUp className="text-[#2e5a44]" /> Weekly Report Dashboard
+            <TrendingUp className="text-[#2e5a44]" /> Overview Report Dashboard
           </h2>
           <p className="text-sm text-gray-500">Track team performance and lead activity overview.</p>
         </div>
@@ -214,13 +215,13 @@ export default function WeeklyReportDashboard() {
 
       {/* Metrics Grid */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-        <MetricCard title="Total Assigned" value={totalAssigned} icon={<Users size={20} />} color="blue" />
-        <MetricCard title="Total Calls Done" value={totalCallsDone} icon={<PhoneCall size={20} />} color="indigo" />
-        <MetricCard title="Follow-ups Completed" value={followUpsCompleted} icon={<CheckCircle size={20} />} color="emerald" />
-        <MetricCard title="Pending Follow-ups" value={pendingFollowUps} icon={<Clock size={20} />} color="amber" />
-        <MetricCard title="Converted / Joined" value={convertedLeads} icon={<TrendingUp size={20} />} color="green" />
-        <MetricCard title="Not Interested" value={deadLeads} icon={<XCircle size={20} />} color="red" />
-        <MetricCard title="Today's Pending Tasks" value={todaysPendingTasks} icon={<ListTodo size={20} />} color="orange" />
+        <MetricCard title="Total Assigned" value={totalAssigned} icon={<Users size={22} />} color="blue" delay={0.1} />
+        <MetricCard title="Total Calls Done" value={totalCallsDone} icon={<PhoneCall size={22} />} color="indigo" delay={0.15} />
+        <MetricCard title="Follow-ups Completed" value={followUpsCompleted} icon={<CheckCircle size={22} />} color="emerald" delay={0.2} />
+        <MetricCard title="Pending Follow-ups" value={pendingFollowUps} icon={<Clock size={22} />} color="amber" delay={0.25} />
+        <MetricCard title="Converted / Joined" value={convertedLeads} icon={<TrendingUp size={22} />} color="green" delay={0.3} />
+        <MetricCard title="Not Interested" value={deadLeads} icon={<XCircle size={22} />} color="red" delay={0.35} />
+        <MetricCard title="Today's Pending Tasks" value={todaysPendingTasks} icon={<ListTodo size={22} />} color="orange" delay={0.4} />
       </div>
 
       {/* Performance Analytics Chart */}
@@ -232,14 +233,31 @@ export default function WeeklyReportDashboard() {
           <div className="h-[300px] w-full">
             <ResponsiveContainer width="100%" height="100%">
               <BarChart data={chartData} margin={{ top: 20, right: 30, left: 0, bottom: 5 }}>
-                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#eee" />
-                <XAxis dataKey="name" axisLine={false} tickLine={false} />
-                <YAxis axisLine={false} tickLine={false} />
-                <RechartsTooltip cursor={{fill: '#f9fafb'}} contentStyle={{ borderRadius: '8px', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)' }} />
-                <Legend iconType="circle" />
-                <Bar dataKey="Calls" fill="#6366f1" radius={[4, 4, 0, 0]} barSize={30} />
-                <Bar dataKey="Converted" fill="#10b981" radius={[4, 4, 0, 0]} barSize={30} />
-                <Bar dataKey="Assigned" fill="#3b82f6" radius={[4, 4, 0, 0]} barSize={30} />
+                <defs>
+                  <linearGradient id="colorCalls" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="5%" stopColor="#818cf8" stopOpacity={1}/>
+                    <stop offset="95%" stopColor="#4f46e5" stopOpacity={1}/>
+                  </linearGradient>
+                  <linearGradient id="colorConverted" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="5%" stopColor="#34d399" stopOpacity={1}/>
+                    <stop offset="95%" stopColor="#059669" stopOpacity={1}/>
+                  </linearGradient>
+                  <linearGradient id="colorAssigned" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="5%" stopColor="#60a5fa" stopOpacity={1}/>
+                    <stop offset="95%" stopColor="#2563eb" stopOpacity={1}/>
+                  </linearGradient>
+                </defs>
+                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
+                <XAxis dataKey="name" axisLine={false} tickLine={false} tick={{fill: '#64748b', fontSize: 12, fontWeight: 500}} dy={10} />
+                <YAxis axisLine={false} tickLine={false} tick={{fill: '#64748b', fontSize: 12}} dx={-10} />
+                <RechartsTooltip 
+                  cursor={{fill: '#f8fafc'}} 
+                  contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.1), 0 4px 6px -4px rgb(0 0 0 / 0.1)' }} 
+                />
+                <Legend iconType="circle" wrapperStyle={{ paddingTop: '20px' }} />
+                <Bar dataKey="Calls" fill="url(#colorCalls)" radius={[6, 6, 0, 0]} barSize={24} />
+                <Bar dataKey="Converted" fill="url(#colorConverted)" radius={[6, 6, 0, 0]} barSize={24} />
+                <Bar dataKey="Assigned" fill="url(#colorAssigned)" radius={[6, 6, 0, 0]} barSize={24} />
               </BarChart>
             </ResponsiveContainer>
           </div>
@@ -250,28 +268,45 @@ export default function WeeklyReportDashboard() {
   );
 }
 
-function MetricCard({ title, value, icon, color }: { title: string, value: number, icon: React.ReactNode, color: string }) {
+function MetricCard({ title, value, icon, color, delay = 0 }: { title: string, value: number, icon: React.ReactNode, color: string, delay?: number }) {
   const colorMap: Record<string, string> = {
-    blue: "bg-blue-50 text-blue-600",
-    indigo: "bg-indigo-50 text-indigo-600",
-    emerald: "bg-emerald-50 text-emerald-600",
-    amber: "bg-amber-50 text-amber-600",
-    green: "bg-green-50 text-green-600",
-    red: "bg-red-50 text-red-600",
-    orange: "bg-orange-50 text-orange-600"
+    blue: "bg-gradient-to-br from-blue-50 to-blue-100/50 text-blue-600 border-blue-100",
+    indigo: "bg-gradient-to-br from-indigo-50 to-indigo-100/50 text-indigo-600 border-indigo-100",
+    emerald: "bg-gradient-to-br from-emerald-50 to-emerald-100/50 text-emerald-600 border-emerald-100",
+    amber: "bg-gradient-to-br from-amber-50 to-amber-100/50 text-amber-600 border-amber-100",
+    green: "bg-gradient-to-br from-green-50 to-green-100/50 text-green-600 border-green-100",
+    red: "bg-gradient-to-br from-red-50 to-red-100/50 text-red-600 border-red-100",
+    orange: "bg-gradient-to-br from-orange-50 to-orange-100/50 text-orange-600 border-orange-100"
+  };
+
+  const iconBgMap: Record<string, string> = {
+    blue: "bg-blue-100/80 shadow-inner shadow-blue-200/50",
+    indigo: "bg-indigo-100/80 shadow-inner shadow-indigo-200/50",
+    emerald: "bg-emerald-100/80 shadow-inner shadow-emerald-200/50",
+    amber: "bg-amber-100/80 shadow-inner shadow-amber-200/50",
+    green: "bg-green-100/80 shadow-inner shadow-green-200/50",
+    red: "bg-red-100/80 shadow-inner shadow-red-200/50",
+    orange: "bg-orange-100/80 shadow-inner shadow-orange-200/50"
   };
 
   return (
-    <Card className="border-none shadow-sm bg-white">
-      <CardContent className="p-5 flex items-center gap-4">
-        <div className={`p-3 rounded-xl ${colorMap[color] || 'bg-gray-100 text-gray-600'}`}>
-          {icon}
-        </div>
-        <div>
-          <p className="text-xs font-medium text-gray-500 uppercase tracking-wider">{title}</p>
-          <h3 className="text-2xl font-bold text-gray-900 mt-1">{value}</h3>
-        </div>
-      </CardContent>
-    </Card>
+    <motion.div
+      initial={{ opacity: 0, y: 20 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ duration: 0.4, delay }}
+      whileHover={{ y: -4, transition: { duration: 0.2 } }}
+    >
+      <Card className={`border shadow-sm hover:shadow-md transition-all duration-300 ${colorMap[color] || 'bg-white'}`}>
+        <CardContent className="p-5 flex items-center justify-between gap-4">
+          <div>
+            <p className="text-[11px] font-bold text-gray-500 uppercase tracking-wider mb-1">{title}</p>
+            <h3 className="text-3xl font-extrabold text-gray-900 tracking-tight">{value}</h3>
+          </div>
+          <div className={`p-3.5 rounded-2xl ${iconBgMap[color] || 'bg-gray-100 text-gray-600'}`}>
+            {icon}
+          </div>
+        </CardContent>
+      </Card>
+    </motion.div>
   );
 }
