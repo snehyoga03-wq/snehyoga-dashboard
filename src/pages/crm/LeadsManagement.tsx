@@ -9,7 +9,7 @@ import { motion } from "framer-motion";
 import {
   ClipboardList, Search, RefreshCw, Plus, Download, Upload,
   Trash2, Edit, Save, X, Calendar, User, Phone, CheckCircle, History,
-  Users, CheckSquare, FileSpreadsheet
+  Users, CheckSquare, FileSpreadsheet, FileCode, Copy, Check
 } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -212,6 +212,8 @@ export function LeadsManagement() {
   // Dialog States
   const [isOpenAddEditDialog, setIsOpenAddEditDialog] = useState(false);
   const [editingLead, setEditingLead] = useState<Lead | null>(null);
+  const [isSheetSyncOpen, setIsSheetSyncOpen] = useState(false);
+  const [copiedScript, setCopiedScript] = useState(false);
 
   const topScrollRef = useRef<HTMLDivElement>(null);
   const tableContainerRef = useRef<HTMLDivElement>(null);
@@ -1125,6 +1127,9 @@ export function LeadsManagement() {
           <Button variant="outline" size="sm" className="border-gray-200" onClick={handleImportClick}>
             <Upload className="w-4 h-4 mr-1" /> Import Data
           </Button>
+          <Button variant="outline" size="sm" className="border-blue-300 text-blue-700 hover:bg-blue-50 font-semibold" onClick={() => setIsSheetSyncOpen(true)}>
+            <FileCode className="w-4 h-4 mr-1 text-blue-600" /> Google Sheet Sync
+          </Button>
           <Button size="sm" className="bg-[#2e5a44] hover:bg-[#203f2f] text-white" onClick={handleOpenAddDialog}>
             <Plus className="w-4 h-4 mr-1" /> Add Lead
           </Button>
@@ -1631,6 +1636,237 @@ export function LeadsManagement() {
               <p className="text-center text-gray-500 py-8">No history available for this lead.</p>
             )}
           </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Google Sheet Auto Sync Dialog */}
+      <Dialog open={isSheetSyncOpen} onOpenChange={setIsSheetSyncOpen}>
+        <DialogContent className="max-w-2xl bg-white max-h-[85vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle className="text-[#2e5a44] font-bold text-xl flex items-center gap-2">
+              <FileCode className="w-6 h-6 text-[#2e5a44]" /> Google Sheet 1-Minute Auto-Sync Setup
+            </DialogTitle>
+          </DialogHeader>
+
+          <div className="space-y-4 py-2 text-sm text-gray-700">
+            <div className="bg-blue-50 border border-blue-200 rounded-lg p-3 text-blue-900 text-xs leading-relaxed">
+              <strong>⚡ Automated 1-Minute Scanner:</strong> This script scans your Google Sheet every minute, extracts <strong>Client Name</strong>, <strong>Contact</strong>, and <strong>Admission Date</strong>, checks if the lead is already in our CRM system, and adds only new, non-existing leads!
+            </div>
+
+            <div className="border border-gray-200 rounded-lg p-3 bg-gray-50 space-y-2">
+              <p className="font-semibold text-gray-900 text-xs uppercase tracking-wider">Required Sheet Header Columns (Row 1):</p>
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs font-mono">
+                <span className="bg-emerald-100 text-emerald-800 px-2 py-1 rounded font-bold border border-emerald-300">1. Client Name *</span>
+                <span className="bg-emerald-100 text-emerald-800 px-2 py-1 rounded font-bold border border-emerald-300">2. Contact *</span>
+                <span className="bg-gray-200 text-gray-700 px-2 py-1 rounded">3. Email</span>
+                <span className="bg-gray-200 text-gray-700 px-2 py-1 rounded">4. Amount Paid</span>
+                <span className="bg-emerald-100 text-emerald-800 px-2 py-1 rounded font-bold border border-emerald-300">5. Admission Date *</span>
+                <span className="bg-gray-200 text-gray-700 px-2 py-1 rounded">6. End Date</span>
+                <span className="bg-gray-200 text-gray-700 px-2 py-1 rounded">7. Plan</span>
+                <span className="bg-gray-200 text-gray-700 px-2 py-1 rounded">8. Status</span>
+              </div>
+            </div>
+
+            <div className="space-y-2">
+              <p className="font-bold text-gray-900">Step-by-Step Setup Instructions:</p>
+              <ol className="list-decimal pl-5 space-y-1.5 text-xs text-gray-600">
+                <li>Open your Google Sheet containing the lead data.</li>
+                <li>In top menu, click <strong>Extensions &gt; Apps Script</strong>.</li>
+                <li>Delete any default code inside the Apps Script editor.</li>
+                <li>Copy the script below and paste it into the Apps Script editor.</li>
+                <li>Click <strong>Save</strong> (Ctrl + S or Cmd + S).</li>
+                <li>From the top toolbar dropdown, select the function <strong className="text-[#2e5a44]">setup1MinuteTrigger</strong> and click <strong>Run</strong>.</li>
+                <li>Grant standard permissions when Google prompts you. You're all set!</li>
+              </ol>
+            </div>
+
+            <div className="space-y-2">
+              <div className="flex justify-between items-center">
+                <span className="font-semibold text-xs text-gray-700">Google Apps Script Code:</span>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => {
+                    const scriptCode = `var SUPABASE_URL = "https://bzqwaxqzggejpejyxhde.supabase.co";
+var SUPABASE_KEY = "sb_publishable_aWZ6_LgTmBCAj7RHgmoDwg_YB4H1Ts4";
+
+function scanAndSyncLeads() {
+  try {
+    var sheet = SpreadsheetApp.getActiveSpreadsheet().getActiveSheet();
+    var data = sheet.getDataRange().getValues();
+    if (data.length <= 1) return;
+
+    var headerRow = data[0].map(function(h) { return String(h || "").trim().toLowerCase(); });
+    var clientNameIdx = headerRow.indexOf("client name");
+    var contactIdx = headerRow.indexOf("contact");
+    var admissionDateIdx = headerRow.indexOf("admission date");
+    
+    var crmStatusIdx = -1;
+    for (var c = 0; c < headerRow.length; c++) {
+      var h = headerRow[c];
+      if (h.indexOf("lead crm status") !== -1 || h.indexOf("crm status") !== -1) {
+        crmStatusIdx = c;
+        break;
+      }
+    }
+
+    if (clientNameIdx === -1) clientNameIdx = headerRow.findIndex(function(h) { return h.includes("client") || h.includes("name"); });
+    if (contactIdx === -1) contactIdx = headerRow.findIndex(function(h) { return h.includes("contact") || h.includes("phone") || h.includes("mobile"); });
+    if (admissionDateIdx === -1) admissionDateIdx = headerRow.findIndex(function(h) { return h.includes("admission") || h.includes("date"); });
+
+    if (clientNameIdx === -1 || contactIdx === -1) return;
+
+    if (crmStatusIdx === -1) {
+      crmStatusIdx = 8;
+      sheet.getRange(1, 9).setValue("lead CRM status").setFontWeight("bold");
+    }
+
+    var response = UrlFetchApp.fetch(SUPABASE_URL + "/rest/v1/leads?select=contact,client_name", {
+      method: "get",
+      headers: { "apikey": SUPABASE_KEY, "Authorization": "Bearer " + SUPABASE_KEY },
+      muteHttpExceptions: true
+    });
+    if (response.getResponseCode() !== 200) return;
+
+    var existingLeads = JSON.parse(response.getContentText());
+    var existingSet = {};
+    for (var i = 0; i < existingLeads.length; i++) {
+      var item = existingLeads[i];
+      if (item.contact) {
+        var cleanC = String(item.contact).replace(/\\D/g, "");
+        if (cleanC) existingSet[cleanC] = true;
+        existingSet[String(item.contact).trim().toLowerCase()] = true;
+      }
+      if (item.client_name && item.contact) {
+        existingSet[(String(item.client_name).trim() + "_" + String(item.contact).trim()).toLowerCase()] = true;
+      }
+    }
+
+    var newLeadsToInsert = [];
+
+    for (var r = 1; r < data.length; r++) {
+      var row = data[r];
+      var clientName = String(row[clientNameIdx] || "").trim();
+      var contact = String(row[contactIdx] || "").trim();
+      var rawAdmissionDate = admissionDateIdx !== -1 ? row[admissionDateIdx] : null;
+
+      if (!clientName || !contact) continue;
+
+      var cleanDigits = contact.replace(/\\D/g, "");
+      var contactLower = contact.toLowerCase();
+      var comboKey = (clientName + "_" + contact).toLowerCase();
+
+      if (existingSet[cleanDigits] || existingSet[contactLower] || existingSet[comboKey]) {
+        sheet.getRange(r + 1, crmStatusIdx + 1).setValue("Done");
+        continue;
+      }
+
+      var formattedAdmissionDate = parseSheetDate(rawAdmissionDate);
+      newLeadsToInsert.push({
+        client_name: clientName,
+        contact: contact,
+        admission_date: formattedAdmissionDate,
+        lead_status: "Follow Up",
+        created_at: new Date().toISOString(),
+        rowIndex: r + 1
+      });
+
+      if (cleanDigits) existingSet[cleanDigits] = true;
+      existingSet[contactLower] = true;
+      existingSet[comboKey] = true;
+    }
+
+    if (newLeadsToInsert.length > 0) {
+      var payloadData = newLeadsToInsert.map(function(item) {
+        return {
+          client_name: item.client_name,
+          contact: item.contact,
+          admission_date: item.admission_date,
+          lead_status: item.lead_status,
+          created_at: item.created_at
+        };
+      });
+
+      var postResponse = UrlFetchApp.fetch(SUPABASE_URL + "/rest/v1/leads", {
+        method: "post",
+        headers: {
+          "apikey": SUPABASE_KEY,
+          "Authorization": "Bearer " + SUPABASE_KEY,
+          "Content-Type": "application/json",
+          "Prefer": "return=minimal"
+        },
+        payload: JSON.stringify(payloadData),
+        muteHttpExceptions: true
+      });
+
+      var statusCode = postResponse.getResponseCode();
+      if (statusCode === 201 || statusCode === 200) {
+        for (var k = 0; k < newLeadsToInsert.length; k++) {
+          sheet.getRange(newLeadsToInsert[k].rowIndex, crmStatusIdx + 1).setValue("Done");
+        }
+      }
+    }
+
+    SpreadsheetApp.flush();
+  } catch (err) { Logger.log("Error: " + err.toString()); }
+}`; }
+}
+
+function parseSheetDate(val) {
+  if (!val) return null;
+  if (val instanceof Date) {
+    if (isNaN(val.getTime())) return null;
+    return Utilities.formatDate(val, Session.getScriptTimeZone(), "yyyy-MM-dd");
+  }
+  var strVal = String(val).trim();
+  if (!strVal) return null;
+  if (/^\\d{4}-\\d{2}-\\d{2}$/.test(strVal)) return strVal;
+  var parsed = new Date(strVal);
+  if (!isNaN(parsed.getTime())) return Utilities.formatDate(parsed, Session.getScriptTimeZone(), "yyyy-MM-dd");
+  return null;
+}
+
+function setup1MinuteTrigger() {
+  deleteExistingTriggers();
+  ScriptApp.newTrigger("scanAndSyncLeads").timeBased().everyMinutes(1).create();
+}
+
+function deleteExistingTriggers() {
+  var triggers = ScriptApp.getProjectTriggers();
+  for (var i = 0; i < triggers.length; i++) {
+    if (triggers[i].getHandlerFunction() === "scanAndSyncLeads") ScriptApp.deleteTrigger(triggers[i]);
+  }
+}`;
+                    navigator.clipboard.writeText(scriptCode);
+                    setCopiedScript(true);
+                    toast({ title: "Script Copied!", description: "Google Apps Script code copied to clipboard." });
+                    setTimeout(() => setCopiedScript(false), 3000);
+                  }}
+                >
+                  {copiedScript ? <Check className="w-3.5 h-3.5 mr-1 text-green-600" /> : <Copy className="w-3.5 h-3.5 mr-1" />}
+                  {copiedScript ? "Copied!" : "Copy Script"}
+                </Button>
+              </div>
+              <textarea
+                readOnly
+                rows={8}
+                className="w-full text-xs font-mono p-3 bg-gray-900 text-gray-100 rounded-lg focus:outline-none"
+                value={`// Read full code in google-apps-script.js file in repository or click Copy Script above!
+var SUPABASE_URL = "https://bzqwaxqzggejpejyxhde.supabase.co";
+var SUPABASE_KEY = "sb_publishable_aWZ6_LgTmBCAj7RHgmoDwg_YB4H1Ts4";
+
+function scanAndSyncLeads() {
+  // Scans sheet every 1 minute -> checks database for duplicates -> inserts new Client Name, Contact, Admission Date
+}`}
+              />
+            </div>
+          </div>
+
+          <DialogFooter>
+            <Button className="bg-[#2e5a44] hover:bg-[#203f2f] text-white" onClick={() => setIsSheetSyncOpen(false)}>
+              Close
+            </Button>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
     </div>

@@ -1,80 +1,254 @@
-// Google Apps Script code for receiving form submissions
-// Deploy this as a Web App in Google Apps Script
+// ==============================================================================
+// SNEHYOGA CRM - Google Sheet Auto Sync Script (1-Minute Automated Scanner)
+// ==============================================================================
+//
+// INSTRUCTIONS FOR GOOGLE SHEET:
+// 1. Open your Google Sheet containing the lead data.
+// 2. Row 1 header columns:
+//    Client Name | Contact | Email | Amount Paid | Admission Date | End Date | Plan | Status | lead CRM status
+// 3. Go to Extensions > Apps Script in the Google Sheet menu.
+// 4. Erase any default code, paste THIS complete file, and click Save (Ctrl + S).
+// 5. Select function "setup1MinuteTrigger" from the dropdown and click "Run".
+// 6. Authorize permissions when prompted by Google.
+// 7. Your Google Sheet will automatically scan every 1 minute, add new leads to CRM,
+//    and update Column I ("lead CRM status") to "Done"!
+// ==============================================================================
 
-// SETUP INSTRUCTIONS:
-// 1. Open Google Sheets and create a new spreadsheet
-// 2. Go to Extensions > Apps Script
-// 3. Delete any existing code and paste this code
-// 4. Click "Deploy" > "New deployment"
-// 5. Select type: "Web app"
-// 6. Execute as: "Me"
-// 7. Who has access: "Anyone"
-// 8. Click "Deploy" and copy the Web App URL
-// 9. Paste that URL in src/components/RegistrationForm.tsx where it says "YOUR_GOOGLE_SCRIPT_URL_HERE"
+var SUPABASE_URL = "https://bzqwaxqzggejpejyxhde.supabase.co";
+var SUPABASE_KEY = "sb_publishable_aWZ6_LgTmBCAj7RHgmoDwg_YB4H1Ts4";
 
-function doPost(e) {
+/**
+ * Main Sync Function: Scans Google Sheet every minute, checks for duplicates,
+ * posts new leads to Supabase CRM, and updates Column I ("lead CRM status") to "Done".
+ */
+function scanAndSyncLeads() {
   try {
-    // Get the active spreadsheet
     var sheet = SpreadsheetApp.getActiveSpreadsheet().getActiveSheet();
+    var data = sheet.getDataRange().getValues();
     
-    // If this is the first time, add headers
-    if (sheet.getLastRow() === 0) {
-      sheet.appendRow([
-        "Timestamp",
-        "Name",
-        "Phone"
-      ]);
-      
-      // Format header row
-      var headerRange = sheet.getRange(1, 1, 1, 3);
-      headerRange.setFontWeight("bold");
-      headerRange.setBackground("#4CAF50");
-      headerRange.setFontColor("#FFFFFF");
+    if (data.length <= 1) {
+      Logger.log("[Sync] Sheet is empty or contains only headers.");
+      return;
     }
+
+    // 1. Locate column headers dynamically (case-insensitive)
+    var headerRow = data[0].map(function(h) { return String(h || "").trim().toLowerCase(); });
     
-    // Get form data
-    var timestamp = new Date();
-    var name = e.parameter.name || "";
-    var phone = e.parameter.phone || "";
+    var clientNameIdx = headerRow.indexOf("client name");
+    var contactIdx = headerRow.indexOf("contact");
+    var admissionDateIdx = headerRow.indexOf("admission date");
     
-    // Add new row with data
-    sheet.appendRow([
-      timestamp,
-      name,
-      phone
-    ]);
+    // Find Column I / "lead CRM status"
+    var crmStatusIdx = -1;
+    for (var c = 0; c < headerRow.length; c++) {
+      var h = headerRow[c];
+      if (h.indexOf("lead crm status") !== -1 || h.indexOf("crm status") !== -1) {
+        crmStatusIdx = c;
+        break;
+      }
+    }
+
+    // Fallbacks if header names have slight variation
+    if (clientNameIdx === -1) {
+      clientNameIdx = headerRow.findIndex(function(h) { return h.includes("client") || h.includes("name"); });
+    }
+    if (contactIdx === -1) {
+      contactIdx = headerRow.findIndex(function(h) { return h.includes("contact") || h.includes("phone") || h.includes("mobile"); });
+    }
+    if (admissionDateIdx === -1) {
+      admissionDateIdx = headerRow.findIndex(function(h) { return h.includes("admission") || h.includes("date"); });
+    }
+
+    if (clientNameIdx === -1 || contactIdx === -1) {
+      Logger.log("[Sync Error] Could not find required column headers ('Client Name', 'Contact'). Header row: " + JSON.stringify(headerRow));
+      return;
+    }
+
+    // If 'lead CRM status' column does not exist, default to Column I (9th column / index 8)
+    if (crmStatusIdx === -1) {
+      crmStatusIdx = 8; // Column I
+      sheet.getRange(1, 9).setValue("lead CRM status").setFontWeight("bold");
+    }
+
+    // 2. Fetch existing leads from Supabase database for duplicate checking
+    var getOptions = {
+      method: "get",
+      headers: {
+        "apikey": SUPABASE_KEY,
+        "Authorization": "Bearer " + SUPABASE_KEY
+      },
+      muteHttpExceptions: true
+    };
+
+    var response = UrlFetchApp.fetch(SUPABASE_URL + "/rest/v1/leads?select=contact,client_name", getOptions);
+    if (response.getResponseCode() !== 200) {
+      Logger.log("[Sync Error] Failed to fetch existing leads from Supabase. Response: " + response.getContentText());
+      return;
+    }
+
+    var existingLeads = JSON.parse(response.getContentText());
     
-    // Auto-resize columns for better readability
-    sheet.autoResizeColumns(1, 3);
-    
-    // Return success response
-    return ContentService
-      .createTextOutput(JSON.stringify({
-        "status": "success",
-        "message": "Data saved successfully"
-      }))
-      .setMimeType(ContentService.MimeType.JSON);
-      
-  } catch (error) {
-    // Return error response
-    return ContentService
-      .createTextOutput(JSON.stringify({
-        "status": "error",
-        "message": error.toString()
-      }))
-      .setMimeType(ContentService.MimeType.JSON);
+    // Build lookup set of existing contacts/names
+    var existingSet = {};
+    for (var i = 0; i < existingLeads.length; i++) {
+      var item = existingLeads[i];
+      if (item.contact) {
+        var cleanC = String(item.contact).replace(/\D/g, "");
+        if (cleanC) existingSet[cleanC] = true;
+        existingSet[String(item.contact).trim().toLowerCase()] = true;
+      }
+      if (item.client_name && item.contact) {
+        var combo = (String(item.client_name).trim() + "_" + String(item.contact).trim()).toLowerCase();
+        existingSet[combo] = true;
+      }
+    }
+
+    // 3. Process each row from Google Sheet
+    var newLeadsToInsert = [];
+
+    for (var r = 1; r < data.length; r++) {
+      var row = data[r];
+      var rawName = row[clientNameIdx];
+      var rawContact = row[contactIdx];
+      var rawAdmissionDate = admissionDateIdx !== -1 ? row[admissionDateIdx] : null;
+
+      var clientName = String(rawName || "").trim();
+      var contact = String(rawContact || "").trim();
+
+      // Skip empty rows
+      if (!clientName || !contact) continue;
+
+      var cleanDigits = contact.replace(/\D/g, "");
+      var contactLower = contact.toLowerCase();
+      var comboKey = (clientName + "_" + contact).toLowerCase();
+
+      // Check if lead is ALREADY in CRM
+      if (existingSet[cleanDigits] || existingSet[contactLower] || existingSet[comboKey]) {
+        // Mark status as Done in Column I directly
+        sheet.getRange(r + 1, crmStatusIdx + 1).setValue("Done");
+        continue;
+      }
+
+      // Format Admission Date to YYYY-MM-DD
+      var formattedAdmissionDate = parseSheetDate(rawAdmissionDate);
+
+      // Prepare lead object with row index saved
+      newLeadsToInsert.push({
+        client_name: clientName,
+        contact: contact,
+        admission_date: formattedAdmissionDate,
+        lead_status: "Follow Up",
+        created_at: new Date().toISOString(),
+        rowIndex: r + 1
+      });
+
+      // Mark in local set
+      if (cleanDigits) existingSet[cleanDigits] = true;
+      existingSet[contactLower] = true;
+      existingSet[comboKey] = true;
+    }
+
+    // 4. Send new leads to Supabase REST API
+    if (newLeadsToInsert.length > 0) {
+      Logger.log("[Sync] Found " + newLeadsToInsert.length + " new lead(s). Posting to CRM...");
+
+      var payloadData = newLeadsToInsert.map(function(item) {
+        return {
+          client_name: item.client_name,
+          contact: item.contact,
+          admission_date: item.admission_date,
+          lead_status: item.lead_status,
+          created_at: item.created_at
+        };
+      });
+
+      var postOptions = {
+        method: "post",
+        headers: {
+          "apikey": SUPABASE_KEY,
+          "Authorization": "Bearer " + SUPABASE_KEY,
+          "Content-Type": "application/json",
+          "Prefer": "return=minimal"
+        },
+        payload: JSON.stringify(payloadData),
+        muteHttpExceptions: true
+      };
+
+      var postResponse = UrlFetchApp.fetch(SUPABASE_URL + "/rest/v1/leads", postOptions);
+      var statusCode = postResponse.getResponseCode();
+
+      if (statusCode === 201 || statusCode === 200) {
+        Logger.log("[Sync Success] Successfully added " + newLeadsToInsert.length + " lead(s) to CRM.");
+        // Mark newly added leads as Done in Column I
+        for (var k = 0; k < newLeadsToInsert.length; k++) {
+          sheet.getRange(newLeadsToInsert[k].rowIndex, crmStatusIdx + 1).setValue("Done");
+        }
+      } else {
+        Logger.log("[Sync Error] Failed to post leads. Code: " + statusCode + ", Body: " + postResponse.getContentText());
+      }
+    } else {
+      Logger.log("[Sync] Scan finished. No new leads to add.");
+    }
+
+    // Force Google Sheet to flush and display all cell updates immediately
+    SpreadsheetApp.flush();
+    Logger.log("[Sync Complete] All sheet statuses in Column I updated.");
+
+  } catch (err) {
+    Logger.log("[Sync Exception] Error: " + err.toString());
   }
 }
 
-// Test function to verify the script works
-function testScript() {
-  var testData = {
-    parameter: {
-      name: "Test User",
-      phone: "9876543210"
+/**
+ * Helper function to parse dates into YYYY-MM-DD format
+ */
+function parseSheetDate(val) {
+  if (!val) return null;
+  if (val instanceof Date) {
+    if (isNaN(val.getTime())) return null;
+    return Utilities.formatDate(val, Session.getScriptTimeZone(), "yyyy-MM-dd");
+  }
+  var strVal = String(val).trim();
+  if (!strVal) return null;
+  if (/^\d{4}-\d{2}-\d{2}$/.test(strVal)) return strVal;
+  var parsed = new Date(strVal);
+  if (!isNaN(parsed.getTime())) {
+    return Utilities.formatDate(parsed, Session.getScriptTimeZone(), "yyyy-MM-dd");
+  }
+  return null;
+}
+
+/**
+ * Run this function ONCE to set up automatic scanning every 1 minute.
+ */
+function setup1MinuteTrigger() {
+  deleteExistingTriggers();
+
+  ScriptApp.newTrigger("scanAndSyncLeads")
+    .timeBased()
+    .everyMinutes(1)
+    .create();
+
+  Logger.log("[Trigger] Successfully set up 1-minute automatic scanner trigger!");
+}
+
+/**
+ * Helper to delete triggers if resetting setup.
+ */
+function deleteExistingTriggers() {
+  var triggers = ScriptApp.getProjectTriggers();
+  for (var i = 0; i < triggers.length; i++) {
+    if (triggers[i].getHandlerFunction() === "scanAndSyncLeads") {
+      ScriptApp.deleteTrigger(triggers[i]);
     }
-  };
-  
-  var result = doPost(testData);
-  Logger.log(result.getContent());
+  }
+}
+
+/**
+ * Manual test function - run from Apps Script console to verify connection & status update.
+ */
+function testManualSync() {
+  Logger.log("Starting manual test scan...");
+  scanAndSyncLeads();
+  Logger.log("Manual test scan completed.");
 }
