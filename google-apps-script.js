@@ -11,7 +11,7 @@
 // 5. Select function "setup1MinuteTrigger" from the dropdown and click "Run".
 // 6. Authorize permissions when prompted by Google.
 // 7. Your Google Sheet will automatically scan every 1 minute, add new leads to CRM with ASSIGNED TO staff,
-//    and update Column J ("lead CRM status") to "Done"!
+//    update existing leads if ASSIGNED TO is changed, and update Column J ("lead CRM status") to "Done"!
 // ==============================================================================
 
 var SUPABASE_URL = "https://bzqwaxqzggejpejyxhde.supabase.co";
@@ -19,7 +19,7 @@ var SUPABASE_KEY = "sb_publishable_aWZ6_LgTmBCAj7RHgmoDwg_YB4H1Ts4";
 
 /**
  * Main Sync Function: Scans Google Sheet every minute, checks for duplicates,
- * posts new leads to Supabase CRM (including ASSIGNED TO staff),
+ * posts new leads to Supabase CRM (including ASSIGNED TO staff), updates existing lead assignments,
  * and updates "lead CRM status" column to "Done".
  */
 function scanAndSyncLeads() {
@@ -81,7 +81,7 @@ function scanAndSyncLeads() {
       sheet.getRange(1, 10).setValue("lead CRM status").setFontWeight("bold");
     }
 
-    // 2. Fetch existing leads from Supabase database for duplicate checking
+    // 2. Fetch existing leads from Supabase database for duplicate checking & assignment updates
     var getOptions = {
       method: "get",
       headers: {
@@ -91,7 +91,7 @@ function scanAndSyncLeads() {
       muteHttpExceptions: true
     };
 
-    var response = UrlFetchApp.fetch(SUPABASE_URL + "/rest/v1/leads?select=contact,client_name", getOptions);
+    var response = UrlFetchApp.fetch(SUPABASE_URL + "/rest/v1/leads?select=id,contact,client_name,assigned_to", getOptions);
     if (response.getResponseCode() !== 200) {
       Logger.log("[Sync Error] Failed to fetch existing leads from Supabase. Response: " + response.getContentText());
       return;
@@ -99,23 +99,45 @@ function scanAndSyncLeads() {
 
     var existingLeads = JSON.parse(response.getContentText());
     
-    // Build lookup set of existing contacts/names
+    // Build lookup maps of existing leads
+    var existingMap = {};
     var existingSet = {};
     for (var i = 0; i < existingLeads.length; i++) {
       var item = existingLeads[i];
       if (item.contact) {
         var cleanC = String(item.contact).replace(/\D/g, "");
-        if (cleanC) existingSet[cleanC] = true;
-        existingSet[String(item.contact).trim().toLowerCase()] = true;
+        if (cleanC) {
+          existingSet[cleanC] = true;
+          existingMap[cleanC] = item;
+        }
+        var contactLow = String(item.contact).trim().toLowerCase();
+        existingSet[contactLow] = true;
+        existingMap[contactLow] = item;
       }
       if (item.client_name && item.contact) {
         var combo = (String(item.client_name).trim() + "_" + String(item.contact).trim()).toLowerCase();
         existingSet[combo] = true;
+        existingMap[combo] = item;
       }
+    }
+
+    // Standardize staff names case-insensitively (e.g. "Ragini k" -> "Ragini K")
+    var KNOWN_STAFF = ["Mayuri K", "Ragini K", "Shreya K"];
+    function formatAssignedTo(val) {
+      if (!val) return null;
+      var str = String(val).trim();
+      if (!str) return null;
+      for (var s = 0; s < KNOWN_STAFF.length; s++) {
+        if (KNOWN_STAFF[s].toLowerCase() === str.toLowerCase()) {
+          return KNOWN_STAFF[s];
+        }
+      }
+      return str;
     }
 
     // 3. Process each row from Google Sheet
     var newLeadsToInsert = [];
+    var existingLeadsToUpdate = [];
 
     for (var r = 1; r < data.length; r++) {
       var row = data[r];
@@ -126,7 +148,7 @@ function scanAndSyncLeads() {
 
       var clientName = String(rawName || "").trim();
       var contact = String(rawContact || "").trim();
-      var assignedTo = String(rawAssignedTo || "").trim() || null;
+      var assignedTo = formatAssignedTo(rawAssignedTo);
 
       // Skip empty rows
       if (!clientName || !contact) continue;
@@ -135,17 +157,28 @@ function scanAndSyncLeads() {
       var contactLower = contact.toLowerCase();
       var comboKey = (clientName + "_" + contact).toLowerCase();
 
-      // Check if lead is ALREADY in CRM
-      if (existingSet[cleanDigits] || existingSet[contactLower] || existingSet[comboKey]) {
-        // Mark status as Done in lead CRM status column directly
+      var existingItem = existingMap[cleanDigits] || existingMap[contactLower] || existingMap[comboKey];
+
+      // If ALREADY in CRM
+      if (existingItem) {
+        // Mark status as Done in lead CRM status column
         sheet.getRange(r + 1, crmStatusIdx + 1).setValue("Done");
+
+        // If sheet has an assigned_to value and database assigned_to is different or null, prepare update
+        if (assignedTo && (existingItem.assigned_to || "").toLowerCase() !== assignedTo.toLowerCase()) {
+          existingLeadsToUpdate.push({
+            id: existingItem.id,
+            assigned_to: assignedTo
+          });
+          existingItem.assigned_to = assignedTo; // update in-memory map
+        }
         continue;
       }
 
       // Format Admission Date to YYYY-MM-DD
       var formattedAdmissionDate = parseSheetDate(rawAdmissionDate);
 
-      // Prepare lead object with row index saved
+      // Prepare new lead object with row index saved
       newLeadsToInsert.push({
         client_name: clientName,
         contact: contact,
@@ -162,7 +195,28 @@ function scanAndSyncLeads() {
       existingSet[comboKey] = true;
     }
 
-    // 4. Send new leads to Supabase REST API
+    // 4. Update existing leads in Supabase if ASSIGNED TO was added/changed in Google Sheet
+    if (existingLeadsToUpdate.length > 0) {
+      Logger.log("[Sync] Updating assigned_to for " + existingLeadsToUpdate.length + " existing lead(s)...");
+      for (var u = 0; u < existingLeadsToUpdate.length; u++) {
+        var updateObj = existingLeadsToUpdate[u];
+        var patchOptions = {
+          method: "patch",
+          headers: {
+            "apikey": SUPABASE_KEY,
+            "Authorization": "Bearer " + SUPABASE_KEY,
+            "Content-Type": "application/json",
+            "Prefer": "return=minimal"
+          },
+          payload: JSON.stringify({ assigned_to: updateObj.assigned_to }),
+          muteHttpExceptions: true
+        };
+        var patchResponse = UrlFetchApp.fetch(SUPABASE_URL + "/rest/v1/leads?id=eq." + updateObj.id, patchOptions);
+        Logger.log("[Sync Patch] Lead ID " + updateObj.id + " updated to assigned_to=" + updateObj.assigned_to + " (Status: " + patchResponse.getResponseCode() + ")");
+      }
+    }
+
+    // 5. Send new leads to Supabase REST API
     if (newLeadsToInsert.length > 0) {
       Logger.log("[Sync] Found " + newLeadsToInsert.length + " new lead(s). Posting to CRM...");
 
@@ -202,12 +256,12 @@ function scanAndSyncLeads() {
         Logger.log("[Sync Error] Failed to post leads. Code: " + statusCode + ", Body: " + postResponse.getContentText());
       }
     } else {
-      Logger.log("[Sync] Scan finished. No new leads to add.");
+      Logger.log("[Sync] Scan finished. No new leads to insert.");
     }
 
     // Force Google Sheet to flush and display all cell updates immediately
     SpreadsheetApp.flush();
-    Logger.log("[Sync Complete] All sheet statuses in lead CRM status column updated.");
+    Logger.log("[Sync Complete] All sheet statuses and assignments synchronized.");
 
   } catch (err) {
     Logger.log("[Sync Exception] Error: " + err.toString());

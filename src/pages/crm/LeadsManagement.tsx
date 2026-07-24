@@ -156,14 +156,19 @@ const LeadRow = React.memo(({ lead, index, isSelected, handlers }: any) => {
         <EditableCell type="date" value={lead.calling_date} onUpdate={(val) => handleUpdateField(lead.id, 'calling_date', val)} />
       </TableCell>
       <TableCell className="p-1">
-        <Select value={lead.assigned_to || ""} onValueChange={(val) => handleUpdateAssignedTo(lead.id, val)}>
-          <SelectTrigger className="h-8 border-none bg-transparent hover:bg-gray-200 text-xs rounded-md px-3 py-1 font-semibold text-gray-700 w-full focus:ring-1 focus:ring-[#2e5a44] focus:bg-white shadow-none">
-            <SelectValue placeholder="Select user" />
-          </SelectTrigger>
-          <SelectContent>
-            {ASSIGNED_USERS.map(u => (<SelectItem key={u} value={u} className="text-xs font-medium">{u}</SelectItem>))}
-          </SelectContent>
-        </Select>
+        {(() => {
+          const matchedUser = ASSIGNED_USERS.find(u => u.toLowerCase() === (lead.assigned_to || "").trim().toLowerCase()) || lead.assigned_to || "";
+          return (
+            <Select value={matchedUser} onValueChange={(val) => handleUpdateAssignedTo(lead.id, val)}>
+              <SelectTrigger className="h-8 border-none bg-transparent hover:bg-gray-200 text-xs rounded-md px-3 py-1 font-semibold text-gray-700 w-full focus:ring-1 focus:ring-[#2e5a44] focus:bg-white shadow-none">
+                <SelectValue placeholder="Select user" />
+              </SelectTrigger>
+              <SelectContent>
+                {ASSIGNED_USERS.map(u => (<SelectItem key={u} value={u} className="text-xs font-medium">{u}</SelectItem>))}
+              </SelectContent>
+            </Select>
+          );
+        })()}
       </TableCell>
       <TableCell className="text-center p-2">
         <div className="flex justify-center items-center gap-1">
@@ -1029,7 +1034,7 @@ export function LeadsManagement() {
     const matchesStatus = statusFilter === "all" || lead.lead_status === statusFilter;
     const matchesType = typeFilter === "all" || lead.lead_type === typeFilter;
     const matchesAssignedTo = assignedToFilter === "all" || 
-      (assignedToFilter === "unassigned" ? (!lead.assigned_to || lead.assigned_to === "") : lead.assigned_to === assignedToFilter);
+      (assignedToFilter === "unassigned" ? (!lead.assigned_to || lead.assigned_to === "") : (!!lead.assigned_to && lead.assigned_to.trim().toLowerCase() === assignedToFilter.toLowerCase()));
     
     let matchesAutoDate = true;
     if (autoDateFilter) {
@@ -1733,7 +1738,18 @@ function scanAndSyncLeads() {
       sheet.getRange(1, 10).setValue("lead CRM status").setFontWeight("bold");
     }
 
-    var response = UrlFetchApp.fetch(SUPABASE_URL + "/rest/v1/leads?select=contact,client_name", {
+    var KNOWN_STAFF = ["Mayuri K", "Ragini K", "Shreya K"];
+    function formatAssignedTo(val) {
+      if (!val) return null;
+      var str = String(val).trim();
+      if (!str) return null;
+      for (var s = 0; s < KNOWN_STAFF.length; s++) {
+        if (KNOWN_STAFF[s].toLowerCase() === str.toLowerCase()) return KNOWN_STAFF[s];
+      }
+      return str;
+    }
+
+    var response = UrlFetchApp.fetch(SUPABASE_URL + "/rest/v1/leads?select=id,contact,client_name,assigned_to", {
       method: "get",
       headers: { "apikey": SUPABASE_KEY, "Authorization": "Bearer " + SUPABASE_KEY },
       muteHttpExceptions: true
@@ -1741,20 +1757,24 @@ function scanAndSyncLeads() {
     if (response.getResponseCode() !== 200) return;
 
     var existingLeads = JSON.parse(response.getContentText());
+    var existingMap = {};
     var existingSet = {};
     for (var i = 0; i < existingLeads.length; i++) {
       var item = existingLeads[i];
       if (item.contact) {
         var cleanC = String(item.contact).replace(/\\D/g, "");
-        if (cleanC) existingSet[cleanC] = true;
-        existingSet[String(item.contact).trim().toLowerCase()] = true;
+        if (cleanC) { existingSet[cleanC] = true; existingMap[cleanC] = item; }
+        var cLow = String(item.contact).trim().toLowerCase();
+        existingSet[cLow] = true; existingMap[cLow] = item;
       }
       if (item.client_name && item.contact) {
-        existingSet[(String(item.client_name).trim() + "_" + String(item.contact).trim()).toLowerCase()] = true;
+        var combo = (String(item.client_name).trim() + "_" + String(item.contact).trim()).toLowerCase();
+        existingSet[combo] = true; existingMap[combo] = item;
       }
     }
 
     var newLeadsToInsert = [];
+    var existingLeadsToUpdate = [];
 
     for (var r = 1; r < data.length; r++) {
       var row = data[r];
@@ -1768,15 +1788,20 @@ function scanAndSyncLeads() {
       var cleanDigits = contact.replace(/\\D/g, "");
       var contactLower = contact.toLowerCase();
       var comboKey = (clientName + "_" + contact).toLowerCase();
+      var assignedTo = formatAssignedTo(rawAssignedTo);
 
-      if (existingSet[cleanDigits] || existingSet[contactLower] || existingSet[comboKey]) {
+      var existingItem = existingMap[cleanDigits] || existingMap[contactLower] || existingMap[comboKey];
+
+      if (existingItem) {
         sheet.getRange(r + 1, crmStatusIdx + 1).setValue("Done");
+        if (assignedTo && (existingItem.assigned_to || "").toLowerCase() !== assignedTo.toLowerCase()) {
+          existingLeadsToUpdate.push({ id: existingItem.id, assigned_to: assignedTo });
+          existingItem.assigned_to = assignedTo;
+        }
         continue;
       }
 
       var formattedAdmissionDate = parseSheetDate(rawAdmissionDate);
-      var assignedTo = String(rawAssignedTo || "").trim() || null;
-
       newLeadsToInsert.push({
         client_name: clientName,
         contact: contact,
@@ -1790,6 +1815,18 @@ function scanAndSyncLeads() {
       if (cleanDigits) existingSet[cleanDigits] = true;
       existingSet[contactLower] = true;
       existingSet[comboKey] = true;
+    }
+
+    if (existingLeadsToUpdate.length > 0) {
+      for (var u = 0; u < existingLeadsToUpdate.length; u++) {
+        var updateObj = existingLeadsToUpdate[u];
+        UrlFetchApp.fetch(SUPABASE_URL + "/rest/v1/leads?id=eq." + updateObj.id, {
+          method: "patch",
+          headers: { "apikey": SUPABASE_KEY, "Authorization": "Bearer " + SUPABASE_KEY, "Content-Type": "application/json", "Prefer": "return=minimal" },
+          payload: JSON.stringify({ assigned_to: updateObj.assigned_to }),
+          muteHttpExceptions: true
+        });
+      }
     }
 
     if (newLeadsToInsert.length > 0) {
