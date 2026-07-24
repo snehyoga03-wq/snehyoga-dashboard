@@ -5,13 +5,13 @@
 // INSTRUCTIONS FOR GOOGLE SHEET:
 // 1. Open your Google Sheet containing the lead data.
 // 2. Row 1 header columns:
-//    Client Name | Contact | Email | Amount Paid | Admission Date | End Date | Plan | Status | lead CRM status
+//    Client Name | Contact | Email | Amount Paid | Admission Date | End Date | Plan | Status | ASSIGNED TO | lead CRM status
 // 3. Go to Extensions > Apps Script in the Google Sheet menu.
 // 4. Erase any default code, paste THIS complete file, and click Save (Ctrl + S).
 // 5. Select function "setup1MinuteTrigger" from the dropdown and click "Run".
 // 6. Authorize permissions when prompted by Google.
-// 7. Your Google Sheet will automatically scan every 1 minute, add new leads to CRM,
-//    and update Column I ("lead CRM status") to "Done"!
+// 7. Your Google Sheet will automatically scan every 1 minute, add new leads to CRM with ASSIGNED TO staff,
+//    and update Column J ("lead CRM status") to "Done"!
 // ==============================================================================
 
 var SUPABASE_URL = "https://bzqwaxqzggejpejyxhde.supabase.co";
@@ -19,7 +19,8 @@ var SUPABASE_KEY = "sb_publishable_aWZ6_LgTmBCAj7RHgmoDwg_YB4H1Ts4";
 
 /**
  * Main Sync Function: Scans Google Sheet every minute, checks for duplicates,
- * posts new leads to Supabase CRM, and updates Column I ("lead CRM status") to "Done".
+ * posts new leads to Supabase CRM (including ASSIGNED TO staff),
+ * and updates "lead CRM status" column to "Done".
  */
 function scanAndSyncLeads() {
   try {
@@ -38,7 +39,17 @@ function scanAndSyncLeads() {
     var contactIdx = headerRow.indexOf("contact");
     var admissionDateIdx = headerRow.indexOf("admission date");
     
-    // Find Column I / "lead CRM status"
+    // Find "ASSIGNED TO" column dynamically
+    var assignedToIdx = -1;
+    for (var c = 0; c < headerRow.length; c++) {
+      var h = headerRow[c];
+      if (h.indexOf("assigned to") !== -1 || h.indexOf("assigned") !== -1) {
+        assignedToIdx = c;
+        break;
+      }
+    }
+
+    // Find Column "lead CRM status"
     var crmStatusIdx = -1;
     for (var c = 0; c < headerRow.length; c++) {
       var h = headerRow[c];
@@ -64,10 +75,10 @@ function scanAndSyncLeads() {
       return;
     }
 
-    // If 'lead CRM status' column does not exist, default to Column I (9th column / index 8)
+    // If 'lead CRM status' column does not exist, default to Column J (10th column / index 9)
     if (crmStatusIdx === -1) {
-      crmStatusIdx = 8; // Column I
-      sheet.getRange(1, 9).setValue("lead CRM status").setFontWeight("bold");
+      crmStatusIdx = 9; // Column J
+      sheet.getRange(1, 10).setValue("lead CRM status").setFontWeight("bold");
     }
 
     // 2. Fetch existing leads from Supabase database for duplicate checking
@@ -111,9 +122,11 @@ function scanAndSyncLeads() {
       var rawName = row[clientNameIdx];
       var rawContact = row[contactIdx];
       var rawAdmissionDate = admissionDateIdx !== -1 ? row[admissionDateIdx] : null;
+      var rawAssignedTo = assignedToIdx !== -1 ? row[assignedToIdx] : null;
 
       var clientName = String(rawName || "").trim();
       var contact = String(rawContact || "").trim();
+      var assignedTo = String(rawAssignedTo || "").trim() || null;
 
       // Skip empty rows
       if (!clientName || !contact) continue;
@@ -124,7 +137,7 @@ function scanAndSyncLeads() {
 
       // Check if lead is ALREADY in CRM
       if (existingSet[cleanDigits] || existingSet[contactLower] || existingSet[comboKey]) {
-        // Mark status as Done in Column I directly
+        // Mark status as Done in lead CRM status column directly
         sheet.getRange(r + 1, crmStatusIdx + 1).setValue("Done");
         continue;
       }
@@ -137,6 +150,7 @@ function scanAndSyncLeads() {
         client_name: clientName,
         contact: contact,
         admission_date: formattedAdmissionDate,
+        assigned_to: assignedTo,
         lead_status: "Follow Up",
         created_at: new Date().toISOString(),
         rowIndex: r + 1
@@ -157,6 +171,7 @@ function scanAndSyncLeads() {
           client_name: item.client_name,
           contact: item.contact,
           admission_date: item.admission_date,
+          assigned_to: item.assigned_to,
           lead_status: item.lead_status,
           created_at: item.created_at
         };
@@ -179,7 +194,7 @@ function scanAndSyncLeads() {
 
       if (statusCode === 201 || statusCode === 200) {
         Logger.log("[Sync Success] Successfully added " + newLeadsToInsert.length + " lead(s) to CRM.");
-        // Mark newly added leads as Done in Column I
+        // Mark newly added leads as Done in lead CRM status column
         for (var k = 0; k < newLeadsToInsert.length; k++) {
           sheet.getRange(newLeadsToInsert[k].rowIndex, crmStatusIdx + 1).setValue("Done");
         }
@@ -192,7 +207,7 @@ function scanAndSyncLeads() {
 
     // Force Google Sheet to flush and display all cell updates immediately
     SpreadsheetApp.flush();
-    Logger.log("[Sync Complete] All sheet statuses in Column I updated.");
+    Logger.log("[Sync Complete] All sheet statuses in lead CRM status column updated.");
 
   } catch (err) {
     Logger.log("[Sync Exception] Error: " + err.toString());

@@ -956,7 +956,8 @@ export function LeadsManagement() {
             else finalPlan = String(existingPlan).trim();
           }
 
-          // currentIndex = (currentIndex + 1) % 3;
+          const assignedToRaw = normalizedRow["assigned to"] || normalizedRow["assignedto"] || normalizedRow["assigned"] || normalizedRow["assigned_to"];
+
           validLeads.push({
             admission_date: parseDate(admissionDateRaw),
             calling_date: parseDate(callingDateRaw),
@@ -967,7 +968,7 @@ export function LeadsManagement() {
             lead_existing_plan: finalPlan,
             lead_status: finalStatus,
             remark: remark ? String(remark).trim() : null,
-            assigned_to: null
+            assigned_to: assignedToRaw ? String(assignedToRaw).trim() : null
           });
         }
 
@@ -1655,7 +1656,7 @@ export function LeadsManagement() {
 
             <div className="border border-gray-200 rounded-lg p-3 bg-gray-50 space-y-2">
               <p className="font-semibold text-gray-900 text-xs uppercase tracking-wider">Required Sheet Header Columns (Row 1):</p>
-              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs font-mono">
+              <div className="grid grid-cols-2 sm:grid-cols-5 gap-2 text-xs font-mono">
                 <span className="bg-emerald-100 text-emerald-800 px-2 py-1 rounded font-bold border border-emerald-300">1. Client Name *</span>
                 <span className="bg-emerald-100 text-emerald-800 px-2 py-1 rounded font-bold border border-emerald-300">2. Contact *</span>
                 <span className="bg-gray-200 text-gray-700 px-2 py-1 rounded">3. Email</span>
@@ -1664,6 +1665,8 @@ export function LeadsManagement() {
                 <span className="bg-gray-200 text-gray-700 px-2 py-1 rounded">6. End Date</span>
                 <span className="bg-gray-200 text-gray-700 px-2 py-1 rounded">7. Plan</span>
                 <span className="bg-gray-200 text-gray-700 px-2 py-1 rounded">8. Status</span>
+                <span className="bg-amber-100 text-amber-800 px-2 py-1 rounded font-bold border border-amber-300">9. ASSIGNED TO</span>
+                <span className="bg-blue-100 text-blue-800 px-2 py-1 rounded font-bold border border-blue-300">10. lead CRM status</span>
               </div>
             </div>
 
@@ -1701,6 +1704,15 @@ function scanAndSyncLeads() {
     var contactIdx = headerRow.indexOf("contact");
     var admissionDateIdx = headerRow.indexOf("admission date");
     
+    var assignedToIdx = -1;
+    for (var c = 0; c < headerRow.length; c++) {
+      var h = headerRow[c];
+      if (h.indexOf("assigned to") !== -1 || h.indexOf("assigned") !== -1) {
+        assignedToIdx = c;
+        break;
+      }
+    }
+
     var crmStatusIdx = -1;
     for (var c = 0; c < headerRow.length; c++) {
       var h = headerRow[c];
@@ -1717,8 +1729,8 @@ function scanAndSyncLeads() {
     if (clientNameIdx === -1 || contactIdx === -1) return;
 
     if (crmStatusIdx === -1) {
-      crmStatusIdx = 8;
-      sheet.getRange(1, 9).setValue("lead CRM status").setFontWeight("bold");
+      crmStatusIdx = 9;
+      sheet.getRange(1, 10).setValue("lead CRM status").setFontWeight("bold");
     }
 
     var response = UrlFetchApp.fetch(SUPABASE_URL + "/rest/v1/leads?select=contact,client_name", {
@@ -1749,6 +1761,7 @@ function scanAndSyncLeads() {
       var clientName = String(row[clientNameIdx] || "").trim();
       var contact = String(row[contactIdx] || "").trim();
       var rawAdmissionDate = admissionDateIdx !== -1 ? row[admissionDateIdx] : null;
+      var rawAssignedTo = assignedToIdx !== -1 ? row[assignedToIdx] : null;
 
       if (!clientName || !contact) continue;
 
@@ -1762,10 +1775,13 @@ function scanAndSyncLeads() {
       }
 
       var formattedAdmissionDate = parseSheetDate(rawAdmissionDate);
+      var assignedTo = String(rawAssignedTo || "").trim() || null;
+
       newLeadsToInsert.push({
         client_name: clientName,
         contact: contact,
         admission_date: formattedAdmissionDate,
+        assigned_to: assignedTo,
         lead_status: "Follow Up",
         created_at: new Date().toISOString(),
         rowIndex: r + 1
@@ -1782,6 +1798,7 @@ function scanAndSyncLeads() {
           client_name: item.client_name,
           contact: item.contact,
           admission_date: item.admission_date,
+          assigned_to: item.assigned_to,
           lead_status: item.lead_status,
           created_at: item.created_at
         };
