@@ -9,8 +9,8 @@ import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip,
 import type { Lead } from '@/integrations/supabase/types';
 import { motion } from 'framer-motion';
 
-const ASSIGNED_USERS = ["Mayuri K", "Ragini K", "Shreya K"];
-const LEAD_STATUSES = ["Select Option", "Follow Up", "Deal Done", "Dead"];
+const ASSIGNED_USERS = ["Ragini K", "Shreya K", "Janhavi V"];
+const LEAD_STATUSES = ["Select Option", "Follow Up", "Master Class Follow", "Deal Done", "Dead"];
 
 export default function WeeklyReportDashboard() {
   const [loading, setLoading] = useState(true);
@@ -18,19 +18,17 @@ export default function WeeklyReportDashboard() {
   const [leads, setLeads] = useState<Lead[]>([]);
   const [history, setHistory] = useState<any[]>([]);
   
-  // Filters
-  const [startDate, setStartDate] = useState(() => {
-    const d = new Date();
-    d.setDate(d.getDate() - 7);
-    return d.toISOString().split('T')[0];
-  });
+  // Filters - Default to today's date onward
+  const [startDate, setStartDate] = useState(() => new Date().toISOString().split('T')[0]);
   const [endDate, setEndDate] = useState(() => new Date().toISOString().split('T')[0]);
   const [dailyDate, setDailyDate] = useState<string>("");
   const userRole = sessionStorage.getItem("crm_user_role");
   const username = sessionStorage.getItem("crm_username");
+  const isStaff = userRole === "staff";
+  const effectiveMember = isStaff && username ? username : selectedMember;
 
   const [selectedMember, setSelectedMember] = useState<string>(() => {
-    if (userRole === "staff" && username && username !== "Shreya K") return username;
+    if (isStaff && username) return username;
     return "all";
   });
   const [selectedStatus, setSelectedStatus] = useState<string>("all");
@@ -46,8 +44,8 @@ export default function WeeklyReportDashboard() {
 
       // 1. Fetch leads
       let leadsQuery = supabase.from('leads').select('*');
-      if (selectedMember !== 'all') {
-        leadsQuery = leadsQuery.eq('assigned_to', selectedMember);
+      if (effectiveMember !== 'all') {
+        leadsQuery = leadsQuery.eq('assigned_to', effectiveMember);
       }
       if (selectedStatus !== 'all') {
         leadsQuery = leadsQuery.eq('lead_status', selectedStatus);
@@ -75,8 +73,8 @@ export default function WeeklyReportDashboard() {
         historyQuery = historyQuery.lte('created_at', `${effectiveEndDate}T23:59:59.999Z`);
       }
       
-      if (selectedMember !== 'all') {
-        historyQuery = historyQuery.eq('leads.assigned_to', selectedMember);
+      if (effectiveMember !== 'all') {
+        historyQuery = historyQuery.eq('leads.assigned_to', effectiveMember);
       }
       
       const { data: historyData, error: historyError } = await historyQuery;
@@ -108,24 +106,13 @@ export default function WeeklyReportDashboard() {
   // A "Call" or interaction is any lead where a status has been selected
   const totalCallsDone = leads.filter(l => l.lead_status && l.lead_status !== 'Select Option').length;
   
-  // "Follow-ups Completed" inferred as any status change or remark update during the period
-  const followUpsCompleted = history.filter(h => 
-    h.action_type === 'Status Changed' || h.action_type === 'Updated'
-  ).length;
-
   const pendingFollowUps = leads.filter(l => l.lead_status === 'Follow Up').length;
+  const masterClassLeads = leads.filter(l => l.lead_status === 'Master Class Follow').length;
   const convertedLeads = leads.filter(l => l.lead_status === 'Deal Done').length;
   const deadLeads = leads.filter(l => l.lead_status === 'Dead').length;
-  
-  const todayStr = new Date().toISOString().split('T')[0];
-  const todaysPendingTasks = leads.filter(l => 
-    l.follow_up_date === todayStr && 
-    l.lead_status !== 'Deal Done' && 
-    l.lead_status !== 'Dead'
-  ).length;
 
   // Analytics Chart Data
-  const displayedUsers = selectedMember === 'all' ? ASSIGNED_USERS : [selectedMember];
+  const displayedUsers = effectiveMember === 'all' ? ASSIGNED_USERS : [effectiveMember];
   const chartData = displayedUsers.map(user => {
     const userLeads = leads.filter(l => l.assigned_to === user);
     const userHistory = history.filter(h => h.leads?.assigned_to === user);
@@ -178,7 +165,7 @@ export default function WeeklyReportDashboard() {
                 }
               }} />
             </div>
-            {(userRole !== "staff" || username === "Shreya K") && (
+            {!isStaff && (
               <div>
                 <label className="text-xs font-semibold text-gray-500 mb-1 block">Team Member</label>
                 <Select value={selectedMember} onValueChange={setSelectedMember}>
@@ -214,14 +201,13 @@ export default function WeeklyReportDashboard() {
       </Card>
 
       {/* Metrics Grid */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+      <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
         <MetricCard title="Total Assigned" value={totalAssigned} icon={<Users size={22} />} color="blue" delay={0.1} />
         <MetricCard title="Total Calls Done" value={totalCallsDone} icon={<PhoneCall size={22} />} color="indigo" delay={0.15} />
-        <MetricCard title="Follow-ups Completed" value={followUpsCompleted} icon={<CheckCircle size={22} />} color="emerald" delay={0.2} />
+        <MetricCard title="Master Class Follow" value={masterClassLeads} icon={<Users size={22} />} color="purple" delay={0.22} />
         <MetricCard title="Pending Follow-ups" value={pendingFollowUps} icon={<Clock size={22} />} color="amber" delay={0.25} />
         <MetricCard title="Converted / Joined" value={convertedLeads} icon={<TrendingUp size={22} />} color="green" delay={0.3} />
         <MetricCard title="Not Interested" value={deadLeads} icon={<XCircle size={22} />} color="red" delay={0.35} />
-        <MetricCard title="Today's Pending Tasks" value={todaysPendingTasks} icon={<ListTodo size={22} />} color="orange" delay={0.4} />
       </div>
 
       {/* Performance Analytics Chart */}
@@ -273,6 +259,7 @@ function MetricCard({ title, value, icon, color, delay = 0 }: { title: string, v
     blue: "bg-gradient-to-br from-blue-50 to-blue-100/50 text-blue-600 border-blue-100",
     indigo: "bg-gradient-to-br from-indigo-50 to-indigo-100/50 text-indigo-600 border-indigo-100",
     emerald: "bg-gradient-to-br from-emerald-50 to-emerald-100/50 text-emerald-600 border-emerald-100",
+    purple: "bg-gradient-to-br from-purple-50 to-purple-100/50 text-purple-600 border-purple-100",
     amber: "bg-gradient-to-br from-amber-50 to-amber-100/50 text-amber-600 border-amber-100",
     green: "bg-gradient-to-br from-green-50 to-green-100/50 text-green-600 border-green-100",
     red: "bg-gradient-to-br from-red-50 to-red-100/50 text-red-600 border-red-100",
@@ -283,6 +270,7 @@ function MetricCard({ title, value, icon, color, delay = 0 }: { title: string, v
     blue: "bg-blue-100/80 shadow-inner shadow-blue-200/50",
     indigo: "bg-indigo-100/80 shadow-inner shadow-indigo-200/50",
     emerald: "bg-emerald-100/80 shadow-inner shadow-emerald-200/50",
+    purple: "bg-purple-100/80 shadow-inner shadow-purple-200/50",
     amber: "bg-amber-100/80 shadow-inner shadow-amber-200/50",
     green: "bg-green-100/80 shadow-inner shadow-green-200/50",
     red: "bg-red-100/80 shadow-inner shadow-red-200/50",

@@ -17,7 +17,7 @@ import { Label } from "@/components/ui/label";
 import { Checkbox } from "@/components/ui/checkbox";
 import * as XLSX from "xlsx";
 
-const ASSIGNED_USERS = ["Mayuri K", "Ragini K", "Shreya K"];
+const ASSIGNED_USERS = ["Ragini K", "Shreya K", "Janhavi V"];
 
 // Dropdown Constants
 const LEAD_TYPES = [
@@ -53,6 +53,7 @@ const LEAD_STATUSES = [
   { id: "Select Option", label: "Select Option", bg: "bg-gray-100 hover:bg-gray-200", text: "text-gray-700" },
   { id: "Deal Done", label: "Deal Done", bg: "bg-[#14532d] hover:bg-[#166534]", text: "text-white" },
   { id: "Follow Up", label: "Follow Up", bg: "bg-[#991b1b] hover:bg-[#b91c1c]", text: "text-white" },
+  { id: "Master Class Follow", label: "Master Class Follow", bg: "bg-purple-700 hover:bg-purple-800", text: "text-white" },
   { id: "Dead", label: "Dead", bg: "bg-[#fef08a] hover:bg-[#fde047]", text: "text-[#854d0e]" }
 ];
 
@@ -940,6 +941,7 @@ export function LeadsManagement() {
             const statusStr = String(leadStatus).trim().toLowerCase();
             if (statusStr.includes("done") || statusStr.includes("deal")) finalStatus = "Deal Done";
             else if (statusStr.includes("dead")) finalStatus = "Dead";
+            else if (statusStr.includes("master")) finalStatus = "Master Class Follow";
             else if (statusStr.includes("follow")) finalStatus = "Follow Up";
           }
 
@@ -1038,8 +1040,9 @@ export function LeadsManagement() {
     
     let matchesAutoDate = true;
     if (autoDateFilter) {
+      const isMasterClassFollow = lead.lead_status === "Master Class Follow";
       if (!lead.created_at) {
-        matchesAutoDate = lead.follow_up_date === autoDateFilter;
+        matchesAutoDate = lead.follow_up_date === autoDateFilter || isMasterClassFollow;
       } else {
         const leadDate = new Date(lead.created_at).toISOString().split('T')[0];
         
@@ -1054,7 +1057,7 @@ export function LeadsManagement() {
                                         lead.lead_status === "Select Option" && 
                                         !lead.follow_up_date;
                                         
-        matchesAutoDate = isCreatedToday || isFollowUpToday || isUntouchedCarryForward;
+        matchesAutoDate = isCreatedToday || isFollowUpToday || isUntouchedCarryForward || isMasterClassFollow;
       }
     }
 
@@ -1738,7 +1741,7 @@ function scanAndSyncLeads() {
       sheet.getRange(1, 10).setValue("lead CRM status").setFontWeight("bold");
     }
 
-    var KNOWN_STAFF = ["Mayuri K", "Ragini K", "Shreya K"];
+    var KNOWN_STAFF = ["Ragini K", "Shreya K", "Janhavi V", "Janhavi Vaidya"];
     function formatAssignedTo(val) {
       if (!val) return null;
       var str = String(val).trim();
@@ -1863,7 +1866,6 @@ function scanAndSyncLeads() {
 
     SpreadsheetApp.flush();
   } catch (err) { Logger.log("Error: " + err.toString()); }
-}`; }
 }
 
 function parseSheetDate(val) {
