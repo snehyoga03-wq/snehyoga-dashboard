@@ -25,13 +25,14 @@ export default function WeeklyReportDashboard() {
   const userRole = sessionStorage.getItem("crm_user_role");
   const username = sessionStorage.getItem("crm_username");
   const isStaff = userRole === "staff";
-  const effectiveMember = isStaff && username ? username : selectedMember;
 
   const [selectedMember, setSelectedMember] = useState<string>(() => {
     if (isStaff && username) return username;
     return "all";
   });
   const [selectedStatus, setSelectedStatus] = useState<string>("all");
+
+  const effectiveMember = isStaff && username ? username : selectedMember;
 
   const fetchIdRef = useRef(0);
 
