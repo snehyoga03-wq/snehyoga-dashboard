@@ -24,15 +24,15 @@ export default function WeeklyReportDashboard() {
   const [dailyDate, setDailyDate] = useState<string>("");
   const userRole = sessionStorage.getItem("crm_user_role");
   const username = sessionStorage.getItem("crm_username");
-  const isStaff = userRole === "staff";
+  const isRestrictedStaff = userRole === "staff" && username !== "Shreya K";
 
   const [selectedMember, setSelectedMember] = useState<string>(() => {
-    if (isStaff && username) return username;
+    if (isRestrictedStaff && username) return username;
     return "all";
   });
   const [selectedStatus, setSelectedStatus] = useState<string>("all");
 
-  const effectiveMember = isStaff && username ? username : selectedMember;
+  const effectiveMember = isRestrictedStaff && username ? username : selectedMember;
 
   const fetchIdRef = useRef(0);
 
@@ -46,7 +46,8 @@ export default function WeeklyReportDashboard() {
       // 1. Fetch leads
       let leadsQuery = supabase.from('leads').select('*');
       if (effectiveMember !== 'all') {
-        leadsQuery = leadsQuery.eq('assigned_to', effectiveMember);
+        const firstName = effectiveMember.split(' ')[0];
+        leadsQuery = leadsQuery.or(`assigned_to.ilike.%${effectiveMember}%,assigned_to.ilike.%${firstName}%`);
       }
       if (selectedStatus !== 'all') {
         leadsQuery = leadsQuery.eq('lead_status', selectedStatus);
@@ -75,7 +76,8 @@ export default function WeeklyReportDashboard() {
       }
       
       if (effectiveMember !== 'all') {
-        historyQuery = historyQuery.eq('leads.assigned_to', effectiveMember);
+        const firstName = effectiveMember.split(' ')[0];
+        historyQuery = historyQuery.or(`leads.assigned_to.ilike.%${effectiveMember}%,leads.assigned_to.ilike.%${firstName}%`);
       }
       
       const { data: historyData, error: historyError } = await historyQuery;
@@ -115,8 +117,9 @@ export default function WeeklyReportDashboard() {
   // Analytics Chart Data
   const displayedUsers = effectiveMember === 'all' ? ASSIGNED_USERS : [effectiveMember];
   const chartData = displayedUsers.map(user => {
-    const userLeads = leads.filter(l => l.assigned_to === user);
-    const userHistory = history.filter(h => h.leads?.assigned_to === user);
+    const firstName = user.split(' ')[0].toLowerCase();
+    const userLeads = leads.filter(l => (l.assigned_to || "").toLowerCase().includes(firstName));
+    const userHistory = history.filter(h => (h.leads?.assigned_to || "").toLowerCase().includes(firstName));
     
     return {
       name: user.split(' ')[0],
@@ -166,7 +169,7 @@ export default function WeeklyReportDashboard() {
                 }
               }} />
             </div>
-            {!isStaff && (
+            {!isRestrictedStaff && (
               <div>
                 <label className="text-xs font-semibold text-gray-500 mb-1 block">Team Member</label>
                 <Select value={selectedMember} onValueChange={setSelectedMember}>
