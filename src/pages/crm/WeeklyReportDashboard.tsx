@@ -106,8 +106,8 @@ export default function WeeklyReportDashboard() {
   // Derived Metrics
   const totalAssigned = leads.length;
   
-  // A "Call" or interaction is any lead where a status has been selected
-  const totalCallsDone = leads.filter(l => l.lead_status && l.lead_status !== 'Select Option').length;
+  // A "Call" / interaction is recorded when staff performs an action or status update on a lead (from history)
+  const totalCallsDone = new Set(history.map(h => h.lead_id)).size;
   
   const pendingFollowUps = leads.filter(l => l.lead_status === 'Follow Up').length;
   const masterClassLeads = leads.filter(l => l.lead_status === 'Master Class Follow').length;
@@ -123,7 +123,7 @@ export default function WeeklyReportDashboard() {
     
     return {
       name: user.split(' ')[0],
-      Calls: userLeads.filter(l => l.lead_status && l.lead_status !== 'Select Option').length,
+      Calls: new Set(userHistory.map(h => h.lead_id)).size,
       Converted: userLeads.filter(l => l.lead_status === 'Deal Done').length,
       Assigned: userLeads.length
     };

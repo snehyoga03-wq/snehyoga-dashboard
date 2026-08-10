@@ -1810,7 +1810,7 @@ function scanAndSyncLeads() {
         contact: contact,
         admission_date: formattedAdmissionDate,
         assigned_to: assignedTo,
-        lead_status: "Follow Up",
+        lead_status: "Select Option",
         created_at: new Date().toISOString(),
         rowIndex: r + 1
       });
