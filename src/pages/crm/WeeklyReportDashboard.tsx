@@ -4,10 +4,12 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
-import { Calendar, Users, PhoneCall, CheckCircle, Clock, ListTodo, XCircle, TrendingUp, RefreshCw, ChevronUp, ChevronDown } from 'lucide-react';
+import { Calendar, Users, PhoneCall, CheckCircle, Clock, ListTodo, XCircle, TrendingUp, RefreshCw, ChevronUp, ChevronDown, Award, Target, ArrowUpRight, ArrowDownRight, RotateCcw } from 'lucide-react';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip, Legend, ResponsiveContainer } from 'recharts';
 import type { Lead } from '@/integrations/supabase/types';
 import { motion } from 'framer-motion';
+import { calculateCallTargetLedgers, UserTargetLedger } from '@/utils/callTargetLedger';
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 
 const ASSIGNED_USERS = ["Ragini K", "Shreya K", "Janhavi V"];
 const LEAD_STATUSES = ["Select Option", "Follow Up", "Master Class Follow", "Deal Done", "Dead"];
@@ -17,6 +19,7 @@ export default function WeeklyReportDashboard() {
   const [isExpanded, setIsExpanded] = useState(false);
   const [leads, setLeads] = useState<Lead[]>([]);
   const [history, setHistory] = useState<any[]>([]);
+  const [selectedLedgerUser, setSelectedLedgerUser] = useState<UserTargetLedger | null>(null);
   
   // Filters - Default to today's date onward
   const [startDate, setStartDate] = useState(() => new Date().toISOString().split('T')[0]);
@@ -63,7 +66,6 @@ export default function WeeklyReportDashboard() {
       if (leadsError) throw leadsError;
 
       // 2. Fetch history within date range
-      // For tracking "calls" and "follow-ups" completed within this week
       let historyQuery = supabase
         .from('lead_history')
         .select('*, leads!inner(assigned_to)');
@@ -83,7 +85,6 @@ export default function WeeklyReportDashboard() {
       const { data: historyData, error: historyError } = await historyQuery;
       if (historyError) throw historyError;
 
-      // Only update state if this is still the most recent request
       if (currentFetchId === fetchIdRef.current) {
         setLeads(leadsData || []);
         setHistory(historyData || []);
@@ -105,8 +106,6 @@ export default function WeeklyReportDashboard() {
 
   // Derived Metrics
   const totalAssigned = leads.length;
-  
-  // A "Call" / interaction is recorded when staff performs an action or status update on a lead (from history)
   const totalCallsDone = new Set(history.map(h => h.lead_id)).size;
   
   const pendingFollowUps = leads.filter(l => l.lead_status === 'Follow Up').length;
@@ -114,8 +113,19 @@ export default function WeeklyReportDashboard() {
   const convertedLeads = leads.filter(l => l.lead_status === 'Deal Done').length;
   const deadLeads = leads.filter(l => l.lead_status === 'Dead').length;
 
-  // Analytics Chart Data
+  // 60-Call Daily Target & Appreciation Ledgers
+  const effectiveStartDate = dailyDate || startDate;
+  const effectiveEndDate = dailyDate || endDate;
   const displayedUsers = effectiveMember === 'all' ? ASSIGNED_USERS : [effectiveMember];
+
+  const targetLedgers = calculateCallTargetLedgers(
+    history,
+    displayedUsers,
+    effectiveStartDate,
+    effectiveEndDate
+  );
+
+  // Analytics Chart Data
   const chartData = displayedUsers.map(user => {
     const firstName = user.split(' ')[0].toLowerCase();
     const userLeads = leads.filter(l => (l.assigned_to || "").toLowerCase().includes(firstName));
@@ -214,6 +224,98 @@ export default function WeeklyReportDashboard() {
         <MetricCard title="Not Interested" value={deadLeads} icon={<XCircle size={22} />} color="red" delay={0.35} />
       </div>
 
+      {/* 60-Call Daily Target & Appreciation Ledger Section */}
+      <Card className="border-none shadow-sm bg-gradient-to-br from-amber-50/40 via-white to-emerald-50/30 overflow-hidden border border-amber-100/60">
+        <CardHeader className="pb-3 border-b border-gray-100 flex flex-row items-center justify-between">
+          <div>
+            <CardTitle className="text-lg font-bold text-gray-900 flex items-center gap-2">
+              <Award className="w-5 h-5 text-amber-600" /> Target Performance & Appreciation Ledger
+            </CardTitle>
+            <p className="text-xs text-gray-500 mt-1">
+              Daily Target: <span className="font-semibold text-gray-700">60 Calls/Day</span>. Surplus calls automatically pay back past deficits to preserve Appreciation Days.
+            </p>
+          </div>
+          <span className="px-3 py-1 bg-amber-100 text-amber-800 text-xs font-bold rounded-full border border-amber-200">
+            Target: 60 Calls/Day
+          </span>
+        </CardHeader>
+        <CardContent className="pt-4">
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            {displayedUsers.map(user => {
+              const ledger = targetLedgers[user];
+              if (!ledger) return null;
+
+              const isHighAppreciation = ledger.appreciationPercentage >= 80;
+              const hasDeficits = ledger.totalOutstandingDeficit > 0;
+
+              return (
+                <div key={user} className="bg-white rounded-xl p-4 border border-gray-100 shadow-sm hover:shadow-md transition-all">
+                  <div className="flex justify-between items-start mb-3">
+                    <div>
+                      <h4 className="font-bold text-gray-900">{user}</h4>
+                      <p className="text-xs text-gray-500">
+                        {ledger.appreciationDaysEarned} / {ledger.totalActiveDays} Days Target Met
+                      </p>
+                    </div>
+                    <div className={`px-2.5 py-1 rounded-full text-xs font-bold flex items-center gap-1 ${
+                      isHighAppreciation 
+                        ? 'bg-emerald-100 text-emerald-800 border border-emerald-200' 
+                        : 'bg-amber-100 text-amber-800 border border-amber-200'
+                    }`}>
+                      <Award className="w-3.5 h-3.5" />
+                      {ledger.appreciationPercentage}% Score
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-2 text-xs mb-3">
+                    <div className="bg-gray-50 p-2.5 rounded-lg border border-gray-100">
+                      <span className="text-gray-500 block text-[10px] uppercase font-semibold">Raw Calls</span>
+                      <span className="font-extrabold text-gray-800 text-sm">{ledger.totalRawCalls}</span>
+                      <span className="text-gray-400 text-[10px] block">Target: {ledger.totalTarget}</span>
+                    </div>
+
+                    <div className="bg-gray-50 p-2.5 rounded-lg border border-gray-100">
+                      <span className="text-gray-500 block text-[10px] uppercase font-semibold">Adjusted Calls</span>
+                      <span className="font-extrabold text-indigo-700 text-sm flex items-center gap-1">
+                        {ledger.totalAdjustedCalls}
+                        {ledger.totalDeficitPaidBack > 0 && (
+                          <span className="text-[10px] text-emerald-600 font-bold">(+{ledger.totalDeficitPaidBack} Back-Adjusted)</span>
+                        )}
+                      </span>
+                    </div>
+                  </div>
+
+                  {hasDeficits ? (
+                    <div className="flex items-center justify-between text-xs bg-red-50 text-red-700 p-2 rounded-lg border border-red-100 mb-3">
+                      <span className="font-medium flex items-center gap-1">
+                        <ArrowDownRight className="w-3.5 h-3.5 text-red-500" /> Outstanding Deficit
+                      </span>
+                      <span className="font-bold">-{ledger.totalOutstandingDeficit} Calls</span>
+                    </div>
+                  ) : (
+                    <div className="flex items-center justify-between text-xs bg-emerald-50 text-emerald-700 p-2 rounded-lg border border-emerald-100 mb-3">
+                      <span className="font-medium flex items-center gap-1">
+                        <CheckCircle className="w-3.5 h-3.5 text-emerald-500" /> Deficits Fully Paid Back
+                      </span>
+                      <span className="font-bold">0 Pending</span>
+                    </div>
+                  )}
+
+                  <Button 
+                    variant="outline" 
+                    size="sm" 
+                    onClick={() => setSelectedLedgerUser(ledger)}
+                    className="w-full text-xs font-semibold text-[#2e5a44] border-[#2e5a44]/30 hover:bg-[#2e5a44]/10"
+                  >
+                    View Daily Ledger Details
+                  </Button>
+                </div>
+              );
+            })}
+          </div>
+        </CardContent>
+      </Card>
+
       {/* Performance Analytics Chart */}
       <Card className="border-none shadow-sm bg-white">
         <CardHeader>
@@ -254,9 +356,99 @@ export default function WeeklyReportDashboard() {
         </CardContent>
       </Card>
       </div>)}
+
+      {/* Daily Target Ledger Dialog */}
+      <Dialog open={!!selectedLedgerUser} onOpenChange={(open) => !open && setSelectedLedgerUser(null)}>
+        <DialogContent className="max-w-3xl max-h-[85vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle className="text-xl font-bold flex items-center gap-2">
+              <Award className="text-amber-600" /> Daily Target & Back-Adjustment Ledger: {selectedLedgerUser?.userName}
+            </DialogTitle>
+          </DialogHeader>
+
+          {selectedLedgerUser && (
+            <div className="space-y-4 pt-2">
+              <div className="grid grid-cols-4 gap-3 bg-gray-50 p-4 rounded-xl text-center">
+                <div>
+                  <span className="text-[11px] text-gray-500 font-semibold block uppercase">Total Calls</span>
+                  <span className="text-lg font-bold text-gray-800">{selectedLedgerUser.totalRawCalls}</span>
+                </div>
+                <div>
+                  <span className="text-[11px] text-gray-500 font-semibold block uppercase">Total Target</span>
+                  <span className="text-lg font-bold text-gray-800">{selectedLedgerUser.totalTarget}</span>
+                </div>
+                <div>
+                  <span className="text-[11px] text-gray-500 font-semibold block uppercase">Back-Adjusted</span>
+                  <span className="text-lg font-bold text-emerald-600">+{selectedLedgerUser.totalDeficitPaidBack}</span>
+                </div>
+                <div>
+                  <span className="text-[11px] text-gray-500 font-semibold block uppercase">Appreciation Score</span>
+                  <span className="text-lg font-bold text-amber-700">{selectedLedgerUser.appreciationPercentage}%</span>
+                </div>
+              </div>
+
+              <div className="border rounded-xl overflow-hidden">
+                <table className="w-full text-xs text-left">
+                  <thead className="bg-gray-100 font-semibold text-gray-700 uppercase border-b">
+                    <tr>
+                      <th className="p-3">Date</th>
+                      <th className="p-3 text-center">Raw Calls</th>
+                      <th className="p-3 text-center">Target</th>
+                      <th className="p-3 text-center">Back-Adjusted</th>
+                      <th className="p-3 text-center">Final Balance</th>
+                      <th className="p-3 text-center">Status</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-gray-100">
+                    {selectedLedgerUser.dailyEntries.map(entry => (
+                      <tr key={entry.date} className="hover:bg-gray-50/80">
+                        <td className="p-3 font-medium text-gray-800">{entry.date}</td>
+                        <td className="p-3 text-center font-semibold">{entry.rawCalls}</td>
+                        <td className="p-3 text-center text-gray-500">60</td>
+                        <td className="p-3 text-center">
+                          {entry.deficitPaidByFuture > 0 ? (
+                            <span className="px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 font-bold">
+                              +{entry.deficitPaidByFuture} Covered
+                            </span>
+                          ) : entry.surplusGivenToPast > 0 ? (
+                            <span className="px-2 py-0.5 rounded-full bg-blue-100 text-blue-800 font-medium">
+                              -{entry.surplusGivenToPast} Paid Back
+                            </span>
+                          ) : (
+                            <span className="text-gray-400">—</span>
+                          )}
+                        </td>
+                        <td className="p-3 text-center font-bold">
+                          {entry.adjustedCalls} / 60
+                        </td>
+                        <td className="p-3 text-center">
+                          {entry.rawCalls >= 60 ? (
+                            <span className="px-2.5 py-1 rounded-full bg-emerald-100 text-emerald-800 font-bold text-[10px]">
+                              Target Met (Direct)
+                            </span>
+                          ) : entry.isTargetMet ? (
+                            <span className="px-2.5 py-1 rounded-full bg-indigo-100 text-indigo-800 font-bold text-[10px] flex items-center justify-center gap-1">
+                              <RotateCcw className="w-3 h-3" /> Back-Adjusted
+                            </span>
+                          ) : (
+                            <span className="px-2.5 py-1 rounded-full bg-red-100 text-red-800 font-bold text-[10px]">
+                              Deficit (-{entry.unresolvedDeficit})
+                            </span>
+                          )}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
+
 
 function MetricCard({ title, value, icon, color, delay = 0 }: { title: string, value: number, icon: React.ReactNode, color: string, delay?: number }) {
   const colorMap: Record<string, string> = {
