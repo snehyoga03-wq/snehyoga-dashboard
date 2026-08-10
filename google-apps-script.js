@@ -86,12 +86,13 @@ function scanAndSyncLeads() {
       method: "get",
       headers: {
         "apikey": SUPABASE_KEY,
-        "Authorization": "Bearer " + SUPABASE_KEY
+        "Authorization": "Bearer " + SUPABASE_KEY,
+        "Range": "0-99999"
       },
       muteHttpExceptions: true
     };
 
-    var response = UrlFetchApp.fetch(SUPABASE_URL + "/rest/v1/leads?select=id,contact,client_name,assigned_to", getOptions);
+    var response = UrlFetchApp.fetch(SUPABASE_URL + "/rest/v1/leads?select=id,contact,client_name,assigned_to&limit=100000", getOptions);
     if (response.getResponseCode() !== 200) {
       Logger.log("[Sync Error] Failed to fetch existing leads from Supabase. Response: " + response.getContentText());
       return;
@@ -109,6 +110,11 @@ function scanAndSyncLeads() {
         if (cleanC) {
           existingSet[cleanC] = true;
           existingMap[cleanC] = item;
+          if (cleanC.length >= 10) {
+            var last10 = cleanC.slice(-10);
+            existingSet[last10] = true;
+            existingMap[last10] = item;
+          }
         }
         var contactLow = String(item.contact).trim().toLowerCase();
         existingSet[contactLow] = true;
@@ -154,10 +160,11 @@ function scanAndSyncLeads() {
       if (!clientName || !contact) continue;
 
       var cleanDigits = contact.replace(/\D/g, "");
+      var last10 = cleanDigits.length >= 10 ? cleanDigits.slice(-10) : cleanDigits;
       var contactLower = contact.toLowerCase();
       var comboKey = (clientName + "_" + contact).toLowerCase();
 
-      var existingItem = existingMap[cleanDigits] || existingMap[contactLower] || existingMap[comboKey];
+      var existingItem = existingMap[last10] || existingMap[cleanDigits] || existingMap[contactLower] || existingMap[comboKey];
 
       // If ALREADY in CRM
       if (existingItem) {

@@ -9,7 +9,7 @@ import { motion } from "framer-motion";
 import {
   ClipboardList, Search, RefreshCw, Plus, Download, Upload,
   Trash2, Edit, Save, X, Calendar, User, Phone, CheckCircle, History,
-  Users, CheckSquare, FileSpreadsheet, FileCode, Copy, Check
+  Users, CheckSquare, FileSpreadsheet, FileCode, Copy, Check, Sparkles
 } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -267,10 +267,105 @@ export function LeadsManagement() {
     }
   };
 
-  // History States
+  // History & Deduplication States
   const [showHistoryDialog, setShowHistoryDialog] = useState(false);
   const [selectedLeadHistory, setSelectedLeadHistory] = useState<any[]>([]);
   const [selectedLeadForHistory, setSelectedLeadForHistory] = useState<Lead | null>(null);
+
+  const [isCleanDuplicatesOpen, setIsCleanDuplicatesOpen] = useState(false);
+  const [duplicateSummary, setDuplicateSummary] = useState<{
+    totalDuplicateGroups: number;
+    totalRedundantRows: number;
+    redundantIds: string[];
+    duplicateGroups: { clientName: string; contact: string; count: number; keptId: string }[];
+  }>({ totalDuplicateGroups: 0, totalRedundantRows: 0, redundantIds: [], duplicateGroups: [] });
+  const [isCleaningDuplicates, setIsCleaningDuplicates] = useState(false);
+
+  const handleAnalyzeDuplicates = () => {
+    const groups: Record<string, Lead[]> = {};
+
+    leads.forEach(lead => {
+      const cleanContact = (lead.contact || "").replace(/\D/g, "");
+      const last10 = cleanContact.length >= 10 ? cleanContact.slice(-10) : cleanContact;
+      const key = last10 || (lead.client_name || "").trim().toLowerCase();
+
+      if (!key) return;
+      if (!groups[key]) groups[key] = [];
+      groups[key].push(lead);
+    });
+
+    const duplicateGroupsList: { clientName: string; contact: string; count: number; keptId: string }[] = [];
+    const redundantIds: string[] = [];
+
+    Object.values(groups).forEach(groupLeads => {
+      if (groupLeads.length > 1) {
+        const sorted = [...groupLeads].sort((a, b) => {
+          const aHasStatus = a.lead_status && a.lead_status !== 'Select Option' ? 1 : 0;
+          const bHasStatus = b.lead_status && b.lead_status !== 'Select Option' ? 1 : 0;
+          if (aHasStatus !== bHasStatus) return bHasStatus - aHasStatus;
+
+          const aHasRemark = a.remark ? 1 : 0;
+          const bHasRemark = b.remark ? 1 : 0;
+          if (aHasRemark !== bHasRemark) return bHasRemark - aHasRemark;
+
+          const aHasAssigned = a.assigned_to ? 1 : 0;
+          const bHasAssigned = b.assigned_to ? 1 : 0;
+          if (aHasAssigned !== bHasAssigned) return bHasAssigned - aHasAssigned;
+
+          return 0;
+        });
+
+        const keptLead = sorted[0];
+        const redundant = sorted.slice(1);
+        redundant.forEach(r => redundantIds.push(r.id));
+
+        duplicateGroupsList.push({
+          clientName: keptLead.client_name,
+          contact: keptLead.contact,
+          count: groupLeads.length,
+          keptId: keptLead.id
+        });
+      }
+    });
+
+    setDuplicateSummary({
+      totalDuplicateGroups: duplicateGroupsList.length,
+      totalRedundantRows: redundantIds.length,
+      redundantIds,
+      duplicateGroups: duplicateGroupsList
+    });
+    setIsCleanDuplicatesOpen(true);
+  };
+
+  const handleConfirmCleanDuplicates = async () => {
+    if (duplicateSummary.redundantIds.length === 0) return;
+    setIsCleaningDuplicates(true);
+    try {
+      const chunkSize = 500;
+      for (let i = 0; i < duplicateSummary.redundantIds.length; i += chunkSize) {
+        const chunk = duplicateSummary.redundantIds.slice(i, i + chunkSize);
+        const { error } = await supabase.from("leads").delete().in("id", chunk);
+        if (error) throw error;
+      }
+
+      toast({
+        title: "Duplicates Cleaned Successfully",
+        description: `Removed ${duplicateSummary.totalRedundantRows} redundant duplicate leads across ${duplicateSummary.totalDuplicateGroups} contacts.`
+      });
+
+      setIsCleanDuplicatesOpen(false);
+      fetchLeads();
+    } catch (err: any) {
+      console.error("Error cleaning duplicates:", err);
+      toast({
+        title: "Clean Duplicates Failed",
+        description: err.message,
+        variant: "destructive"
+      });
+    } finally {
+      setIsCleaningDuplicates(false);
+    }
+  };
 
   const [leadForm, setLeadForm] = useState<Partial<Lead>>({
     admission_date: "",
@@ -989,8 +1084,33 @@ export function LeadsManagement() {
           return;
         }
 
+        // Deduplicate against existing contacts in state
+        const existingContactSet = new Set(
+          leads
+            .map(l => (l.contact || "").replace(/\D/g, "").slice(-10))
+            .filter(c => c.length >= 7)
+        );
+
+        const nonDuplicateLeads = validLeads.filter(l => {
+          const clean = (l.contact || "").replace(/\D/g, "");
+          const last10 = clean.length >= 10 ? clean.slice(-10) : clean;
+          if (last10 && existingContactSet.has(last10)) return false;
+          return true;
+        });
+
+        if (nonDuplicateLeads.length === 0) {
+          toast({
+            title: "All Duplicates Skipped",
+            description: `All ${validLeads.length} leads in the file already exist in the database.`,
+          });
+          setLoading(false);
+          return;
+        }
+
+        const skippedCount = validLeads.length - nonDuplicateLeads.length;
+
         // Bulk insert to Supabase
-        const { data: insertedLeads, error } = await supabase.from("leads").insert(validLeads).select('id, client_name, assigned_to');
+        const { data: insertedLeads, error } = await supabase.from("leads").insert(nonDuplicateLeads).select('id, client_name, assigned_to');
         if (error) throw error;
 
         if (insertedLeads && insertedLeads.length > 0) {
@@ -1005,7 +1125,7 @@ export function LeadsManagement() {
 
         toast({
           title: "Import Successful",
-          description: `Successfully imported ${validLeads.length} leads.`
+          description: `Successfully imported ${nonDuplicateLeads.length} leads.${skippedCount > 0 ? ` (${skippedCount} duplicates skipped)` : ""}`
         });
         fetchLeads();
       } catch (err: any) {
@@ -1135,6 +1255,9 @@ export function LeadsManagement() {
           </Button>
           <Button variant="outline" size="sm" className="border-gray-200" onClick={handleImportClick}>
             <Upload className="w-4 h-4 mr-1" /> Import Data
+          </Button>
+          <Button variant="outline" size="sm" className="border-amber-300 text-amber-800 hover:bg-amber-50 font-semibold" onClick={handleAnalyzeDuplicates}>
+            <Sparkles className="w-4 h-4 mr-1 text-amber-600" /> Clean Duplicates
           </Button>
           <Button variant="outline" size="sm" className="border-blue-300 text-blue-700 hover:bg-blue-50 font-semibold" onClick={() => setIsSheetSyncOpen(true)}>
             <FileCode className="w-4 h-4 mr-1 text-blue-600" /> Google Sheet Sync
@@ -1922,6 +2045,77 @@ function scanAndSyncLeads() {
             <Button className="bg-[#2e5a44] hover:bg-[#203f2f] text-white" onClick={() => setIsSheetSyncOpen(false)}>
               Close
             </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Clean Duplicates Confirmation Dialog */}
+      <Dialog open={isCleanDuplicatesOpen} onOpenChange={setIsCleanDuplicatesOpen}>
+        <DialogContent className="max-w-2xl max-h-[85vh] overflow-hidden flex flex-col">
+          <DialogHeader>
+            <DialogTitle className="text-xl font-bold flex items-center gap-2 text-amber-700">
+              <Sparkles className="w-5 h-5 text-amber-600" /> Deduplicate & Clean Lead Records
+            </DialogTitle>
+          </DialogHeader>
+
+          <div className="space-y-4 pt-2 flex-1 overflow-y-auto">
+            {duplicateSummary.totalDuplicateGroups === 0 ? (
+              <div className="p-8 text-center bg-emerald-50 rounded-xl border border-emerald-100">
+                <CheckCircle className="w-10 h-10 text-emerald-600 mx-auto mb-2" />
+                <h4 className="font-bold text-gray-900 text-lg">No Duplicate Leads Found!</h4>
+                <p className="text-xs text-gray-600 mt-1">All contact numbers in your CRM are unique. No cleanup required.</p>
+              </div>
+            ) : (
+              <>
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="bg-amber-50 p-4 rounded-xl border border-amber-200">
+                    <span className="text-xs text-amber-800 font-semibold block uppercase">Duplicate Contacts</span>
+                    <span className="text-2xl font-extrabold text-amber-900">{duplicateSummary.totalDuplicateGroups}</span>
+                    <span className="text-[11px] text-amber-700 block mt-0.5">Contacts with multiple entries</span>
+                  </div>
+                  <div className="bg-red-50 p-4 rounded-xl border border-red-200">
+                    <span className="text-xs text-red-800 font-semibold block uppercase">Redundant Rows to Delete</span>
+                    <span className="text-2xl font-extrabold text-red-900">{duplicateSummary.totalRedundantRows}</span>
+                    <span className="text-[11px] text-red-700 block mt-0.5">Duplicate records will be removed</span>
+                  </div>
+                </div>
+
+                <div className="border rounded-xl overflow-hidden text-xs">
+                  <div className="bg-gray-100 p-3 font-bold text-gray-700 uppercase flex justify-between border-b">
+                    <span>Client / Contact</span>
+                    <span>Total Copies (1 kept, rest deleted)</span>
+                  </div>
+                  <div className="max-h-60 overflow-y-auto divide-y divide-gray-100">
+                    {duplicateSummary.duplicateGroups.map((g, idx) => (
+                      <div key={idx} className="p-3 flex justify-between items-center hover:bg-gray-50">
+                        <div>
+                          <span className="font-bold text-gray-900 block">{g.clientName}</span>
+                          <span className="text-gray-500">{g.contact}</span>
+                        </div>
+                        <span className="px-2.5 py-1 rounded-full bg-red-100 text-red-800 font-bold">
+                          {g.count} copies
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </>
+            )}
+          </div>
+
+          <DialogFooter className="pt-3 border-t">
+            <Button variant="outline" onClick={() => setIsCleanDuplicatesOpen(false)}>
+              Cancel
+            </Button>
+            {duplicateSummary.totalRedundantRows > 0 && (
+              <Button
+                onClick={handleConfirmCleanDuplicates}
+                disabled={isCleaningDuplicates}
+                className="bg-red-600 hover:bg-red-700 text-white font-bold"
+              >
+                {isCleaningDuplicates ? "Cleaning Duplicates..." : `Delete ${duplicateSummary.totalRedundantRows} Duplicate Rows`}
+              </Button>
+            )}
           </DialogFooter>
         </DialogContent>
       </Dialog>
