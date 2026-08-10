@@ -196,7 +196,12 @@ function scanAndSyncLeads() {
         rowIndex: r + 1
       });
 
-      // Mark in local set
+      // Mark in local lookup map & set immediately so subsequent rows in same scan are blocked
+      var newItem = { client_name: clientName, contact: contact, assigned_to: assignedTo };
+      if (last10) existingMap[last10] = newItem;
+      if (cleanDigits) existingMap[cleanDigits] = newItem;
+      if (contactLower) existingMap[contactLower] = newItem;
+      if (comboKey) existingMap[comboKey] = newItem;
       if (cleanDigits) existingSet[cleanDigits] = true;
       existingSet[contactLower] = true;
       existingSet[comboKey] = true;

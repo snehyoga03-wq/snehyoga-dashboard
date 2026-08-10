@@ -1875,9 +1875,9 @@ function scanAndSyncLeads() {
       return str;
     }
 
-    var response = UrlFetchApp.fetch(SUPABASE_URL + "/rest/v1/leads?select=id,contact,client_name,assigned_to", {
+    var response = UrlFetchApp.fetch(SUPABASE_URL + "/rest/v1/leads?select=id,contact,client_name,assigned_to&limit=100000", {
       method: "get",
-      headers: { "apikey": SUPABASE_KEY, "Authorization": "Bearer " + SUPABASE_KEY },
+      headers: { "apikey": SUPABASE_KEY, "Authorization": "Bearer " + SUPABASE_KEY, "Range": "0-99999" },
       muteHttpExceptions: true
     });
     if (response.getResponseCode() !== 200) return;
@@ -1889,7 +1889,15 @@ function scanAndSyncLeads() {
       var item = existingLeads[i];
       if (item.contact) {
         var cleanC = String(item.contact).replace(/\\D/g, "");
-        if (cleanC) { existingSet[cleanC] = true; existingMap[cleanC] = item; }
+        if (cleanC) {
+          existingSet[cleanC] = true;
+          existingMap[cleanC] = item;
+          if (cleanC.length >= 10) {
+            var last10 = cleanC.slice(-10);
+            existingSet[last10] = true;
+            existingMap[last10] = item;
+          }
+        }
         var cLow = String(item.contact).trim().toLowerCase();
         existingSet[cLow] = true; existingMap[cLow] = item;
       }
@@ -1912,11 +1920,12 @@ function scanAndSyncLeads() {
       if (!clientName || !contact) continue;
 
       var cleanDigits = contact.replace(/\\D/g, "");
+      var last10 = cleanDigits.length >= 10 ? cleanDigits.slice(-10) : cleanDigits;
       var contactLower = contact.toLowerCase();
       var comboKey = (clientName + "_" + contact).toLowerCase();
       var assignedTo = formatAssignedTo(rawAssignedTo);
 
-      var existingItem = existingMap[cleanDigits] || existingMap[contactLower] || existingMap[comboKey];
+      var existingItem = existingMap[last10] || existingMap[cleanDigits] || existingMap[contactLower] || existingMap[comboKey];
 
       if (existingItem) {
         sheet.getRange(r + 1, crmStatusIdx + 1).setValue("Done");
@@ -1938,6 +1947,11 @@ function scanAndSyncLeads() {
         rowIndex: r + 1
       });
 
+      var newItem = { client_name: clientName, contact: contact, assigned_to: assignedTo };
+      if (last10) existingMap[last10] = newItem;
+      if (cleanDigits) existingMap[cleanDigits] = newItem;
+      if (contactLower) existingMap[contactLower] = newItem;
+      if (comboKey) existingMap[comboKey] = newItem;
       if (cleanDigits) existingSet[cleanDigits] = true;
       existingSet[contactLower] = true;
       existingSet[comboKey] = true;
