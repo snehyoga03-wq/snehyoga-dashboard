@@ -14,6 +14,22 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/u
 const ASSIGNED_USERS = ["Ragini K", "Shreya K", "Janhavi V"];
 const LEAD_STATUSES = ["Select Option", "Follow Up", "Master Class Follow", "Deal Done", "Dead"];
 
+const isUserMatch = (assignedTo: string | null | undefined, createdBy: string | null | undefined, targetUser: string): boolean => {
+  if (!targetUser || targetUser === 'all') return true;
+  const normTarget = targetUser.trim().toLowerCase();
+  const targetFirstName = normTarget.split(' ')[0];
+
+  const normAssigned = (assignedTo || "").trim().toLowerCase();
+  const normCreatedBy = (createdBy || "").trim().toLowerCase();
+
+  return (
+    normAssigned.includes(normTarget) ||
+    normAssigned.includes(targetFirstName) ||
+    normCreatedBy.includes(normTarget) ||
+    normCreatedBy.includes(targetFirstName)
+  );
+};
+
 export default function WeeklyReportDashboard() {
   const [loading, setLoading] = useState(true);
   const [isExpanded, setIsExpanded] = useState(false);
@@ -68,7 +84,7 @@ export default function WeeklyReportDashboard() {
       // 2. Fetch history within date range
       let historyQuery = supabase
         .from('lead_history')
-        .select('*, leads!inner(assigned_to)');
+        .select('*, leads(assigned_to)');
         
       if (effectiveStartDate) {
         historyQuery = historyQuery.gte('created_at', `${effectiveStartDate}T00:00:00.000Z`);
@@ -79,7 +95,7 @@ export default function WeeklyReportDashboard() {
       
       if (effectiveMember !== 'all') {
         const firstName = effectiveMember.split(' ')[0];
-        historyQuery = historyQuery.or(`leads.assigned_to.ilike.%${effectiveMember}%,leads.assigned_to.ilike.%${firstName}%`);
+        historyQuery = historyQuery.or(`created_by.ilike.%${effectiveMember}%,created_by.ilike.%${firstName}%,leads.assigned_to.ilike.%${effectiveMember}%,leads.assigned_to.ilike.%${firstName}%`);
       }
       
       const { data: historyData, error: historyError } = await historyQuery;
@@ -104,14 +120,17 @@ export default function WeeklyReportDashboard() {
     fetchData();
   }, [startDate, endDate, dailyDate, selectedMember, selectedStatus]);
 
-  // Derived Metrics
-  const totalAssigned = leads.length;
-  const totalCallsDone = new Set(history.map(h => h.lead_id)).size;
+  // Harmonized Derived Metrics
+  const filteredLeads = leads.filter(l => isUserMatch(l.assigned_to, null, effectiveMember));
+  const filteredHistory = history.filter(h => isUserMatch(h.leads?.assigned_to, h.created_by, effectiveMember));
+
+  const totalAssigned = filteredLeads.length;
+  const totalCallsDone = filteredHistory.length;
   
-  const pendingFollowUps = leads.filter(l => l.lead_status === 'Follow Up').length;
-  const masterClassLeads = leads.filter(l => l.lead_status === 'Master Class Follow').length;
-  const convertedLeads = leads.filter(l => l.lead_status === 'Deal Done').length;
-  const deadLeads = leads.filter(l => l.lead_status === 'Dead').length;
+  const pendingFollowUps = filteredLeads.filter(l => l.lead_status === 'Follow Up').length;
+  const masterClassLeads = filteredLeads.filter(l => l.lead_status === 'Master Class Follow').length;
+  const convertedLeads = filteredLeads.filter(l => l.lead_status === 'Deal Done').length;
+  const deadLeads = filteredLeads.filter(l => l.lead_status === 'Dead').length;
 
   // 60-Call Daily Target & Appreciation Ledgers
   const effectiveStartDate = dailyDate || startDate;
@@ -125,15 +144,14 @@ export default function WeeklyReportDashboard() {
     effectiveEndDate
   );
 
-  // Analytics Chart Data
+  // Analytics Chart Data (Harmonized with Top Cards & Ledger)
   const chartData = displayedUsers.map(user => {
-    const firstName = user.split(' ')[0].toLowerCase();
-    const userLeads = leads.filter(l => (l.assigned_to || "").toLowerCase().includes(firstName));
-    const userHistory = history.filter(h => (h.leads?.assigned_to || "").toLowerCase().includes(firstName));
+    const userLeads = leads.filter(l => isUserMatch(l.assigned_to, null, user));
+    const userHistory = history.filter(h => isUserMatch(h.leads?.assigned_to, h.created_by, user));
     
     return {
       name: user.split(' ')[0],
-      Calls: new Set(userHistory.map(h => h.lead_id)).size,
+      Calls: userHistory.length,
       Converted: userLeads.filter(l => l.lead_status === 'Deal Done').length,
       Assigned: userLeads.length
     };
@@ -216,8 +234,8 @@ export default function WeeklyReportDashboard() {
 
       {/* Metrics Grid */}
       <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
-        <MetricCard title="Total Assigned" value={totalAssigned} icon={<Users size={22} />} color="blue" delay={0.1} />
-        <MetricCard title="Total Calls Done" value={totalCallsDone} icon={<PhoneCall size={22} />} color="indigo" delay={0.15} />
+        <MetricCard title="Total Assigned" subtitle="Fresh leads added on selected date" value={totalAssigned} icon={<Users size={22} />} color="blue" delay={0.1} />
+        <MetricCard title="Total Calls Done" subtitle="Calls made today (fresh + past follow-ups)" value={totalCallsDone} icon={<PhoneCall size={22} />} color="indigo" delay={0.15} />
         <MetricCard title="Master Class Follow" value={masterClassLeads} icon={<Users size={22} />} color="purple" delay={0.22} />
         <MetricCard title="Pending Follow-ups" value={pendingFollowUps} icon={<Clock size={22} />} color="amber" delay={0.25} />
         <MetricCard title="Converted / Joined" value={convertedLeads} icon={<TrendingUp size={22} />} color="green" delay={0.3} />
@@ -449,8 +467,7 @@ export default function WeeklyReportDashboard() {
   );
 }
 
-
-function MetricCard({ title, value, icon, color, delay = 0 }: { title: string, value: number, icon: React.ReactNode, color: string, delay?: number }) {
+function MetricCard({ title, subtitle, value, icon, color, delay = 0 }: { title: string, subtitle?: string, value: number, icon: React.ReactNode, color: string, delay?: number }) {
   const colorMap: Record<string, string> = {
     blue: "bg-gradient-to-br from-blue-50 to-blue-100/50 text-blue-600 border-blue-100",
     indigo: "bg-gradient-to-br from-indigo-50 to-indigo-100/50 text-indigo-600 border-indigo-100",
@@ -483,8 +500,9 @@ function MetricCard({ title, value, icon, color, delay = 0 }: { title: string, v
       <Card className={`border shadow-sm hover:shadow-md transition-all duration-300 ${colorMap[color] || 'bg-white'}`}>
         <CardContent className="p-5 flex items-center justify-between gap-4">
           <div>
-            <p className="text-[11px] font-bold text-gray-500 uppercase tracking-wider mb-1">{title}</p>
+            <p className="text-[11px] font-bold text-gray-500 uppercase tracking-wider mb-0.5">{title}</p>
             <h3 className="text-3xl font-extrabold text-gray-900 tracking-tight">{value}</h3>
+            {subtitle && <p className="text-[10px] text-gray-500 font-medium mt-1">{subtitle}</p>}
           </div>
           <div className={`p-3.5 rounded-2xl ${iconBgMap[color] || 'bg-gray-100 text-gray-600'}`}>
             {icon}

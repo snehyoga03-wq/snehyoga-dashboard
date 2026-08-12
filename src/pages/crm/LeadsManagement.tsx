@@ -282,9 +282,10 @@ export function LeadsManagement() {
   const [isCleaningDuplicates, setIsCleaningDuplicates] = useState(false);
 
   const handleAnalyzeDuplicates = () => {
+    const uniqueLeadsById = Array.from(new Map(leads.map(item => [item.id, item])).values());
     const groups: Record<string, Lead[]> = {};
 
-    leads.forEach(lead => {
+    uniqueLeadsById.forEach(lead => {
       const cleanContact = (lead.contact || "").replace(/\D/g, "");
       const last10 = cleanContact.length >= 10 ? cleanContact.slice(-10) : cleanContact;
       const key = last10 || (lead.client_name || "").trim().toLowerCase();
@@ -341,7 +342,7 @@ export function LeadsManagement() {
     if (duplicateSummary.redundantIds.length === 0) return;
     setIsCleaningDuplicates(true);
     try {
-      const chunkSize = 500;
+      const chunkSize = 50;
       for (let i = 0; i < duplicateSummary.redundantIds.length; i += chunkSize) {
         const chunk = duplicateSummary.redundantIds.slice(i, i + chunkSize);
         const { error } = await supabase.from("leads").delete().in("id", chunk);
@@ -391,10 +392,12 @@ export function LeadsManagement() {
       const { data, error } = await supabase
         .from("leads")
         .select("*")
-        .order("created_at", { ascending: false });
+        .order("created_at", { ascending: false })
+        .limit(1000);
 
       if (error) throw error;
-      setLeads(data || []);
+      const uniqueData = Array.from(new Map((data || []).map((item: Lead) => [item.id, item])).values());
+      setLeads(uniqueData);
     } catch (err: any) {
       console.error("Error fetching leads:", err);
       toast({
@@ -1864,7 +1867,7 @@ function scanAndSyncLeads() {
       sheet.getRange(1, 10).setValue("lead CRM status").setFontWeight("bold");
     }
 
-    var KNOWN_STAFF = ["Ragini K", "Shreya K", "Janhavi V", "Janhavi Vaidya"];
+    var KNOWN_STAFF = ["Mayuri K", "Ragini K", "Shreya K", "Janhavi V", "Janhavi Vaidya"];
     function formatAssignedTo(val) {
       if (!val) return null;
       var str = String(val).trim();
@@ -1875,35 +1878,53 @@ function scanAndSyncLeads() {
       return str;
     }
 
-    var response = UrlFetchApp.fetch(SUPABASE_URL + "/rest/v1/leads?select=id,contact,client_name,assigned_to&limit=100000", {
-      method: "get",
-      headers: { "apikey": SUPABASE_KEY, "Authorization": "Bearer " + SUPABASE_KEY, "Range": "0-99999" },
-      muteHttpExceptions: true
-    });
-    if (response.getResponseCode() !== 200) return;
+    // 2. Fetch ALL existing leads from Supabase using PAGINATION (bypasses 1,000 row default limit)
+    var existingLeads = [];
+    var offset = 0;
+    var pageSize = 1000;
+    var hasMore = true;
 
-    var existingLeads = JSON.parse(response.getContentText());
+    while (hasMore) {
+      var getOptions = {
+        method: "get",
+        headers: { "apikey": SUPABASE_KEY, "Authorization": "Bearer " + SUPABASE_KEY },
+        muteHttpExceptions: true
+      };
+      var fetchUrl = SUPABASE_URL + "/rest/v1/leads?select=id,contact,client_name,assigned_to&offset=" + offset + "&limit=" + pageSize;
+      var response = UrlFetchApp.fetch(fetchUrl, getOptions);
+      if (response.getResponseCode() !== 200) break;
+
+      var pageData = JSON.parse(response.getContentText());
+      if (!pageData || pageData.length === 0) {
+        hasMore = false;
+      } else {
+        existingLeads = existingLeads.concat(pageData);
+        if (pageData.length < pageSize) {
+          hasMore = false;
+        } else {
+          offset += pageSize;
+        }
+      }
+    }
+
     var existingMap = {};
-    var existingSet = {};
     for (var i = 0; i < existingLeads.length; i++) {
       var item = existingLeads[i];
       if (item.contact) {
-        var cleanC = String(item.contact).replace(/\\D/g, "");
+        var rawC = String(item.contact).trim();
+        var cleanC = rawC.replace(/\\D/g, "");
         if (cleanC) {
-          existingSet[cleanC] = true;
           existingMap[cleanC] = item;
           if (cleanC.length >= 10) {
             var last10 = cleanC.slice(-10);
-            existingSet[last10] = true;
             existingMap[last10] = item;
           }
         }
-        var cLow = String(item.contact).trim().toLowerCase();
-        existingSet[cLow] = true; existingMap[cLow] = item;
+        existingMap[rawC.toLowerCase()] = item;
       }
       if (item.client_name && item.contact) {
         var combo = (String(item.client_name).trim() + "_" + String(item.contact).trim()).toLowerCase();
-        existingSet[combo] = true; existingMap[combo] = item;
+        existingMap[combo] = item;
       }
     }
 
@@ -1916,6 +1937,7 @@ function scanAndSyncLeads() {
       var contact = String(row[contactIdx] || "").trim();
       var rawAdmissionDate = admissionDateIdx !== -1 ? row[admissionDateIdx] : null;
       var rawAssignedTo = assignedToIdx !== -1 ? row[assignedToIdx] : null;
+      var crmStatus = crmStatusIdx !== -1 ? String(row[crmStatusIdx] || "").trim().toLowerCase() : "";
 
       if (!clientName || !contact) continue;
 
@@ -1925,10 +1947,18 @@ function scanAndSyncLeads() {
       var comboKey = (clientName + "_" + contact).toLowerCase();
       var assignedTo = formatAssignedTo(rawAssignedTo);
 
-      var existingItem = existingMap[last10] || existingMap[cleanDigits] || existingMap[contactLower] || existingMap[comboKey];
+      var existingItem = (last10 && existingMap[last10]) || 
+                         (cleanDigits && existingMap[cleanDigits]) || 
+                         existingMap[contactLower] || 
+                         existingMap[comboKey];
 
+      var isDoneInSheet = (crmStatus === "done");
+
+      // Case A: Lead exists in database
       if (existingItem) {
-        sheet.getRange(r + 1, crmStatusIdx + 1).setValue("Done");
+        if (!isDoneInSheet) {
+          sheet.getRange(r + 1, crmStatusIdx + 1).setValue("Done");
+        }
         if (assignedTo && (existingItem.assigned_to || "").toLowerCase() !== assignedTo.toLowerCase()) {
           existingLeadsToUpdate.push({ id: existingItem.id, assigned_to: assignedTo });
           existingItem.assigned_to = assignedTo;
@@ -1936,6 +1966,12 @@ function scanAndSyncLeads() {
         continue;
       }
 
+      // Case B: Lead does NOT exist in DB, BUT sheet ALREADY marks it "Done"
+      if (isDoneInSheet) {
+        continue;
+      }
+
+      // Case C: Lead does NOT exist in DB and is NOT marked Done in sheet -> Prepare for insert
       var formattedAdmissionDate = parseSheetDate(rawAdmissionDate);
       newLeadsToInsert.push({
         client_name: clientName,
@@ -1950,11 +1986,8 @@ function scanAndSyncLeads() {
       var newItem = { client_name: clientName, contact: contact, assigned_to: assignedTo };
       if (last10) existingMap[last10] = newItem;
       if (cleanDigits) existingMap[cleanDigits] = newItem;
-      if (contactLower) existingMap[contactLower] = newItem;
-      if (comboKey) existingMap[comboKey] = newItem;
-      if (cleanDigits) existingSet[cleanDigits] = true;
-      existingSet[contactLower] = true;
-      existingSet[comboKey] = true;
+      existingMap[contactLower] = newItem;
+      existingMap[comboKey] = newItem;
     }
 
     if (existingLeadsToUpdate.length > 0) {
@@ -1970,33 +2003,37 @@ function scanAndSyncLeads() {
     }
 
     if (newLeadsToInsert.length > 0) {
-      var payloadData = newLeadsToInsert.map(function(item) {
-        return {
-          client_name: item.client_name,
-          contact: item.contact,
-          admission_date: item.admission_date,
-          assigned_to: item.assigned_to,
-          lead_status: item.lead_status,
-          created_at: item.created_at
-        };
-      });
+      var chunkSize = 50;
+      for (var c = 0; c < newLeadsToInsert.length; c += chunkSize) {
+        var chunk = newLeadsToInsert.slice(c, c + chunkSize);
+        var payloadData = chunk.map(function(item) {
+          return {
+            client_name: item.client_name,
+            contact: item.contact,
+            admission_date: item.admission_date,
+            assigned_to: item.assigned_to,
+            lead_status: item.lead_status,
+            created_at: item.created_at
+          };
+        });
 
-      var postResponse = UrlFetchApp.fetch(SUPABASE_URL + "/rest/v1/leads", {
-        method: "post",
-        headers: {
-          "apikey": SUPABASE_KEY,
-          "Authorization": "Bearer " + SUPABASE_KEY,
-          "Content-Type": "application/json",
-          "Prefer": "return=minimal"
-        },
-        payload: JSON.stringify(payloadData),
-        muteHttpExceptions: true
-      });
+        var postResponse = UrlFetchApp.fetch(SUPABASE_URL + "/rest/v1/leads", {
+          method: "post",
+          headers: {
+            "apikey": SUPABASE_KEY,
+            "Authorization": "Bearer " + SUPABASE_KEY,
+            "Content-Type": "application/json",
+            "Prefer": "return=minimal"
+          },
+          payload: JSON.stringify(payloadData),
+          muteHttpExceptions: true
+        });
 
-      var statusCode = postResponse.getResponseCode();
-      if (statusCode === 201 || statusCode === 200) {
-        for (var k = 0; k < newLeadsToInsert.length; k++) {
-          sheet.getRange(newLeadsToInsert[k].rowIndex, crmStatusIdx + 1).setValue("Done");
+        var statusCode = postResponse.getResponseCode();
+        if (statusCode === 201 || statusCode === 200) {
+          for (var k = 0; k < chunk.length; k++) {
+            sheet.getRange(chunk[k].rowIndex, crmStatusIdx + 1).setValue("Done");
+          }
         }
       }
     }

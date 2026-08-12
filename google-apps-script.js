@@ -81,48 +81,61 @@ function scanAndSyncLeads() {
       sheet.getRange(1, 10).setValue("lead CRM status").setFontWeight("bold");
     }
 
-    // 2. Fetch existing leads from Supabase database for duplicate checking & assignment updates
-    var getOptions = {
-      method: "get",
-      headers: {
-        "apikey": SUPABASE_KEY,
-        "Authorization": "Bearer " + SUPABASE_KEY,
-        "Range": "0-99999"
-      },
-      muteHttpExceptions: true
-    };
+    // 2. Fetch ALL existing leads from Supabase using PAGINATION (bypasses 1,000 row default limit)
+    var existingLeads = [];
+    var offset = 0;
+    var pageSize = 1000;
+    var hasMore = true;
 
-    var response = UrlFetchApp.fetch(SUPABASE_URL + "/rest/v1/leads?select=id,contact,client_name,assigned_to&limit=100000", getOptions);
-    if (response.getResponseCode() !== 200) {
-      Logger.log("[Sync Error] Failed to fetch existing leads from Supabase. Response: " + response.getContentText());
-      return;
+    while (hasMore) {
+      var getOptions = {
+        method: "get",
+        headers: {
+          "apikey": SUPABASE_KEY,
+          "Authorization": "Bearer " + SUPABASE_KEY
+        },
+        muteHttpExceptions: true
+      };
+      var fetchUrl = SUPABASE_URL + "/rest/v1/leads?select=id,contact,client_name,assigned_to&offset=" + offset + "&limit=" + pageSize;
+      var response = UrlFetchApp.fetch(fetchUrl, getOptions);
+      if (response.getResponseCode() !== 200) {
+        Logger.log("[Sync Error] Failed to fetch leads from Supabase at offset " + offset + ". Response: " + response.getContentText());
+        break;
+      }
+
+      var pageData = JSON.parse(response.getContentText());
+      if (!pageData || pageData.length === 0) {
+        hasMore = false;
+      } else {
+        existingLeads = existingLeads.concat(pageData);
+        if (pageData.length < pageSize) {
+          hasMore = false;
+        } else {
+          offset += pageSize;
+        }
+      }
     }
 
-    var existingLeads = JSON.parse(response.getContentText());
+    Logger.log("[Sync] Loaded " + existingLeads.length + " existing leads from Supabase CRM.");
     
     // Build lookup maps of existing leads
     var existingMap = {};
-    var existingSet = {};
     for (var i = 0; i < existingLeads.length; i++) {
       var item = existingLeads[i];
       if (item.contact) {
-        var cleanC = String(item.contact).replace(/\D/g, "");
+        var rawC = String(item.contact).trim();
+        var cleanC = rawC.replace(/\D/g, "");
         if (cleanC) {
-          existingSet[cleanC] = true;
           existingMap[cleanC] = item;
           if (cleanC.length >= 10) {
             var last10 = cleanC.slice(-10);
-            existingSet[last10] = true;
             existingMap[last10] = item;
           }
         }
-        var contactLow = String(item.contact).trim().toLowerCase();
-        existingSet[contactLow] = true;
-        existingMap[contactLow] = item;
+        existingMap[rawC.toLowerCase()] = item;
       }
       if (item.client_name && item.contact) {
         var combo = (String(item.client_name).trim() + "_" + String(item.contact).trim()).toLowerCase();
-        existingSet[combo] = true;
         existingMap[combo] = item;
       }
     }
@@ -151,6 +164,7 @@ function scanAndSyncLeads() {
       var rawContact = row[contactIdx];
       var rawAdmissionDate = admissionDateIdx !== -1 ? row[admissionDateIdx] : null;
       var rawAssignedTo = assignedToIdx !== -1 ? row[assignedToIdx] : null;
+      var crmStatus = crmStatusIdx !== -1 ? String(row[crmStatusIdx] || "").trim().toLowerCase() : "";
 
       var clientName = String(rawName || "").trim();
       var contact = String(rawContact || "").trim();
@@ -164,14 +178,21 @@ function scanAndSyncLeads() {
       var contactLower = contact.toLowerCase();
       var comboKey = (clientName + "_" + contact).toLowerCase();
 
-      var existingItem = existingMap[last10] || existingMap[cleanDigits] || existingMap[contactLower] || existingMap[comboKey];
+      var existingItem = (last10 && existingMap[last10]) || 
+                         (cleanDigits && existingMap[cleanDigits]) || 
+                         existingMap[contactLower] || 
+                         existingMap[comboKey];
 
-      // If ALREADY in CRM
+      var isDoneInSheet = (crmStatus === "done");
+
+      // Case A: Lead exists in database
       if (existingItem) {
-        // Mark status as Done in lead CRM status column
-        sheet.getRange(r + 1, crmStatusIdx + 1).setValue("Done");
+        // Ensure sheet cell shows Done
+        if (!isDoneInSheet) {
+          sheet.getRange(r + 1, crmStatusIdx + 1).setValue("Done");
+        }
 
-        // If sheet has an assigned_to value and database assigned_to is different or null, prepare update
+        // If sheet has assigned_to and database assigned_to is different or null, update DB
         if (assignedTo && (existingItem.assigned_to || "").toLowerCase() !== assignedTo.toLowerCase()) {
           existingLeadsToUpdate.push({
             id: existingItem.id,
@@ -182,10 +203,15 @@ function scanAndSyncLeads() {
         continue;
       }
 
-      // Format Admission Date to YYYY-MM-DD
+      // Case B: Lead does NOT exist in DB, BUT sheet ALREADY marks it "Done"
+      // NEVER insert a lead into CRM if the sheet row is already marked Done!
+      if (isDoneInSheet) {
+        continue;
+      }
+
+      // Case C: Lead does NOT exist in DB and is NOT marked Done in sheet -> Prepare for insert
       var formattedAdmissionDate = parseSheetDate(rawAdmissionDate);
 
-      // Prepare new lead object with row index saved
       newLeadsToInsert.push({
         client_name: clientName,
         contact: contact,
@@ -196,15 +222,12 @@ function scanAndSyncLeads() {
         rowIndex: r + 1
       });
 
-      // Mark in local lookup map & set immediately so subsequent rows in same scan are blocked
+      // Mark in local lookup map immediately so duplicate rows in the SAME sheet scan are blocked
       var newItem = { client_name: clientName, contact: contact, assigned_to: assignedTo };
       if (last10) existingMap[last10] = newItem;
       if (cleanDigits) existingMap[cleanDigits] = newItem;
-      if (contactLower) existingMap[contactLower] = newItem;
-      if (comboKey) existingMap[comboKey] = newItem;
-      if (cleanDigits) existingSet[cleanDigits] = true;
-      existingSet[contactLower] = true;
-      existingSet[comboKey] = true;
+      existingMap[contactLower] = newItem;
+      existingMap[comboKey] = newItem;
     }
 
     // 4. Update existing leads in Supabase if ASSIGNED TO was added/changed in Google Sheet
@@ -228,44 +251,48 @@ function scanAndSyncLeads() {
       }
     }
 
-    // 5. Send new leads to Supabase REST API
+    // 5. Send new leads to Supabase in CHUNKS of 50 and update sheet status immediately for each successful batch
     if (newLeadsToInsert.length > 0) {
-      Logger.log("[Sync] Found " + newLeadsToInsert.length + " new lead(s). Posting to CRM...");
+      Logger.log("[Sync] Found " + newLeadsToInsert.length + " new lead(s). Posting to CRM in batches...");
 
-      var payloadData = newLeadsToInsert.map(function(item) {
-        return {
-          client_name: item.client_name,
-          contact: item.contact,
-          admission_date: item.admission_date,
-          assigned_to: item.assigned_to,
-          lead_status: item.lead_status,
-          created_at: item.created_at
+      var chunkSize = 50;
+      for (var c = 0; c < newLeadsToInsert.length; c += chunkSize) {
+        var chunk = newLeadsToInsert.slice(c, c + chunkSize);
+        var payloadData = chunk.map(function(item) {
+          return {
+            client_name: item.client_name,
+            contact: item.contact,
+            admission_date: item.admission_date,
+            assigned_to: item.assigned_to,
+            lead_status: item.lead_status,
+            created_at: item.created_at
+          };
+        });
+
+        var postOptions = {
+          method: "post",
+          headers: {
+            "apikey": SUPABASE_KEY,
+            "Authorization": "Bearer " + SUPABASE_KEY,
+            "Content-Type": "application/json",
+            "Prefer": "return=minimal"
+          },
+          payload: JSON.stringify(payloadData),
+          muteHttpExceptions: true
         };
-      });
 
-      var postOptions = {
-        method: "post",
-        headers: {
-          "apikey": SUPABASE_KEY,
-          "Authorization": "Bearer " + SUPABASE_KEY,
-          "Content-Type": "application/json",
-          "Prefer": "return=minimal"
-        },
-        payload: JSON.stringify(payloadData),
-        muteHttpExceptions: true
-      };
+        var postResponse = UrlFetchApp.fetch(SUPABASE_URL + "/rest/v1/leads", postOptions);
+        var statusCode = postResponse.getResponseCode();
 
-      var postResponse = UrlFetchApp.fetch(SUPABASE_URL + "/rest/v1/leads", postOptions);
-      var statusCode = postResponse.getResponseCode();
-
-      if (statusCode === 201 || statusCode === 200) {
-        Logger.log("[Sync Success] Successfully added " + newLeadsToInsert.length + " lead(s) to CRM.");
-        // Mark newly added leads as Done in lead CRM status column
-        for (var k = 0; k < newLeadsToInsert.length; k++) {
-          sheet.getRange(newLeadsToInsert[k].rowIndex, crmStatusIdx + 1).setValue("Done");
+        if (statusCode === 201 || statusCode === 200) {
+          Logger.log("[Sync Success] Batch (" + (c+1) + "-" + (c+chunk.length) + ") added to CRM.");
+          // Mark newly added batch as "Done" in lead CRM status column immediately
+          for (var k = 0; k < chunk.length; k++) {
+            sheet.getRange(chunk[k].rowIndex, crmStatusIdx + 1).setValue("Done");
+          }
+        } else {
+          Logger.log("[Sync Error] Failed batch (" + (c+1) + "-" + (c+chunk.length) + "). Code: " + statusCode + ", Body: " + postResponse.getContentText());
         }
-      } else {
-        Logger.log("[Sync Error] Failed to post leads. Code: " + statusCode + ", Body: " + postResponse.getContentText());
       }
     } else {
       Logger.log("[Sync] Scan finished. No new leads to insert.");
