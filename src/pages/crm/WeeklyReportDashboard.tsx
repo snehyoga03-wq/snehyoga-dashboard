@@ -143,6 +143,7 @@ export default function WeeklyReportDashboard() {
 
   const targetLedgers = calculateCallTargetLedgers(
     filteredHistory,
+    leads,
     displayedUsers,
     targetDate,
     targetDate
@@ -320,20 +321,34 @@ export default function WeeklyReportDashboard() {
                   </div>
 
                   {hasDeficits ? (
-                    <div className="flex items-center justify-between text-xs bg-red-50 text-red-700 p-2 rounded-lg border border-red-100 mb-3">
+                    <div className="flex items-center justify-between text-xs bg-red-50 text-red-700 p-2 rounded-lg border border-red-100 mb-2">
                       <span className="font-medium flex items-center gap-1">
                         <ArrowDownRight className="w-3.5 h-3.5 text-red-500" /> Outstanding Deficit
                       </span>
                       <span className="font-bold">-{ledger.totalOutstandingDeficit} Calls</span>
                     </div>
                   ) : (
-                    <div className="flex items-center justify-between text-xs bg-emerald-50 text-emerald-700 p-2 rounded-lg border border-emerald-100 mb-3">
+                    <div className="flex items-center justify-between text-xs bg-emerald-50 text-emerald-700 p-2 rounded-lg border border-emerald-100 mb-2">
                       <span className="font-medium flex items-center gap-1">
                         <CheckCircle className="w-3.5 h-3.5 text-emerald-500" /> Deficits Fully Paid Back
                       </span>
                       <span className="font-bold">0 Pending</span>
                     </div>
                   )}
+
+                  {/* Surplus Bank Balance */}
+                  <div className={`flex items-center justify-between text-xs p-2 rounded-lg border mb-3 ${
+                    (ledger as any).surplusBankBalance > 0
+                      ? 'bg-blue-50 text-blue-700 border-blue-100'
+                      : 'bg-gray-50 text-gray-500 border-gray-100'
+                  }`}>
+                    <span className="font-medium flex items-center gap-1">
+                      🏦 Surplus Bank Balance
+                    </span>
+                    <span className="font-bold">
+                      {(ledger as any).surplusBankBalance > 0 ? `+${(ledger as any).surplusBankBalance}` : '0'} Calls
+                    </span>
+                  </div>
 
                   <Button 
                     variant="outline" 
