@@ -32,15 +32,15 @@ const isUserMatch = (assignedTo: string | null | undefined, createdBy: string | 
 
 export default function WeeklyReportDashboard() {
   const [loading, setLoading] = useState(true);
-  const [isExpanded, setIsExpanded] = useState(false);
+  const [isExpanded, setIsExpanded] = useState(true);
   const [leads, setLeads] = useState<Lead[]>([]);
   const [history, setHistory] = useState<any[]>([]);
   const [selectedLedgerUser, setSelectedLedgerUser] = useState<UserTargetLedger | null>(null);
   
-  // Filters - Default to today's date onward
-  const [startDate, setStartDate] = useState(() => new Date().toISOString().split('T')[0]);
-  const [endDate, setEndDate] = useState(() => new Date().toISOString().split('T')[0]);
-  const [dailyDate, setDailyDate] = useState<string>("");
+  // Filters - Default to today's date
+  const [startDate, setStartDate] = useState("");
+  const [endDate, setEndDate] = useState("");
+  const [dailyDate, setDailyDate] = useState<string>(() => new Date().toISOString().split('T')[0]);
   const userRole = sessionStorage.getItem("crm_user_role");
   const username = sessionStorage.getItem("crm_username");
   const isRestrictedStaff = userRole === "staff" && username !== "Shreya K";
@@ -59,46 +59,20 @@ export default function WeeklyReportDashboard() {
     const currentFetchId = ++fetchIdRef.current;
     setLoading(true);
     try {
-      const effectiveStartDate = dailyDate || startDate;
-      const effectiveEndDate = dailyDate || endDate;
-
-      // 1. Fetch leads
+      // 1. Fetch all leads clean from database
       let leadsQuery = supabase.from('leads').select('*');
-      if (effectiveMember !== 'all') {
-        const firstName = effectiveMember.split(' ')[0];
-        leadsQuery = leadsQuery.or(`assigned_to.ilike.%${effectiveMember}%,assigned_to.ilike.%${firstName}%`);
-      }
       if (selectedStatus !== 'all') {
         leadsQuery = leadsQuery.eq('lead_status', selectedStatus);
-      }
-      if (effectiveStartDate) {
-        leadsQuery = leadsQuery.gte('created_at', `${effectiveStartDate}T00:00:00.000Z`);
-      }
-      if (effectiveEndDate) {
-        leadsQuery = leadsQuery.lte('created_at', `${effectiveEndDate}T23:59:59.999Z`);
       }
       
       const { data: leadsData, error: leadsError } = await leadsQuery;
       if (leadsError) throw leadsError;
 
-      // 2. Fetch history within date range
-      let historyQuery = supabase
+      // 2. Fetch history clean from database (avoiding invalid postgrest join queries)
+      const { data: historyData, error: historyError } = await supabase
         .from('lead_history')
-        .select('*, leads(assigned_to)');
+        .select('*');
         
-      if (effectiveStartDate) {
-        historyQuery = historyQuery.gte('created_at', `${effectiveStartDate}T00:00:00.000Z`);
-      }
-      if (effectiveEndDate) {
-        historyQuery = historyQuery.lte('created_at', `${effectiveEndDate}T23:59:59.999Z`);
-      }
-      
-      if (effectiveMember !== 'all') {
-        const firstName = effectiveMember.split(' ')[0];
-        historyQuery = historyQuery.or(`created_by.ilike.%${effectiveMember}%,created_by.ilike.%${firstName}%,leads.assigned_to.ilike.%${effectiveMember}%,leads.assigned_to.ilike.%${firstName}%`);
-      }
-      
-      const { data: historyData, error: historyError } = await historyQuery;
       if (historyError) throw historyError;
 
       if (currentFetchId === fetchIdRef.current) {
@@ -118,14 +92,46 @@ export default function WeeklyReportDashboard() {
 
   useEffect(() => {
     fetchData();
-  }, [startDate, endDate, dailyDate, selectedMember, selectedStatus]);
+  }, [selectedStatus]);
 
-  // Harmonized Derived Metrics
-  const filteredLeads = leads.filter(l => isUserMatch(l.assigned_to, null, effectiveMember));
-  const filteredHistory = history.filter(h => isUserMatch(h.leads?.assigned_to, h.created_by, effectiveMember));
+  // Harmonized Derived Metrics (Strictly Identical to Leads Management Filter Engine)
+  const targetDate = dailyDate || startDate || endDate || new Date().toISOString().split('T')[0];
+
+  const matchesAutoDate = (lead: Lead, tDate: string): boolean => {
+    if (!tDate) return true;
+    const isMasterClassFollow = lead.lead_status === "Master Class Follow";
+    if (!lead.created_at) {
+      return lead.follow_up_date === tDate || isMasterClassFollow;
+    }
+    const leadDate = new Date(lead.created_at).toISOString().split('T')[0];
+    const isCreatedToday = leadDate === tDate;
+    const isFollowUpToday = lead.follow_up_date === tDate;
+    const isUntouchedCarryForward = leadDate < tDate && lead.lead_status === "Select Option" && !lead.follow_up_date;
+    return isCreatedToday || isFollowUpToday || isUntouchedCarryForward || isMasterClassFollow;
+  };
+
+  const filteredLeads = leads.filter(l => 
+    isUserMatch(l.assigned_to, null, effectiveMember) && 
+    matchesAutoDate(l, targetDate)
+  );
+
+  const assignedLeadIds = new Set(filteredLeads.map(l => l.id));
+
+  // History entries for the leads matching autoDate filter
+  const filteredHistory = history.filter(h => {
+    const matchesUser = isUserMatch(null, h.created_by, effectiveMember);
+    const matchesAssignedLead = targetDate ? assignedLeadIds.has(h.lead_id) : true;
+    return matchesUser || matchesAssignedLead;
+  });
 
   const totalAssigned = filteredLeads.length;
-  const totalCallsDone = filteredHistory.length;
+  // Total Calls Done = Unique assigned leads in this pool that have been called / acted upon
+  const totalCallsDone = filteredLeads.filter(l => 
+    (l.lead_status && l.lead_status !== 'Select Option') || 
+    (l.remark && l.remark !== '' && l.remark !== 'No remark') ||
+    (l.calling_date && l.calling_date !== '') ||
+    history.some(h => h.lead_id === l.id)
+  ).length;
   
   const pendingFollowUps = filteredLeads.filter(l => l.lead_status === 'Follow Up').length;
   const masterClassLeads = filteredLeads.filter(l => l.lead_status === 'Master Class Follow').length;
@@ -133,25 +139,35 @@ export default function WeeklyReportDashboard() {
   const deadLeads = filteredLeads.filter(l => l.lead_status === 'Dead').length;
 
   // 60-Call Daily Target & Appreciation Ledgers
-  const effectiveStartDate = dailyDate || startDate;
-  const effectiveEndDate = dailyDate || endDate;
   const displayedUsers = effectiveMember === 'all' ? ASSIGNED_USERS : [effectiveMember];
 
   const targetLedgers = calculateCallTargetLedgers(
-    history,
+    filteredHistory,
     displayedUsers,
-    effectiveStartDate,
-    effectiveEndDate
+    targetDate,
+    targetDate
   );
 
   // Analytics Chart Data (Harmonized with Top Cards & Ledger)
   const chartData = displayedUsers.map(user => {
-    const userLeads = leads.filter(l => isUserMatch(l.assigned_to, null, user));
-    const userHistory = history.filter(h => isUserMatch(h.leads?.assigned_to, h.created_by, user));
+    const userLeads = leads.filter(l => isUserMatch(l.assigned_to, null, user) && matchesAutoDate(l, targetDate));
+    const userLeadIds = new Set(userLeads.map(l => l.id));
+    const userHistory = history.filter(h => {
+      const matchesUser = isUserMatch(null, h.created_by, user);
+      const matchesAssignedLead = targetDate ? userLeadIds.has(h.lead_id) : true;
+      return matchesUser || matchesAssignedLead;
+    });
+
+    const userCallsDone = userLeads.filter(l => 
+      (l.lead_status && l.lead_status !== 'Select Option') || 
+      (l.remark && l.remark !== '' && l.remark !== 'No remark') ||
+      (l.calling_date && l.calling_date !== '') ||
+      userHistory.some(h => h.lead_id === l.id)
+    ).length;
     
     return {
       name: user.split(' ')[0],
-      Calls: userHistory.length,
+      Calls: userCallsDone,
       Converted: userLeads.filter(l => l.lead_status === 'Deal Done').length,
       Assigned: userLeads.length
     };
@@ -219,7 +235,7 @@ export default function WeeklyReportDashboard() {
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="all">All Statuses</SelectItem>
-                  {LEAD_STATUSES.map(s => <SelectItem key={s} value={s}>{s}</SelectItem>)}
+                  {LEAD_STATUSES.map(s => <SelectItem key={s.id || s} value={s.id || s}>{s.label || s}</SelectItem>)}
                 </SelectContent>
               </Select>
             </div>
@@ -234,8 +250,8 @@ export default function WeeklyReportDashboard() {
 
       {/* Metrics Grid */}
       <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
-        <MetricCard title="Total Assigned" subtitle="Fresh leads added on selected date" value={totalAssigned} icon={<Users size={22} />} color="blue" delay={0.1} />
-        <MetricCard title="Total Calls Done" subtitle="Calls made today (fresh + past follow-ups)" value={totalCallsDone} icon={<PhoneCall size={22} />} color="indigo" delay={0.15} />
+        <MetricCard title="Total Assigned" subtitle="Leads assigned in selected date range" value={totalAssigned} icon={<Users size={22} />} color="blue" delay={0.1} />
+        <MetricCard title="Total Calls Done" subtitle="Assigned leads called/acted upon" value={totalCallsDone} icon={<PhoneCall size={22} />} color="indigo" delay={0.15} />
         <MetricCard title="Master Class Follow" value={masterClassLeads} icon={<Users size={22} />} color="purple" delay={0.22} />
         <MetricCard title="Pending Follow-ups" value={pendingFollowUps} icon={<Clock size={22} />} color="amber" delay={0.25} />
         <MetricCard title="Converted / Joined" value={convertedLeads} icon={<TrendingUp size={22} />} color="green" delay={0.3} />
@@ -358,7 +374,7 @@ export default function WeeklyReportDashboard() {
                   </linearGradient>
                 </defs>
                 <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
-                <XAxis dataKey="name" axisLine={false} tickLine={false} tick={{fill: '#64748b', fontSize: 12, fontWeight: 500}} dy={10} />
+                <XAxis dataKey="name" axisLine={false} tickLine={false} tick={{fill: '#64748b', fontSize: 12, fontWeigh: 500}} dy={10} />
                 <YAxis axisLine={false} tickLine={false} tick={{fill: '#64748b', fontSize: 12}} dx={-10} />
                 <RechartsTooltip 
                   cursor={{fill: '#f8fafc'}} 
