@@ -169,6 +169,7 @@ export type Database = {
           lead_existing_plan: string | null
           lead_status: string
           remark: string | null
+          call_connected: string | null
           assigned_to: string | null
           follow_up_date: string | null
           created_at: string | null
@@ -184,6 +185,7 @@ export type Database = {
           lead_existing_plan?: string | null
           lead_status?: string
           remark?: string | null
+          call_connected?: string | null
           assigned_to?: string | null
           follow_up_date?: string | null
           created_at?: string | null
@@ -199,6 +201,7 @@ export type Database = {
           lead_existing_plan?: string | null
           lead_status?: string
           remark?: string | null
+          call_connected?: string | null
           assigned_to?: string | null
           follow_up_date?: string | null
           created_at?: string | null

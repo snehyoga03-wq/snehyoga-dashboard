@@ -57,6 +57,56 @@ const LEAD_STATUSES = [
   { id: "Dead", label: "Dead", bg: "bg-[#fef08a] hover:bg-[#fde047]", text: "text-[#854d0e]" }
 ];
 
+// Patterns that indicate the call was NOT connected
+const NOT_CONNECTED_PATTERNS = [
+  "call not received",
+  "call not picked",
+  "not received",
+  "not picked",
+  "not reachable",
+  "unreachable",
+  "switched off",
+  "switch off",
+  "out of coverage",
+  "busy",
+  "no response",
+  "no answer",
+  "no ans",
+  "not ans",
+  "didn't pick",
+  "did not pick",
+  "didn't answer",
+  "did not answer",
+  "not responding",
+  "phone off",
+  "number not working",
+  "invalid number",
+  "wrong number",
+  "disconnected",
+  "network issue",
+  "network error",
+  "rnr",
+  "np",
+  "cnr",
+  "snr",
+  "not available",
+  "unavailable",
+  "ring no reply",
+  "call not connected",
+  "couldn't connect",
+  "could not connect",
+  "can't reach",
+  "cannot reach"
+];
+
+/** Auto-detect call connected status from remark text */
+const autoDetectCallConnected = (remark: string | null): string | null => {
+  if (!remark || remark.trim() === "" || remark === "No remark") return null;
+  const lower = remark.trim().toLowerCase();
+  const isNotConnected = NOT_CONNECTED_PATTERNS.some(pattern => lower.includes(pattern));
+  return isNotConnected ? "not_connected" : "connected";
+};
+
 interface Lead {
   id: string;
   admission_date: string | null;
@@ -68,6 +118,7 @@ interface Lead {
   lead_existing_plan: string | null;
   lead_status: string;
   remark: string | null;
+  call_connected: string | null;
   assigned_to: string | null;
   follow_up_date: string | null;
   created_at: string | null;
@@ -145,8 +196,35 @@ const LeadRow = React.memo(({ lead, index, isSelected, handlers }: any) => {
         <EditableCell type="date" value={lead.follow_up_date} onUpdate={(val) => handleUpdateField(lead.id, 'follow_up_date', val)} />
       </TableCell>
       <TableCell className="p-1">
-        <EditableCell value={lead.remark} onUpdate={(val) => handleUpdateField(lead.id, 'remark', val)} placeholder="No remark" />
+        <div className="flex items-center gap-1.5">
+          <div className="flex-1 min-w-0">
+            <EditableCell value={lead.remark} onUpdate={(val) => {
+              handleUpdateField(lead.id, 'remark', val);
+              const detected = autoDetectCallConnected(val);
+              if (detected !== null) {
+                handlers.handleUpdateCallConnected(lead.id, detected);
+              }
+            }} placeholder="No remark" />
+          </div>
+          <Select value={lead.call_connected || "none"} onValueChange={(val) => handlers.handleUpdateCallConnected(lead.id, val === "none" ? null : val)}>
+            <SelectTrigger className={`h-7 w-[110px] shrink-0 border-none text-[10px] rounded-full px-2.5 py-0.5 font-bold text-center focus:ring-1 focus:ring-offset-1 shadow-none ${
+              lead.call_connected === "connected"
+                ? "bg-emerald-100 text-emerald-800 hover:bg-emerald-200"
+                : lead.call_connected === "not_connected"
+                ? "bg-red-100 text-red-700 hover:bg-red-200"
+                : "bg-gray-100 text-gray-500 hover:bg-gray-200"
+            }`}>
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="none" className="text-xs text-gray-500">—</SelectItem>
+              <SelectItem value="connected" className="text-xs font-bold text-emerald-700">✅ Connected</SelectItem>
+              <SelectItem value="not_connected" className="text-xs font-bold text-red-700">❌ Not Connected</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
       </TableCell>
+
       <TableCell className="p-2 font-medium text-gray-700 text-sm">
         {lead.created_at ? new Date(lead.created_at).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" }) : "—"}
       </TableCell>
@@ -378,6 +456,7 @@ export function LeadsManagement() {
     lead_existing_plan: "",
     lead_status: "Select Option",
     remark: "",
+    call_connected: null,
     assigned_to: null,
     follow_up_date: ""
   });
@@ -450,6 +529,7 @@ export function LeadsManagement() {
       lead_existing_plan: EXISTING_PLANS[0],
       lead_status: "Select Option",
       remark: "",
+      call_connected: null,
       follow_up_date: ""
     });
     setIsOpenAddEditDialog(true);
@@ -467,6 +547,7 @@ export function LeadsManagement() {
       lead_existing_plan: lead.lead_existing_plan || "",
       lead_status: lead.lead_status,
       remark: lead.remark || "",
+      call_connected: lead.call_connected || null,
       assigned_to: lead.assigned_to,
       follow_up_date: lead.follow_up_date || ""
     });
@@ -505,6 +586,7 @@ export function LeadsManagement() {
             lead_existing_plan: leadForm.lead_existing_plan || null,
             lead_status: leadForm.lead_status || "Select Option",
             remark: leadForm.remark || null,
+            call_connected: leadForm.call_connected || autoDetectCallConnected(leadForm.remark || null),
             follow_up_date: finalFollowUpDate
           })
           .eq("id", editingLead.id);
@@ -529,6 +611,7 @@ export function LeadsManagement() {
             lead_existing_plan: leadForm.lead_existing_plan || null,
             lead_status: leadForm.lead_status || "Select Option",
             remark: leadForm.remark || null,
+            call_connected: leadForm.call_connected || autoDetectCallConnected(leadForm.remark || null),
             assigned_to: null,
             follow_up_date: finalFollowUpDate
           }]).select();
@@ -684,6 +767,30 @@ export function LeadsManagement() {
     }
   };
 
+  const handleUpdateCallConnected = async (leadId: string, callConnected: string | null) => {
+    const targetLead = leads.find(l => l.id === leadId);
+    const previousValue = targetLead ? targetLead.call_connected : null;
+    setLeads(prev => prev.map(lead => lead.id === leadId ? { ...lead, call_connected: callConnected } : lead));
+
+    try {
+      const { error } = await supabase
+        .from("leads")
+        .update({ call_connected: callConnected })
+        .eq("id", leadId);
+
+      if (error) throw error;
+      logHistory(leadId, "Call Status", `Call status set to ${callConnected === "connected" ? "Connected" : callConnected === "not_connected" ? "Not Connected" : "None"}`);
+    } catch (err: any) {
+      setLeads(prev => prev.map(lead => lead.id === leadId ? { ...lead, call_connected: previousValue } : lead));
+      console.error("Error updating call connected:", err);
+      toast({
+        title: "Error updating call status",
+        description: err.message,
+        variant: "destructive"
+      });
+    }
+  };
+
   const handleDeleteLead = async (leadId: string) => {
     if (!confirm("Are you sure you want to delete this lead?")) return;
     try {
@@ -833,7 +940,8 @@ export function LeadsManagement() {
       "Lead Type": lead.lead_type || "",
       "Lead Existing Plan": lead.lead_existing_plan || "",
       "Lead Status": lead.lead_status,
-      "Remark": lead.remark || ""
+      "Remark": lead.remark || "",
+      "Call Connected": lead.call_connected === "connected" ? "Connected" : lead.call_connected === "not_connected" ? "Not Connected" : ""
     }));
 
     const worksheet = XLSX.utils.json_to_sheet(formattedData);
@@ -1062,6 +1170,7 @@ export function LeadsManagement() {
           }
 
           const assignedToRaw = normalizedRow["assigned to"] || normalizedRow["assignedto"] || normalizedRow["assigned"] || normalizedRow["assigned_to"];
+          const callConnectedRaw = normalizedRow["call connected"] || normalizedRow["callconnected"] || normalizedRow["call status"] || normalizedRow["call_connected"];
 
           validLeads.push({
             admission_date: parseDate(admissionDateRaw),
@@ -1073,6 +1182,9 @@ export function LeadsManagement() {
             lead_existing_plan: finalPlan,
             lead_status: finalStatus,
             remark: remark ? String(remark).trim() : null,
+            call_connected: callConnectedRaw
+              ? (String(callConnectedRaw).trim().toLowerCase().includes("not") ? "not_connected" : "connected")
+              : autoDetectCallConnected(remark ? String(remark).trim() : null),
             assigned_to: assignedToRaw ? String(assignedToRaw).trim() : null
           });
         }
@@ -1447,7 +1559,7 @@ export function LeadsManagement() {
                 <TableHead className="text-white font-semibold min-w-[180px] sticky top-0 z-20 bg-[#2e5a44]">LEAD EXISTING PLAN</TableHead>
                 <TableHead className="text-white font-semibold min-w-[140px] sticky top-0 z-20 bg-[#2e5a44]">LEAD STATUS</TableHead>
                 <TableHead className="text-white font-semibold min-w-[140px] sticky top-0 z-20 bg-[#2e5a44]">FOLLOW-UP DATE</TableHead>
-                <TableHead className="text-white font-semibold min-w-[200px] sticky top-0 z-20 bg-[#2e5a44]">REMARK</TableHead>
+                <TableHead className="text-white font-semibold min-w-[320px] sticky top-0 z-20 bg-[#2e5a44]">REMARK & CALL STATUS</TableHead>
                 <TableHead className="text-white font-semibold min-w-[120px] sticky top-0 z-20 bg-[#2e5a44]">Added Date</TableHead>
                 <TableHead className="text-white font-semibold min-w-[140px] sticky top-0 z-20 bg-[#2e5a44]">Admission Date</TableHead>
                 <TableHead className="text-white font-semibold min-w-[140px] sticky top-0 z-20 bg-[#2e5a44]">Calling Date</TableHead>
@@ -1469,6 +1581,7 @@ export function LeadsManagement() {
                     handleUpdateExistingPlan,
                     handleUpdateStatus,
                     handleUpdateAssignedTo,
+                    handleUpdateCallConnected,
                     handleOpenHistory,
                     handleOpenEditDialog
                   }}
@@ -1477,7 +1590,7 @@ export function LeadsManagement() {
 
               {filteredLeads.length === 0 && (
                 <TableRow>
-                  <TableCell colSpan={13} className="text-center py-12 text-gray-400">
+                  <TableCell colSpan={14} className="text-center py-12 text-gray-400">
                     {loading ? (
                       <div className="flex justify-center items-center gap-2">
                         <RefreshCw className="animate-spin w-4 h-4" /> Fetching leads...
@@ -1622,9 +1735,38 @@ export function LeadsManagement() {
                   id="remark"
                   placeholder="Details of followup discussion..."
                   value={leadForm.remark || ""}
-                  onChange={e => setLeadForm(prev => ({ ...prev, remark: e.target.value }))}
+                  onChange={e => {
+                    const newRemark = e.target.value;
+                    const detected = autoDetectCallConnected(newRemark);
+                    setLeadForm(prev => ({ ...prev, remark: newRemark, call_connected: detected }));
+                  }}
                 />
               </div>
+              <div>
+                <Label className="text-gray-700">Call Status</Label>
+                <Select
+                  value={leadForm.call_connected || "none"}
+                  onValueChange={val => setLeadForm(prev => ({ ...prev, call_connected: val === "none" ? null : val }))}
+                >
+                  <SelectTrigger className={`${
+                    leadForm.call_connected === "connected"
+                      ? "bg-emerald-50 border-emerald-300 text-emerald-800"
+                      : leadForm.call_connected === "not_connected"
+                      ? "bg-red-50 border-red-300 text-red-700"
+                      : "bg-white"
+                  }`}>
+                    <SelectValue placeholder="Auto-detect" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="none" className="text-gray-500">— None —</SelectItem>
+                    <SelectItem value="connected" className="font-bold text-emerald-700">✅ Connected</SelectItem>
+                    <SelectItem value="not_connected" className="font-bold text-red-700">❌ Not Connected</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-2 gap-3">
               <div>
                 <Label htmlFor="follow_up_date" className="flex items-center gap-1 text-gray-700">
                   <Calendar className="w-3.5 h-3.5" /> Follow-Up Date
