@@ -4,11 +4,12 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
-import { Calendar, Users, PhoneCall, CheckCircle, Clock, ListTodo, XCircle, TrendingUp, RefreshCw, ChevronUp, ChevronDown, Award, Target, ArrowUpRight, ArrowDownRight, RotateCcw } from 'lucide-react';
+import { Calendar, Users, PhoneCall, CheckCircle, Clock, ListTodo, XCircle, TrendingUp, RefreshCw, ChevronUp, ChevronDown, Award, Target, ArrowUpRight, ArrowDownRight, RotateCcw, PhoneOff } from 'lucide-react';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip, Legend, ResponsiveContainer } from 'recharts';
 import type { Lead } from '@/integrations/supabase/types';
 import { motion } from 'framer-motion';
 import { calculateCallTargetLedgers, UserTargetLedger } from '@/utils/callTargetLedger';
+import { getLeadCallStatus } from '@/utils/callStatusUtils';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 
 const ASSIGNED_USERS = ["Ragini K", "Shreya K", "Janhavi V"];
@@ -68,7 +69,7 @@ export default function WeeklyReportDashboard() {
       const { data: leadsData, error: leadsError } = await leadsQuery;
       if (leadsError) throw leadsError;
 
-      // 2. Fetch history clean from database (avoiding invalid postgrest join queries)
+      // 2. Fetch history clean from database
       const { data: historyData, error: historyError } = await supabase
         .from('lead_history')
         .select('*');
@@ -94,7 +95,7 @@ export default function WeeklyReportDashboard() {
     fetchData();
   }, [selectedStatus]);
 
-  // Harmonized Derived Metrics (Strictly Identical to Leads Management Filter Engine)
+  // Harmonized Derived Metrics
   const targetDate = dailyDate || startDate || endDate || new Date().toISOString().split('T')[0];
 
   const matchesAutoDate = (lead: Lead, tDate: string): boolean => {
@@ -125,16 +126,20 @@ export default function WeeklyReportDashboard() {
   });
 
   const totalAssigned = filteredLeads.length;
-  // Total Calls Done = Unique assigned leads in this pool that have been called / acted upon
-  const totalCallsDone = filteredLeads.filter(l => 
-    (l.lead_status && l.lead_status !== 'Select Option') || 
-    (l.remark && l.remark !== '' && l.remark !== 'No remark') ||
-    (l.calling_date && l.calling_date !== '') ||
-    history.some(h => h.lead_id === l.id)
-  ).length;
+
+  let totalConnectedCalls = 0;
+  let totalNotConnectedCalls = 0;
+
+  filteredLeads.forEach(l => {
+    const status = getLeadCallStatus(l, filteredHistory);
+    if (status === 'connected') totalConnectedCalls++;
+    else if (status === 'not_connected') totalNotConnectedCalls++;
+  });
+
+  // Total Calls Done = Connected Calls + Not Connected Calls
+  const totalCallsDone = totalConnectedCalls + totalNotConnectedCalls;
   
   const pendingFollowUps = filteredLeads.filter(l => l.lead_status === 'Follow Up').length;
-  const masterClassLeads = filteredLeads.filter(l => l.lead_status === 'Master Class Follow').length;
   const convertedLeads = filteredLeads.filter(l => l.lead_status === 'Deal Done').length;
   const deadLeads = filteredLeads.filter(l => l.lead_status === 'Dead').length;
 
@@ -159,16 +164,20 @@ export default function WeeklyReportDashboard() {
       return matchesUser || matchesAssignedLead;
     });
 
-    const userCallsDone = userLeads.filter(l => 
-      (l.lead_status && l.lead_status !== 'Select Option') || 
-      (l.remark && l.remark !== '' && l.remark !== 'No remark') ||
-      (l.calling_date && l.calling_date !== '') ||
-      userHistory.some(h => h.lead_id === l.id)
-    ).length;
-    
+    let userConnected = 0;
+    let userNotConnected = 0;
+
+    userLeads.forEach(l => {
+      const st = getLeadCallStatus(l, userHistory);
+      if (st === 'connected') userConnected++;
+      else if (st === 'not_connected') userNotConnected++;
+    });
+
     return {
       name: user.split(' ')[0],
-      Calls: userCallsDone,
+      "Calls Done": userConnected + userNotConnected,
+      "Connected": userConnected,
+      "Not Connected": userNotConnected,
       Converted: userLeads.filter(l => l.lead_status === 'Deal Done').length,
       Assigned: userLeads.length
     };
@@ -236,7 +245,7 @@ export default function WeeklyReportDashboard() {
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="all">All Statuses</SelectItem>
-                  {LEAD_STATUSES.map(s => <SelectItem key={s.id || s} value={s.id || s}>{s.label || s}</SelectItem>)}
+                  {LEAD_STATUSES.map(s => <SelectItem key={typeof s === 'string' ? s : (s as any).id} value={typeof s === 'string' ? s : (s as any).id}>{typeof s === 'string' ? s : (s as any).label}</SelectItem>)}
                 </SelectContent>
               </Select>
             </div>
@@ -250,13 +259,14 @@ export default function WeeklyReportDashboard() {
       </Card>
 
       {/* Metrics Grid */}
-      <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
         <MetricCard title="Total Assigned" subtitle="Leads assigned in selected date range" value={totalAssigned} icon={<Users size={22} />} color="blue" delay={0.1} />
-        <MetricCard title="Total Calls Done" subtitle="Assigned leads called/acted upon" value={totalCallsDone} icon={<PhoneCall size={22} />} color="indigo" delay={0.15} />
-        <MetricCard title="Master Class Follow" value={masterClassLeads} icon={<Users size={22} />} color="purple" delay={0.22} />
-        <MetricCard title="Pending Follow-ups" value={pendingFollowUps} icon={<Clock size={22} />} color="amber" delay={0.25} />
-        <MetricCard title="Converted / Joined" value={convertedLeads} icon={<TrendingUp size={22} />} color="green" delay={0.3} />
-        <MetricCard title="Not Interested" value={deadLeads} icon={<XCircle size={22} />} color="red" delay={0.35} />
+        <MetricCard title="Total Calls Done" subtitle={`Connected: ${totalConnectedCalls} | Not Connected: ${totalNotConnectedCalls}`} value={totalCallsDone} icon={<PhoneCall size={22} />} color="indigo" delay={0.15} />
+        <MetricCard title="Connected Calls" subtitle="Used for 60-call daily target" value={totalConnectedCalls} icon={<CheckCircle size={22} />} color="emerald" delay={0.2} />
+        <MetricCard title="Not Connected Calls" subtitle="Unreachable / Busy / No answer" value={totalNotConnectedCalls} icon={<XCircle size={22} />} color="red" delay={0.25} />
+        <MetricCard title="Pending Follow-ups" value={pendingFollowUps} icon={<Clock size={22} />} color="amber" delay={0.3} />
+        <MetricCard title="Converted / Joined" value={convertedLeads} icon={<TrendingUp size={22} />} color="green" delay={0.35} />
+        <MetricCard title="Not Interested" value={deadLeads} icon={<XCircle size={22} />} color="purple" delay={0.4} />
       </div>
 
       {/* 60-Call Daily Target & Appreciation Ledger Section */}
@@ -267,11 +277,11 @@ export default function WeeklyReportDashboard() {
               <Award className="w-5 h-5 text-amber-600" /> Target Performance & Appreciation Ledger
             </CardTitle>
             <p className="text-xs text-gray-500 mt-1">
-              Daily Target: <span className="font-semibold text-gray-700">60 Calls/Day</span>. Surplus calls automatically pay back past deficits to preserve Appreciation Days.
+              Daily Target: <span className="font-semibold text-gray-700">60 Connected Calls/Day</span>. Surplus connected calls automatically pay back past deficits.
             </p>
           </div>
           <span className="px-3 py-1 bg-amber-100 text-amber-800 text-xs font-bold rounded-full border border-amber-200">
-            Target: 60 Calls/Day
+            Target: 60 Connected Calls/Day
           </span>
         </CardHeader>
         <CardContent className="pt-4">
@@ -302,24 +312,43 @@ export default function WeeklyReportDashboard() {
                     </div>
                   </div>
 
+                  {/* 4 Cells Grid: Call Assign, Adjusted Calls, Connected Call, Not Connected Call */}
                   <div className="grid grid-cols-2 gap-2 text-xs mb-3">
+                    {/* Cell 1: Call Assign */}
                     <div className="bg-gray-50 p-2.5 rounded-lg border border-gray-100">
-                      <span className="text-gray-500 block text-[10px] uppercase font-semibold">Raw Calls</span>
-                      <span className="font-extrabold text-gray-800 text-sm">{ledger.totalRawCalls}</span>
-                      <span className="text-gray-400 text-[10px] block">Target: {ledger.totalTarget}</span>
+                      <span className="text-gray-500 block text-[10px] uppercase font-semibold">Call Assign</span>
+                      <span className="font-extrabold text-gray-800 text-sm">{ledger.totalAssigned}</span>
+                      <span className="text-gray-400 text-[10px] block">Target: 60</span>
                     </div>
 
-                    <div className="bg-gray-50 p-2.5 rounded-lg border border-gray-100">
-                      <span className="text-gray-500 block text-[10px] uppercase font-semibold">Adjusted Calls</span>
+                    {/* Cell 2: Adjusted Calls */}
+                    <div className="bg-indigo-50/50 p-2.5 rounded-lg border border-indigo-100">
+                      <span className="text-indigo-600 block text-[10px] uppercase font-semibold">Adjusted Calls</span>
                       <span className="font-extrabold text-indigo-700 text-sm flex items-center gap-1">
                         {ledger.totalAdjustedCalls}
                         {ledger.totalDeficitPaidBack > 0 && (
-                          <span className="text-[10px] text-emerald-600 font-bold">(+{ledger.totalDeficitPaidBack} Back-Adjusted)</span>
+                          <span className="text-[9px] text-emerald-600 font-bold">(+{ledger.totalDeficitPaidBack})</span>
                         )}
                       </span>
+                      <span className="text-indigo-400 text-[10px] block">Done: {ledger.totalCallsDone}</span>
+                    </div>
+
+                    {/* Cell 3: Connected Call */}
+                    <div className="bg-emerald-50/50 p-2.5 rounded-lg border border-emerald-100">
+                      <span className="text-emerald-700 block text-[10px] uppercase font-semibold">Connected Call</span>
+                      <span className="font-extrabold text-emerald-700 text-sm">{ledger.totalConnectedCalls}</span>
+                      <span className="text-emerald-600 text-[10px] block">Target Basis</span>
+                    </div>
+
+                    {/* Cell 4: Not Connected Call */}
+                    <div className="bg-red-50/50 p-2.5 rounded-lg border border-red-100">
+                      <span className="text-red-600 block text-[10px] uppercase font-semibold">Not Connected Call</span>
+                      <span className="font-extrabold text-red-700 text-sm">{ledger.totalNotConnectedCalls}</span>
+                      <span className="text-red-400 text-[10px] block">Unreachable</span>
                     </div>
                   </div>
 
+                  {/* Outstanding Deficit */}
                   {hasDeficits ? (
                     <div className="flex items-center justify-between text-xs bg-red-50 text-red-700 p-2 rounded-lg border border-red-100 mb-2">
                       <span className="font-medium flex items-center gap-1">
@@ -338,7 +367,7 @@ export default function WeeklyReportDashboard() {
 
                   {/* Surplus Bank Balance */}
                   <div className={`flex items-center justify-between text-xs p-2 rounded-lg border mb-3 ${
-                    (ledger as any).surplusBankBalance > 0
+                    ledger.surplusBankBalance > 0
                       ? 'bg-blue-50 text-blue-700 border-blue-100'
                       : 'bg-gray-50 text-gray-500 border-gray-100'
                   }`}>
@@ -346,7 +375,7 @@ export default function WeeklyReportDashboard() {
                       🏦 Surplus Bank Balance
                     </span>
                     <span className="font-bold">
-                      {(ledger as any).surplusBankBalance > 0 ? `+${(ledger as any).surplusBankBalance}` : '0'} Calls
+                      {ledger.surplusBankBalance > 0 ? `+${ledger.surplusBankBalance}` : '0'} Calls
                     </span>
                   </div>
 
@@ -375,13 +404,17 @@ export default function WeeklyReportDashboard() {
             <ResponsiveContainer width="100%" height="100%">
               <BarChart data={chartData} margin={{ top: 20, right: 30, left: 0, bottom: 5 }}>
                 <defs>
-                  <linearGradient id="colorCalls" x1="0" y1="0" x2="0" y2="1">
+                  <linearGradient id="colorCallsDone" x1="0" y1="0" x2="0" y2="1">
                     <stop offset="5%" stopColor="#818cf8" stopOpacity={1}/>
                     <stop offset="95%" stopColor="#4f46e5" stopOpacity={1}/>
                   </linearGradient>
-                  <linearGradient id="colorConverted" x1="0" y1="0" x2="0" y2="1">
+                  <linearGradient id="colorConnected" x1="0" y1="0" x2="0" y2="1">
                     <stop offset="5%" stopColor="#34d399" stopOpacity={1}/>
                     <stop offset="95%" stopColor="#059669" stopOpacity={1}/>
+                  </linearGradient>
+                  <linearGradient id="colorNotConnected" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="5%" stopColor="#fca5a5" stopOpacity={1}/>
+                    <stop offset="95%" stopColor="#dc2626" stopOpacity={1}/>
                   </linearGradient>
                   <linearGradient id="colorAssigned" x1="0" y1="0" x2="0" y2="1">
                     <stop offset="5%" stopColor="#60a5fa" stopOpacity={1}/>
@@ -389,16 +422,17 @@ export default function WeeklyReportDashboard() {
                   </linearGradient>
                 </defs>
                 <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
-                <XAxis dataKey="name" axisLine={false} tickLine={false} tick={{fill: '#64748b', fontSize: 12, fontWeigh: 500}} dy={10} />
+                <XAxis dataKey="name" axisLine={false} tickLine={false} tick={{fill: '#64748b', fontSize: 12, fontWeight: 500}} dy={10} />
                 <YAxis axisLine={false} tickLine={false} tick={{fill: '#64748b', fontSize: 12}} dx={-10} />
                 <RechartsTooltip 
                   cursor={{fill: '#f8fafc'}} 
                   contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.1), 0 4px 6px -4px rgb(0 0 0 / 0.1)' }} 
                 />
                 <Legend iconType="circle" wrapperStyle={{ paddingTop: '20px' }} />
-                <Bar dataKey="Calls" fill="url(#colorCalls)" radius={[6, 6, 0, 0]} barSize={24} />
-                <Bar dataKey="Converted" fill="url(#colorConverted)" radius={[6, 6, 0, 0]} barSize={24} />
-                <Bar dataKey="Assigned" fill="url(#colorAssigned)" radius={[6, 6, 0, 0]} barSize={24} />
+                <Bar dataKey="Calls Done" fill="url(#colorCallsDone)" radius={[6, 6, 0, 0]} barSize={20} />
+                <Bar dataKey="Connected" fill="url(#colorConnected)" radius={[6, 6, 0, 0]} barSize={20} />
+                <Bar dataKey="Not Connected" fill="url(#colorNotConnected)" radius={[6, 6, 0, 0]} barSize={20} />
+                <Bar dataKey="Assigned" fill="url(#colorAssigned)" radius={[6, 6, 0, 0]} barSize={20} />
               </BarChart>
             </ResponsiveContainer>
           </div>
@@ -408,7 +442,7 @@ export default function WeeklyReportDashboard() {
 
       {/* Daily Target Ledger Dialog */}
       <Dialog open={!!selectedLedgerUser} onOpenChange={(open) => !open && setSelectedLedgerUser(null)}>
-        <DialogContent className="max-w-3xl max-h-[85vh] overflow-y-auto">
+        <DialogContent className="max-w-4xl max-h-[85vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle className="text-xl font-bold flex items-center gap-2">
               <Award className="text-amber-600" /> Daily Target & Back-Adjustment Ledger: {selectedLedgerUser?.userName}
@@ -417,22 +451,30 @@ export default function WeeklyReportDashboard() {
 
           {selectedLedgerUser && (
             <div className="space-y-4 pt-2">
-              <div className="grid grid-cols-4 gap-3 bg-gray-50 p-4 rounded-xl text-center">
+              <div className="grid grid-cols-2 md:grid-cols-6 gap-2 bg-gray-50 p-4 rounded-xl text-center">
                 <div>
-                  <span className="text-[11px] text-gray-500 font-semibold block uppercase">Total Calls</span>
-                  <span className="text-lg font-bold text-gray-800">{selectedLedgerUser.totalRawCalls}</span>
+                  <span className="text-[10px] text-gray-500 font-semibold block uppercase">Call Assign</span>
+                  <span className="text-base font-bold text-gray-800">{selectedLedgerUser.totalAssigned}</span>
                 </div>
                 <div>
-                  <span className="text-[11px] text-gray-500 font-semibold block uppercase">Total Target</span>
-                  <span className="text-lg font-bold text-gray-800">{selectedLedgerUser.totalTarget}</span>
+                  <span className="text-[10px] text-gray-500 font-semibold block uppercase">Calls Done</span>
+                  <span className="text-base font-bold text-indigo-700">{selectedLedgerUser.totalCallsDone}</span>
                 </div>
                 <div>
-                  <span className="text-[11px] text-gray-500 font-semibold block uppercase">Back-Adjusted</span>
-                  <span className="text-lg font-bold text-emerald-600">+{selectedLedgerUser.totalDeficitPaidBack}</span>
+                  <span className="text-[10px] text-gray-500 font-semibold block uppercase">Connected</span>
+                  <span className="text-base font-bold text-emerald-700">{selectedLedgerUser.totalConnectedCalls}</span>
                 </div>
                 <div>
-                  <span className="text-[11px] text-gray-500 font-semibold block uppercase">Appreciation Score</span>
-                  <span className="text-lg font-bold text-amber-700">{selectedLedgerUser.appreciationPercentage}%</span>
+                  <span className="text-[10px] text-gray-500 font-semibold block uppercase">Not Connected</span>
+                  <span className="text-base font-bold text-red-700">{selectedLedgerUser.totalNotConnectedCalls}</span>
+                </div>
+                <div>
+                  <span className="text-[10px] text-gray-500 font-semibold block uppercase">Back-Adjusted</span>
+                  <span className="text-base font-bold text-emerald-600">+{selectedLedgerUser.totalDeficitPaidBack}</span>
+                </div>
+                <div>
+                  <span className="text-[10px] text-gray-500 font-semibold block uppercase">Appreciation Score</span>
+                  <span className="text-base font-bold text-amber-700">{selectedLedgerUser.appreciationPercentage}%</span>
                 </div>
               </div>
 
@@ -441,7 +483,10 @@ export default function WeeklyReportDashboard() {
                   <thead className="bg-gray-100 font-semibold text-gray-700 uppercase border-b">
                     <tr>
                       <th className="p-3">Date</th>
-                      <th className="p-3 text-center">Raw Calls</th>
+                      <th className="p-3 text-center">Call Assign</th>
+                      <th className="p-3 text-center">Calls Done</th>
+                      <th className="p-3 text-center text-emerald-700">Connected</th>
+                      <th className="p-3 text-center text-red-700">Not Connected</th>
                       <th className="p-3 text-center">Target</th>
                       <th className="p-3 text-center">Back-Adjusted</th>
                       <th className="p-3 text-center">Final Balance</th>
@@ -452,7 +497,10 @@ export default function WeeklyReportDashboard() {
                     {selectedLedgerUser.dailyEntries.map(entry => (
                       <tr key={entry.date} className="hover:bg-gray-50/80">
                         <td className="p-3 font-medium text-gray-800">{entry.date}</td>
-                        <td className="p-3 text-center font-semibold">{entry.rawCalls}</td>
+                        <td className="p-3 text-center text-gray-700 font-medium">{entry.assigned}</td>
+                        <td className="p-3 text-center font-semibold text-indigo-700">{entry.callsDone}</td>
+                        <td className="p-3 text-center font-bold text-emerald-700">{entry.connectedCalls}</td>
+                        <td className="p-3 text-center font-semibold text-red-600">{entry.notConnectedCalls}</td>
                         <td className="p-3 text-center text-gray-500">60</td>
                         <td className="p-3 text-center">
                           {entry.deficitPaidByFuture > 0 ? (
@@ -471,7 +519,7 @@ export default function WeeklyReportDashboard() {
                           {entry.adjustedCalls} / 60
                         </td>
                         <td className="p-3 text-center">
-                          {entry.rawCalls >= 60 ? (
+                          {entry.connectedCalls >= 60 ? (
                             <span className="px-2.5 py-1 rounded-full bg-emerald-100 text-emerald-800 font-bold text-[10px]">
                               Target Met (Direct)
                             </span>

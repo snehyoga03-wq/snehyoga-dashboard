@@ -1,18 +1,28 @@
+import { getLeadCallStatus } from './callStatusUtils';
+
 export interface DailyLedgerEntry {
   date: string; // YYYY-MM-DD
-  rawCalls: number;
+  assigned: number;
+  callsDone: number;
+  connectedCalls: number;
+  notConnectedCalls: number;
+  rawCalls: number; // Connected calls count (used for 60-target calculation)
   target: number; // Default 60
-  netBalance: number; // rawCalls - target
+  netBalance: number; // connectedCalls - target
   surplusGivenToPast: number; // surplus calls used to clear past deficits
   deficitPaidByFuture: number; // deficit calls cleared by surplus bank
-  adjustedCalls: number; // rawCalls + deficitPaidByFuture
+  adjustedCalls: number; // connectedCalls + deficitPaidByFuture
   isTargetMet: boolean; // adjustedCalls >= target
   unresolvedDeficit: number; // Math.max(0, target - adjustedCalls)
 }
 
 export interface UserTargetLedger {
   userName: string;
-  totalRawCalls: number;
+  totalAssigned: number;
+  totalCallsDone: number;
+  totalConnectedCalls: number;
+  totalNotConnectedCalls: number;
+  totalRawCalls: number; // Connected calls count for target evaluation
   totalTarget: number;
   totalAdjustedCalls: number;
   totalSurplusGenerated: number;
@@ -59,19 +69,12 @@ const matchesAutoDate = (lead: any, tDate: string): boolean => {
 /**
  * Calculates daily performance ledger with a Surplus Bank model.
  * 
- * How the Surplus Bank works:
- * 1. Scan ALL active duty days in the past 60 days.
- * 2. Any day where rawCalls > 60 generates surplus into the bank.
- *    Bank = SUM of (rawCalls - 60) for all surplus days.
- * 3. When viewing a specific date (or date range), ONLY the viewed days
+ * Rules:
+ * 1. Target = 60 Connected Calls per day.
+ * 2. ONLY Connected Calls count towards meeting the daily target and generating surplus.
+ * 3. Any day where connectedCalls > 60 generates surplus into the bank.
+ * 4. When viewing a specific date (or date range), ONLY the viewed days
  *    draw from the bank to cover their deficits.
- * 4. This ensures that surplus from e.g. 10-08-2026 (+54) is available
- *    to cover today's deficit, not consumed by intermediate days.
- * 
- * Example:
- *   08/10: 114 raw calls → +54 surplus added to bank
- *   08/12 (today): 28 raw calls → 32 deficit → bank covers 32 → adjusted = 60
- *   Bank remaining: 54 - 32 = 22 surplus still available
  */
 export function calculateCallTargetLedgers(
   history: any[],
@@ -98,59 +101,78 @@ export function calculateCallTargetLedgers(
   const result: Record<string, UserTargetLedger> = {};
 
   assignedUsers.forEach(user => {
-    // 2. Calculate raw calls for each day in the window
-    const dailyData: { date: string; rawCalls: number; assigned: number }[] = [];
+    // 2. Calculate daily metrics for each day in the window
+    const dailyData: { 
+      date: string; 
+      assigned: number;
+      callsDone: number;
+      connectedCalls: number; 
+      notConnectedCalls: number;
+    }[] = [];
 
     windowDates.forEach(dateKey => {
       const userLeads = leads.filter(l => isUserMatch(l.assigned_to, null, user) && matchesAutoDate(l, dateKey));
-      // RAW CALLS = 100% synchronized with TOTAL CALLS DONE
-      const rawCalls = userLeads.filter(l => 
-        (l.lead_status && l.lead_status !== 'Select Option') || 
-        (l.remark && l.remark !== '' && l.remark !== 'No remark') ||
-        (l.calling_date && l.calling_date !== '') ||
-        history.some(h => h.lead_id === l.id)
-      ).length;
+      const userLeadIds = new Set(userLeads.map(l => l.id));
+      const userHistory = history.filter(h => isUserMatch(null, h.created_by, user) || userLeadIds.has(h.lead_id));
 
-      dailyData.push({ date: dateKey, rawCalls, assigned: userLeads.length });
+      let connectedCalls = 0;
+      let notConnectedCalls = 0;
+
+      userLeads.forEach(lead => {
+        const status = getLeadCallStatus(lead, userHistory);
+        if (status === 'connected') connectedCalls++;
+        else if (status === 'not_connected') notConnectedCalls++;
+      });
+
+      const callsDone = connectedCalls + notConnectedCalls;
+
+      dailyData.push({ 
+        date: dateKey, 
+        assigned: userLeads.length,
+        callsDone,
+        connectedCalls, 
+        notConnectedCalls 
+      });
     });
 
-    // 3. Build the Surplus Bank from ALL surplus days in the window
-    //    (days where rawCalls exceeded the 60-call target)
+    // 3. Build Surplus Bank from connected calls exceeding daily target (60)
     let surplusBank = 0;
     dailyData.forEach(day => {
-      if (day.rawCalls > DAILY_TARGET) {
-        surplusBank += (day.rawCalls - DAILY_TARGET);
+      if (day.connectedCalls > DAILY_TARGET) {
+        surplusBank += (day.connectedCalls - DAILY_TARGET);
       }
     });
 
     const totalSurplusGenerated = surplusBank;
 
-    // 4. Build display entries for the requested date range
-    //    ONLY these days draw from the surplus bank
+    // 4. Build display entries for requested date range
     const displayEntries: DailyLedgerEntry[] = [];
 
     dailyData.forEach(day => {
       const isInViewRange = day.date >= reqStart && day.date <= reqEnd;
       if (!isInViewRange) return;
 
-      const netBalance = day.rawCalls - DAILY_TARGET;
+      const netBalance = day.connectedCalls - DAILY_TARGET;
       let deficitPaidByBank = 0;
       let unresolvedDeficit = 0;
 
       if (netBalance < 0) {
-        // This day has a deficit — draw from surplus bank
         const deficit = Math.abs(netBalance);
         deficitPaidByBank = Math.min(deficit, surplusBank);
         surplusBank -= deficitPaidByBank;
         unresolvedDeficit = deficit - deficitPaidByBank;
       }
 
-      const adjustedCalls = day.rawCalls + deficitPaidByBank;
+      const adjustedCalls = day.connectedCalls + deficitPaidByBank;
       const isTargetMet = adjustedCalls >= DAILY_TARGET;
 
       displayEntries.push({
         date: day.date,
-        rawCalls: day.rawCalls,
+        assigned: day.assigned,
+        callsDone: day.callsDone,
+        connectedCalls: day.connectedCalls,
+        notConnectedCalls: day.notConnectedCalls,
+        rawCalls: day.connectedCalls, // Target is based on connected calls
         target: DAILY_TARGET,
         netBalance,
         surplusGivenToPast: 0,
@@ -161,29 +183,37 @@ export function calculateCallTargetLedgers(
       });
     });
 
-    // If no entries in the requested range, use latest active day as fallback
+    // Fallback if range is empty
     if (displayEntries.length === 0) {
-      const latestActive = [...dailyData].reverse().find(d => d.rawCalls > 0 || d.assigned >= 5);
+      const latestActive = [...dailyData].reverse().find(d => d.callsDone > 0 || d.assigned >= 5);
       if (latestActive) {
-        const netBalance = latestActive.rawCalls - DAILY_TARGET;
+        const netBalance = latestActive.connectedCalls - DAILY_TARGET;
         const deficit = netBalance < 0 ? Math.abs(netBalance) : 0;
         const deficitPaidByBank = Math.min(deficit, surplusBank);
         surplusBank -= deficitPaidByBank;
         displayEntries.push({
           date: latestActive.date,
-          rawCalls: latestActive.rawCalls,
+          assigned: latestActive.assigned,
+          callsDone: latestActive.callsDone,
+          connectedCalls: latestActive.connectedCalls,
+          notConnectedCalls: latestActive.notConnectedCalls,
+          rawCalls: latestActive.connectedCalls,
           target: DAILY_TARGET,
           netBalance,
           surplusGivenToPast: 0,
           deficitPaidByFuture: deficitPaidByBank,
-          adjustedCalls: latestActive.rawCalls + deficitPaidByBank,
-          isTargetMet: (latestActive.rawCalls + deficitPaidByBank) >= DAILY_TARGET,
+          adjustedCalls: latestActive.connectedCalls + deficitPaidByBank,
+          isTargetMet: (latestActive.connectedCalls + deficitPaidByBank) >= DAILY_TARGET,
           unresolvedDeficit: deficit - deficitPaidByBank
         });
       }
     }
 
     // 5. Calculate summary metrics
+    let totalAssigned = 0;
+    let totalCallsDone = 0;
+    let totalConnectedCalls = 0;
+    let totalNotConnectedCalls = 0;
     let totalRawCalls = 0;
     let totalTarget = 0;
     let totalAdjustedCalls = 0;
@@ -192,6 +222,10 @@ export function calculateCallTargetLedgers(
     let appreciationDaysEarned = 0;
 
     displayEntries.forEach(entry => {
+      totalAssigned += entry.assigned;
+      totalCallsDone += entry.callsDone;
+      totalConnectedCalls += entry.connectedCalls;
+      totalNotConnectedCalls += entry.notConnectedCalls;
       totalRawCalls += entry.rawCalls;
       totalTarget += entry.target;
       totalAdjustedCalls += entry.adjustedCalls;
@@ -209,6 +243,10 @@ export function calculateCallTargetLedgers(
 
     result[user] = {
       userName: user,
+      totalAssigned,
+      totalCallsDone,
+      totalConnectedCalls,
+      totalNotConnectedCalls,
       totalRawCalls,
       totalTarget,
       totalAdjustedCalls,
