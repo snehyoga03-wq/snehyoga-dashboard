@@ -201,9 +201,7 @@ const LeadRow = React.memo(({ lead, index, isSelected, handlers }: any) => {
             <EditableCell value={lead.remark} onUpdate={(val) => {
               handleUpdateField(lead.id, 'remark', val);
               const detected = autoDetectCallConnected(val);
-              if (detected !== null) {
-                handlers.handleUpdateCallConnected(lead.id, detected);
-              }
+              handlers.handleUpdateCallConnected(lead.id, detected);
             }} placeholder="No remark" />
           </div>
           <Select value={lead.call_connected || "none"} onValueChange={(val) => handlers.handleUpdateCallConnected(lead.id, val === "none" ? null : val)}>
@@ -276,7 +274,17 @@ export function LeadsManagement() {
   const [typeFilter, setTypeFilter] = useState("all");
   const [autoDateFilter, setAutoDateFilter] = useState(new Date().toISOString().split("T")[0]);
   const [addedDateFilter, setAddedDateFilter] = useState("");
-  const [assignedToFilter, setAssignedToFilter] = useState("all");
+  const [assignedToFilter, setAssignedToFilter] = useState(() => {
+    const loggedInUser = sessionStorage.getItem("crm_username") || localStorage.getItem("crm_username");
+    if (!loggedInUser || loggedInUser.toLowerCase() === "admin" || loggedInUser === "YOG" || loggedInUser.toLowerCase().includes("shreya")) return "all";
+
+    const matched = ASSIGNED_USERS.find(u => 
+      u.toLowerCase() === loggedInUser.toLowerCase() ||
+      (u.split(" ")[0].length >= 3 && loggedInUser.toLowerCase().includes(u.split(" ")[0].toLowerCase()))
+    );
+
+    return matched || "all";
+  });
 
   const [currentPage, setCurrentPage] = useState(1);
   const itemsPerPage = 50;

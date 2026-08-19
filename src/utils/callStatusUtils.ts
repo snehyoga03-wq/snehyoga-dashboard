@@ -52,30 +52,21 @@ export const autoDetectCallConnected = (remark: string | null): string | null =>
 
 /**
  * Determine call status for a lead:
- * - 'connected': Call was done and connected
- * - 'not_connected': Call was done but not connected (e.g. call not received, busy, etc.)
- * - 'not_called': Lead was not acted upon / called
+ * - 'connected': Explicitly set or detected as connected from notes/remarks
+ * - 'not_connected': Explicitly set or detected as not connected from notes/remarks
+ * - 'not_called': No notes/remarks and no explicit call status set
  */
 export function getLeadCallStatus(lead: Partial<Lead>, historyEntries: any[] = []): 'connected' | 'not_connected' | 'not_called' {
   // 1. Explicit call_connected column takes highest priority if set
   if (lead.call_connected === 'connected') return 'connected';
   if (lead.call_connected === 'not_connected') return 'not_connected';
 
-  // 2. Check if lead has been called / acted upon
-  const hasStatus = lead.lead_status && lead.lead_status !== 'Select Option';
-  const hasRemark = lead.remark && lead.remark !== '' && lead.remark !== 'No remark';
-  const hasCallingDate = lead.calling_date && lead.calling_date !== '';
-  const hasHistory = historyEntries.some(h => h.lead_id === lead.id);
-
-  const isCallDone = hasStatus || hasRemark || hasCallingDate || hasHistory;
-  if (!isCallDone) return 'not_called';
-
-  // 3. If remark exists, check auto-detection from remark text
+  // 2. Check auto-detection from remark text / notes if present
   if (lead.remark && lead.remark.trim() !== '' && lead.remark !== 'No remark') {
     const detected = autoDetectCallConnected(lead.remark);
     if (detected) return detected as 'connected' | 'not_connected';
   }
 
-  // 4. Default for acted upon leads without explicit non-connected remark
-  return 'connected';
+  // 3. Without explicit call_connected column and without notes/remarks, return 'not_called'
+  return 'not_called';
 }
