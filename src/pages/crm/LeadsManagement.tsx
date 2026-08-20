@@ -538,6 +538,7 @@ export function LeadsManagement() {
       lead_status: "Select Option",
       remark: "",
       call_connected: null,
+      assigned_to: null,
       follow_up_date: ""
     });
     setIsOpenAddEditDialog(true);
@@ -595,6 +596,7 @@ export function LeadsManagement() {
             lead_status: leadForm.lead_status || "Select Option",
             remark: leadForm.remark || null,
             call_connected: leadForm.call_connected || autoDetectCallConnected(leadForm.remark || null),
+            assigned_to: leadForm.assigned_to || null,
             follow_up_date: finalFollowUpDate
           })
           .eq("id", editingLead.id);
@@ -604,9 +606,6 @@ export function LeadsManagement() {
         toast({ title: "Success", description: "Lead updated successfully" });
       } else {
         // Create
-        // let nextUserIndex = (getLastAssignedIndex(leads) + 1) % 3;
-        // const assignedTo = ASSIGNED_USERS[nextUserIndex];
-
         const { data, error } = await supabase
           .from("leads")
           .insert([{
@@ -620,7 +619,7 @@ export function LeadsManagement() {
             lead_status: leadForm.lead_status || "Select Option",
             remark: leadForm.remark || null,
             call_connected: leadForm.call_connected || autoDetectCallConnected(leadForm.remark || null),
-            assigned_to: null,
+            assigned_to: leadForm.assigned_to || null,
             follow_up_date: finalFollowUpDate
           }]).select();
 
@@ -1785,6 +1784,25 @@ export function LeadsManagement() {
                   value={leadForm.follow_up_date || ""}
                   onChange={e => setLeadForm(prev => ({ ...prev, follow_up_date: e.target.value }))}
                 />
+              </div>
+              <div>
+                <Label className="flex items-center gap-1 text-gray-700">
+                  <User className="w-3.5 h-3.5" /> Assigned To
+                </Label>
+                <Select
+                  value={leadForm.assigned_to || "unassigned"}
+                  onValueChange={val => setLeadForm(prev => ({ ...prev, assigned_to: val === "unassigned" ? null : val }))}
+                >
+                  <SelectTrigger className="bg-white">
+                    <SelectValue placeholder="Select user" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="unassigned" className="text-gray-500">— Unassigned —</SelectItem>
+                    {ASSIGNED_USERS.map(u => (
+                      <SelectItem key={u} value={u}>{u}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
               </div>
             </div>
           </div>
