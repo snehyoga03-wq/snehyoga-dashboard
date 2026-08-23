@@ -18,12 +18,14 @@ const MessageNode = ({ id, data, isConnectable }: any) => {
       try {
         const { data, error } = await supabase
           .from('session_settings')
-          .select('wa_api_token')
+          .select('wa_api_token, wa_waba_id')
           .maybeSingle();
 
         if (error || !data?.wa_api_token) return;
 
-        const wabaId = "1530834774801331";
+        const wabaId = (data as any)?.wa_waba_id || localStorage.getItem('wa_waba_id') || "1564657775051850";
+        if (!wabaId) return;
+
         const url = `https://graph.facebook.com/v20.0/${wabaId}/message_templates?fields=name,status,category,components&limit=100&access_token=${data.wa_api_token}`;
         
         const res = await fetch(url);

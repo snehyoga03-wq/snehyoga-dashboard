@@ -308,6 +308,7 @@ const CRM = () => {
   const [templateVariables, setTemplateVariables] = useState("");
   const [pabblyToken, setPabblyToken] = useState("");
   const [waPhoneNumberId, setWaPhoneNumberId] = useState("808910018982018");
+  const [waWabaId, setWaWabaId] = useState(() => localStorage.getItem("wa_waba_id") || "1564657775051850");
   const [waLanguageCode, setWaLanguageCode] = useState("en");
   const [fetchedTemplates, setFetchedTemplates] = useState<{ id: string, name: string, category: string, status: string, body: string }[]>([]);
   const [isFetchingTemplates, setIsFetchingTemplates] = useState(false);
@@ -803,6 +804,39 @@ const CRM = () => {
     }
   };
 
+  const handleAdd30DaysToZeroUsers = async () => {
+    const zeroUsers = users.filter((u) => (u.days_left || 0) <= 0);
+    if (zeroUsers.length === 0) {
+      toast({ title: "No Zero-Day Users", description: "All users currently have active days remaining." });
+      return;
+    }
+
+    try {
+      setIsLoading(true);
+      const { error } = await supabase
+        .from("main_data_registration")
+        .update({ days_left: 30 })
+        .or("days_left.lte.0,days_left.is.null");
+
+      if (error) throw error;
+
+      setUsers((prev) =>
+        prev.map((u) => ((u.days_left || 0) <= 0 ? { ...u, days_left: 30 } : u))
+      );
+
+      toast({
+        title: "Subscriptions Extended",
+        description: `Successfully added 30 days to ${zeroUsers.length} user(s).`,
+      });
+    } catch (error: any) {
+      console.error("Error extending zero-day users:", error);
+      toast({ title: "Error", description: error?.message || "Failed to extend subscriptions", variant: "destructive" });
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+
   const toggleSubscriptionPause = async (id: string, paused: boolean) => {
     try {
       const { error } = await supabase.from("main_data_registration").update({ subscription_paused: paused }).eq("id", id);
@@ -832,7 +866,7 @@ const CRM = () => {
     try {
       const { data, error } = await supabase
         .from('session_settings')
-        .select('session_link, premium_session_link, pabbly_reminder_url, wa_api_token, wa_phone_number_id, wa_language_code')
+        .select('session_link, premium_session_link, pabbly_reminder_url, wa_api_token, wa_phone_number_id, wa_language_code, wa_waba_id')
         .maybeSingle();
 
       if (error) { console.error('Error fetching session settings:', error); return; }
@@ -851,6 +885,10 @@ const CRM = () => {
         setPabblyUrl(data.pabbly_reminder_url || "");
         setPabblyToken(data.wa_api_token || "");
         setWaPhoneNumberId(data.wa_phone_number_id || "808910018982018");
+        if (data.wa_waba_id) {
+          setWaWabaId(data.wa_waba_id);
+          localStorage.setItem("wa_waba_id", data.wa_waba_id);
+        }
         setWaLanguageCode(data.wa_language_code || "en");
       }
     } catch (error) { console.error('Error fetching session link:', error); }
@@ -1375,7 +1413,10 @@ const CRM = () => {
                     <h1 className="text-2xl font-bold text-gray-900">User Management</h1>
                     <p className="text-gray-500">Manage all registered users and subscriptions</p>
                   </div>
-                  <div className="flex gap-2">
+                  <div className="flex flex-wrap gap-2">
+                    <Button onClick={handleAdd30DaysToZeroUsers} variant="secondary" className="bg-amber-50 hover:bg-amber-100 text-amber-900 border border-amber-200 shadow-sm font-medium">
+                      <Calendar className="w-4 h-4 mr-2 text-amber-600" /> +30 Days (0-Day Users)
+                    </Button>
                     <Button onClick={handleExportUsers} variant="secondary" className="bg-white hover:bg-gray-100 border shadow-sm">
                       <Download className="w-4 h-4 mr-2 text-green-600" /> Export
                     </Button>
@@ -2128,7 +2169,7 @@ const CRM = () => {
                         />
                       </div>
                     </div>
-                    <div className="grid grid-cols-2 gap-4">
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                       <div className="space-y-2">
                         <label className="text-sm font-medium">Phone Number ID</label>
                         <Input
@@ -2138,25 +2179,40 @@ const CRM = () => {
                         />
                       </div>
                       <div className="space-y-2">
+                        <label className="text-sm font-medium">WABA Account ID</label>
+                        <Input
+                          placeholder="e.g. 1530834774801331"
+                          value={waWabaId}
+                          onChange={(e) => {
+                            setWaWabaId(e.target.value);
+                            localStorage.setItem("wa_waba_id", e.target.value);
+                          }}
+                        />
+                        <p className="text-[11px] text-muted-foreground">Meta WhatsApp Business Account ID</p>
+                      </div>
+                      <div className="space-y-2">
                         <label className="text-sm font-medium">Language Code</label>
                         <Input
                           placeholder="en"
                           value={waLanguageCode}
                           onChange={(e) => setWaLanguageCode(e.target.value)}
                         />
-                        <p className="text-xs text-muted-foreground">e.g. en, en_US, hi</p>
+                        <p className="text-[11px] text-muted-foreground">e.g. en, en_US, hi</p>
                       </div>
                     </div>
                     <Button onClick={async () => {
                       try {
+                        localStorage.setItem("wa_waba_id", waWabaId);
                         const { data: settings } = await supabase.from('session_settings').select('id').single();
                         if (settings) {
-                          await supabase.from('session_settings').update({
+                          const updates: any = {
                             wa_api_token: pabblyToken,
                             wa_phone_number_id: waPhoneNumberId,
                             wa_language_code: waLanguageCode,
-                          }).eq('id', settings.id);
-                          toast({ title: "Saved", description: "WhatsApp config saved" });
+                          };
+                          if (waWabaId) updates.wa_waba_id = waWabaId;
+                          await supabase.from('session_settings').update(updates).eq('id', settings.id);
+                          toast({ title: "Saved", description: "WhatsApp configuration saved successfully" });
                         }
                       } catch (e) { toast({ title: "Error saving config", variant: "destructive" }); }
                     }}>Save Config</Button>
@@ -2247,7 +2303,7 @@ const CRM = () => {
                   <CardContent className="space-y-4">
                     <div className="space-y-2">
                       <label className="text-sm font-medium">Fetch Templates from WhatsApp</label>
-                      <p className="text-xs text-muted-foreground">Uses the API Token saved in the Configuration card above.</p>
+                      <p className="text-xs text-muted-foreground">Uses the API Token & WABA Account ID saved above.</p>
                       <div className="flex gap-2">
                         <Button
                           variant="secondary"
@@ -2255,8 +2311,15 @@ const CRM = () => {
                           onClick={async () => {
                             setIsFetchingTemplates(true);
                             try {
-                              const wabaId = "1530834774801331";
-                              const url = `https://graph.facebook.com/v20.0/${wabaId}/message_templates?fields=name,status,category,components&limit=100&access_token=${pabblyToken}`;
+                              const targetWabaId = (waWabaId || localStorage.getItem("wa_waba_id") || "1564657775051850").trim();
+                              if (!targetWabaId) {
+                                throw new Error("Please enter your WABA Account ID (WhatsApp Business Account ID) in WhatsApp API Configuration above.");
+                              }
+                              if (targetWabaId === waPhoneNumberId.trim()) {
+                                throw new Error("The WABA Account ID cannot be the same as your Phone Number ID. Please enter your WhatsApp Business Account ID (WABA ID) from Meta Business Manager.");
+                              }
+                              localStorage.setItem("wa_waba_id", targetWabaId);
+                              const url = `https://graph.facebook.com/v20.0/${targetWabaId}/message_templates?fields=name,status,category,components&limit=100&access_token=${pabblyToken}`;
                               const res = await fetch(url);
                               const json = await res.json();
                               if (!res.ok || json.error) {
