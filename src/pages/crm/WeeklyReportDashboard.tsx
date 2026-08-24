@@ -60,7 +60,7 @@ export default function WeeklyReportDashboard() {
     const currentFetchId = ++fetchIdRef.current;
     setLoading(true);
     try {
-      // 1. Fetch all leads clean from database
+      // 1. Fetch all leads from database
       let leadsQuery = supabase.from('leads').select('*');
       if (selectedStatus !== 'all') {
         leadsQuery = leadsQuery.eq('lead_status', selectedStatus);
@@ -69,7 +69,7 @@ export default function WeeklyReportDashboard() {
       const { data: leadsData, error: leadsError } = await leadsQuery;
       if (leadsError) throw leadsError;
 
-      // 2. Fetch history clean from database
+      // 2. Fetch history from database
       const { data: historyData, error: historyError } = await supabase
         .from('lead_history')
         .select('*');
@@ -96,29 +96,38 @@ export default function WeeklyReportDashboard() {
   }, [selectedStatus]);
 
   // Harmonized Derived Metrics
+  const isDateRange = Boolean(startDate && endDate);
   const targetDate = dailyDate || startDate || endDate || new Date().toISOString().split('T')[0];
 
-  const matchesAutoDate = (lead: Lead, tDate: string): boolean => {
-    if (!tDate) return true;
-    const isMasterClassFollow = lead.lead_status === "Master Class Follow";
-    if (!lead.created_at) {
-      return lead.follow_up_date === tDate || isMasterClassFollow;
+  const matchesAutoDate = (lead: Lead): boolean => {
+    const leadDate = lead.created_at ? lead.created_at.split('T')[0] : '';
+
+    if (isDateRange) {
+      if (!leadDate) return true;
+      const isFollowUpInRange = Boolean(lead.follow_up_date && lead.follow_up_date >= startDate && lead.follow_up_date <= endDate);
+      const isCreatedInRange = Boolean(leadDate >= startDate && leadDate <= endDate);
+      return isCreatedInRange || isFollowUpInRange || lead.lead_status === "Master Class Follow";
     }
-    const leadDate = new Date(lead.created_at).toISOString().split('T')[0];
-    const isCreatedToday = leadDate === tDate;
-    const isFollowUpToday = lead.follow_up_date === tDate;
-    const isUntouchedCarryForward = leadDate < tDate && lead.lead_status === "Select Option" && !lead.follow_up_date;
+
+    if (!targetDate) return true;
+    const isMasterClassFollow = lead.lead_status === "Master Class Follow";
+    if (!leadDate) {
+      return lead.follow_up_date === targetDate || isMasterClassFollow;
+    }
+    const isCreatedToday = leadDate === targetDate;
+    const isFollowUpToday = lead.follow_up_date === targetDate;
+    const isUntouchedCarryForward = leadDate < targetDate && lead.lead_status === "Select Option" && !lead.follow_up_date;
     return isCreatedToday || isFollowUpToday || isUntouchedCarryForward || isMasterClassFollow;
   };
 
   const filteredLeads = leads.filter(l => 
     isUserMatch(l.assigned_to, null, effectiveMember) && 
-    matchesAutoDate(l, targetDate)
+    matchesAutoDate(l)
   );
 
   const assignedLeadIds = new Set(filteredLeads.map(l => l.id));
 
-  // History entries for the leads matching autoDate filter
+  // History entries for the leads matching filter
   const filteredHistory = history.filter(h => {
     const matchesUser = isUserMatch(null, h.created_by, effectiveMember);
     const matchesAssignedLead = targetDate ? assignedLeadIds.has(h.lead_id) : true;
@@ -150,13 +159,13 @@ export default function WeeklyReportDashboard() {
     filteredHistory,
     leads,
     displayedUsers,
-    targetDate,
-    targetDate
+    isDateRange ? startDate : targetDate,
+    isDateRange ? endDate : targetDate
   );
 
   // Analytics Chart Data (Harmonized with Top Cards & Ledger)
   const chartData = displayedUsers.map(user => {
-    const userLeads = leads.filter(l => isUserMatch(l.assigned_to, null, user) && matchesAutoDate(l, targetDate));
+    const userLeads = leads.filter(l => isUserMatch(l.assigned_to, null, user) && matchesAutoDate(l));
     const userLeadIds = new Set(userLeads.map(l => l.id));
     const userHistory = history.filter(h => {
       const matchesUser = isUserMatch(null, h.created_by, user);
@@ -190,7 +199,7 @@ export default function WeeklyReportDashboard() {
           <h2 className="text-xl font-bold text-gray-900 flex items-center gap-2">
             <TrendingUp className="text-[#2e5a44]" /> Overview Report Dashboard
           </h2>
-          <p className="text-sm text-gray-500">Track team performance and lead activity overview.</p>
+          <p className="text-sm text-gray-500">Track team performance and lead activity overview for {dailyDate || `${startDate} to ${endDate}`}.</p>
         </div>
         <Button variant="ghost" size="icon" className="text-gray-500 rounded-full hover:bg-gray-100">
           {isExpanded ? <ChevronUp className="w-5 h-5" /> : <ChevronDown className="w-5 h-5" />}
@@ -250,7 +259,7 @@ export default function WeeklyReportDashboard() {
               </Select>
             </div>
             <div>
-              <Button onClick={fetchData} disabled={loading} className="w-full bg-[#2e5a44] hover:bg-[#203f2f]">
+              <Button onClick={fetchData} disabled={loading} className="w-full bg-[#2e5a44] hover:bg-[#203f2f] font-bold shadow-sm">
                 <RefreshCw className={`w-4 h-4 mr-2 ${loading ? 'animate-spin' : ''}`} /> Update
               </Button>
             </div>
