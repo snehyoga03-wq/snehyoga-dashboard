@@ -2202,19 +2202,31 @@ const CRM = () => {
                     </div>
                     <Button onClick={async () => {
                       try {
-                        localStorage.setItem("wa_waba_id", waWabaId);
-                        const { data: settings } = await supabase.from('session_settings').select('id').single();
-                        if (settings) {
-                          const updates: any = {
-                            wa_api_token: pabblyToken,
-                            wa_phone_number_id: waPhoneNumberId,
-                            wa_language_code: waLanguageCode,
-                          };
-                          if (waWabaId) updates.wa_waba_id = waWabaId;
-                          await supabase.from('session_settings').update(updates).eq('id', settings.id);
-                          toast({ title: "Saved", description: "WhatsApp configuration saved successfully" });
+                        const targetWaba = waWabaId || "1564657775051850";
+                        localStorage.setItem("wa_waba_id", targetWaba);
+                        localStorage.setItem("wa_api_token", pabblyToken);
+                        
+                        const { data: settings } = await supabase.from('session_settings').select('id').maybeSingle();
+                        const updates: any = {
+                          wa_api_token: pabblyToken,
+                          wa_phone_number_id: waPhoneNumberId || "808910018982018",
+                          wa_language_code: waLanguageCode || "en",
+                          wa_waba_id: targetWaba,
+                          updated_at: new Date().toISOString()
+                        };
+
+                        if (settings?.id) {
+                          const { error: err } = await supabase.from('session_settings').update(updates).eq('id', settings.id);
+                          if (err) throw err;
+                        } else {
+                          const { error: err } = await supabase.from('session_settings').insert(updates);
+                          if (err) throw err;
                         }
-                      } catch (e) { toast({ title: "Error saving config", variant: "destructive" }); }
+                        toast({ title: "Saved ✅", description: "WhatsApp API configuration saved to database successfully!" });
+                      } catch (e: any) { 
+                        console.error("Error saving config:", e);
+                        toast({ title: "Error saving config", description: e?.message || "Failed to save to database", variant: "destructive" }); 
+                      }
                     }}>Save Config</Button>
 
                     {/* Test Connection */}

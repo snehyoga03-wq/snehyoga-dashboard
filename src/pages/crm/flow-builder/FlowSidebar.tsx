@@ -1,5 +1,9 @@
 import React from 'react';
-import { Type, Image as ImageIcon, List as ListIcon, ShoppingBag, Package, FileText, ChevronRight, AlertTriangle, Link as LinkIcon, SplitSquareHorizontal, Waypoints, MapPin, Navigation, HelpCircle, UploadCloud, FileEdit, Tag, Server } from 'lucide-react';
+import { 
+  Type, Image as ImageIcon, List as ListIcon, ShoppingBag, Package, FileText, 
+  ChevronRight, AlertTriangle, Link as LinkIcon, SplitSquareHorizontal, Waypoints, 
+  MapPin, Navigation, HelpCircle, UploadCloud, FileEdit, Tag, Server, Clock, UserCheck 
+} from 'lucide-react';
 
 const FlowSidebar = () => {
   const onDragStart = (event: React.DragEvent, nodeType: string, subtype?: string) => {
@@ -12,7 +16,7 @@ const FlowSidebar = () => {
 
   const DraggableItem = ({ icon: Icon, label, type, subtype, colorClass }: any) => (
     <div
-      className="flex flex-col items-center justify-center p-3 bg-white border border-gray-100 rounded-xl cursor-grab hover:border-emerald-300 hover:shadow-md hover:bg-emerald-50/30 transition-all group aspect-square text-center gap-2"
+      className="flex flex-col items-center justify-center p-3 bg-white border border-gray-100 rounded-xl cursor-grab hover:border-emerald-400 hover:shadow-md hover:bg-emerald-50/40 transition-all group aspect-square text-center gap-2 select-none"
       onDragStart={(event) => onDragStart(event, type, subtype)}
       draggable
     >
@@ -27,41 +31,43 @@ const FlowSidebar = () => {
         
         {/* Messages */}
         <div className="p-4 border-b border-gray-100">
-          <div className="flex items-center justify-between mb-4 cursor-pointer hover:bg-gray-50 p-2 -mx-2 rounded-lg transition-colors">
-            <h4 className="text-sm font-bold text-gray-800">Message types</h4>
+          <div className="flex items-center justify-between mb-3 p-1">
+            <h4 className="text-xs font-bold text-gray-800 uppercase tracking-wider">Message Types</h4>
             <ChevronRight className="w-4 h-4 text-gray-400" />
           </div>
           
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-2 gap-2.5">
+            <DraggableItem icon={FileText} label="WhatsApp Template" type="messageNode" subtype="template" colorClass="text-emerald-600" />
             <DraggableItem icon={Type} label="Text Buttons" type="messageNode" subtype="text-buttons" colorClass="text-emerald-600" />
             <DraggableItem icon={ImageIcon} label="Media Buttons" type="messageNode" subtype="media-buttons" colorClass="text-emerald-600" />
-            <DraggableItem icon={ListIcon} label="List" type="messageNode" subtype="list" colorClass="text-emerald-600" />
-            <DraggableItem icon={ShoppingBag} label="Catalogue Message" type="messageNode" subtype="catalogue" colorClass="text-emerald-600" />
+            <DraggableItem icon={ListIcon} label="List Message" type="messageNode" subtype="list" colorClass="text-emerald-600" />
+            <DraggableItem icon={ShoppingBag} label="Catalogue" type="messageNode" subtype="catalogue" colorClass="text-emerald-600" />
             <DraggableItem icon={Package} label="Single Product" type="messageNode" subtype="single-product" colorClass="text-emerald-600" />
             <DraggableItem icon={Package} label="Multi Product" type="messageNode" subtype="multi-product" colorClass="text-emerald-600" />
-            <DraggableItem icon={FileText} label="Template" type="messageNode" subtype="template" colorClass="text-emerald-600" />
           </div>
         </div>
 
-        {/* Actions */}
+        {/* Actions & Logic */}
         <div className="p-4">
-          <div className="flex items-center justify-between mb-4 cursor-pointer hover:bg-gray-50 p-2 -mx-2 rounded-lg transition-colors">
-            <h4 className="text-sm font-bold text-gray-800">Actions</h4>
+          <div className="flex items-center justify-between mb-3 p-1">
+            <h4 className="text-xs font-bold text-gray-800 uppercase tracking-wider">Actions & Logic</h4>
             <ChevronRight className="w-4 h-4 text-gray-400 rotate-90" />
           </div>
           
-          <div className="grid grid-cols-2 gap-3">
-            <DraggableItem icon={AlertTriangle} label="Request Intervention" type="actionNode" subtype="request-intervention" colorClass="text-emerald-600" />
-            <DraggableItem icon={Waypoints} label="Meta Conversions Api" type="actionNode" subtype="meta-capi" colorClass="text-emerald-600" />
-            <DraggableItem icon={SplitSquareHorizontal} label="Condition" type="conditionNode" subtype="condition" colorClass="text-emerald-600" />
-            <DraggableItem icon={LinkIcon} label="Connect Flow" type="actionNode" subtype="connect-flow" colorClass="text-emerald-600" />
-            <DraggableItem icon={MapPin} label="Ask Address" type="inputNode" subtype="ask-address" colorClass="text-emerald-600" />
-            <DraggableItem icon={Navigation} label="Ask Location" type="inputNode" subtype="ask-location" colorClass="text-emerald-600" />
-            <DraggableItem icon={HelpCircle} label="Ask Question" type="inputNode" subtype="ask-question" colorClass="text-emerald-600" />
-            <DraggableItem icon={UploadCloud} label="Ask Media" type="inputNode" subtype="ask-media" colorClass="text-emerald-600" />
-            <DraggableItem icon={FileEdit} label="Set Attribute" type="actionNode" subtype="set-attribute" colorClass="text-emerald-600" />
-            <DraggableItem icon={Tag} label="Add Tag" type="actionNode" subtype="add-tag" colorClass="text-emerald-600" />
-            <DraggableItem icon={Server} label="API Request" type="actionNode" subtype="api-request" colorClass="text-emerald-600" />
+          <div className="grid grid-cols-2 gap-2.5">
+            <DraggableItem icon={Clock} label="Delay / Wait" type="actionNode" subtype="delay" colorClass="text-blue-600" />
+            <DraggableItem icon={SplitSquareHorizontal} label="Condition (If/Else)" type="conditionNode" subtype="condition" colorClass="text-amber-600" />
+            <DraggableItem icon={HelpCircle} label="Ask Question" type="inputNode" subtype="ask-question" colorClass="text-pink-600" />
+            <DraggableItem icon={MapPin} label="Ask Address" type="inputNode" subtype="ask-address" colorClass="text-pink-600" />
+            <DraggableItem icon={Navigation} label="Ask Location" type="inputNode" subtype="ask-location" colorClass="text-pink-600" />
+            <DraggableItem icon={UploadCloud} label="Ask Media" type="inputNode" subtype="ask-media" colorClass="text-pink-600" />
+            <DraggableItem icon={FileEdit} label="Set Attribute" type="actionNode" subtype="set-attribute" colorClass="text-blue-600" />
+            <DraggableItem icon={Tag} label="Add Tag" type="actionNode" subtype="add-tag" colorClass="text-blue-600" />
+            <DraggableItem icon={UserCheck} label="Assign Agent" type="actionNode" subtype="assign-agent" colorClass="text-blue-600" />
+            <DraggableItem icon={AlertTriangle} label="Pause Bot" type="actionNode" subtype="request-intervention" colorClass="text-blue-600" />
+            <DraggableItem icon={LinkIcon} label="Connect Flow" type="actionNode" subtype="connect-flow" colorClass="text-blue-600" />
+            <DraggableItem icon={Server} label="API Request" type="actionNode" subtype="api-request" colorClass="text-blue-600" />
+            <DraggableItem icon={Waypoints} label="Meta CAPI" type="actionNode" subtype="meta-capi" colorClass="text-blue-600" />
           </div>
         </div>
 

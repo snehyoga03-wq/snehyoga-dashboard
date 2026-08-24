@@ -1,6 +1,6 @@
 import React from 'react';
 import { Handle, Position, useReactFlow } from '@xyflow/react';
-import { AlertTriangle, Waypoints, Link as LinkIcon, FileEdit, Tag, Server, Settings } from 'lucide-react';
+import { AlertTriangle, Waypoints, Link as LinkIcon, FileEdit, Tag, Server, Settings, Clock, UserCheck } from 'lucide-react';
 import { Input } from '@/components/ui/input';
 
 const ActionNode = ({ id, data, isConnectable }: any) => {
@@ -9,6 +9,8 @@ const ActionNode = ({ id, data, isConnectable }: any) => {
 
   const renderHeaderIcon = () => {
     switch (subtype) {
+      case 'delay': return <Clock className="w-3.5 h-3.5 text-blue-600" />;
+      case 'assign-agent': return <UserCheck className="w-3.5 h-3.5 text-blue-600" />;
       case 'request-intervention': return <AlertTriangle className="w-3.5 h-3.5 text-blue-600" />;
       case 'meta-capi': return <Waypoints className="w-3.5 h-3.5 text-blue-600" />;
       case 'connect-flow': return <LinkIcon className="w-3.5 h-3.5 text-blue-600" />;
@@ -21,7 +23,9 @@ const ActionNode = ({ id, data, isConnectable }: any) => {
 
   const renderHeaderTitle = () => {
     switch (subtype) {
-      case 'request-intervention': return 'Intervention';
+      case 'delay': return 'Delay / Wait';
+      case 'assign-agent': return 'Assign to Agent';
+      case 'request-intervention': return 'Pause Bot';
       case 'meta-capi': return 'Meta API';
       case 'connect-flow': return 'Connect Flow';
       case 'set-attribute': return 'Set Attribute';
@@ -33,6 +37,53 @@ const ActionNode = ({ id, data, isConnectable }: any) => {
 
   const renderContent = () => {
     switch (subtype) {
+      case 'delay':
+        return (
+          <div className="flex flex-col gap-2">
+            <div>
+              <label className="text-[10px] font-semibold text-gray-500 uppercase tracking-wider mb-1 block">Delay Duration</label>
+              <div className="flex gap-2">
+                <Input 
+                  type="number"
+                  min="1"
+                  value={data.delayValue || '5'}
+                  onChange={(e) => updateNodeData(id, { delayValue: e.target.value })}
+                  className="h-8 text-xs bg-gray-50 flex-1"
+                />
+                <select 
+                  value={data.delayUnit || 'minutes'}
+                  onChange={(e) => updateNodeData(id, { delayUnit: e.target.value })}
+                  className="border border-gray-200 rounded-md px-2 text-xs bg-gray-50 font-semibold"
+                >
+                  <option value="seconds">Seconds</option>
+                  <option value="minutes">Minutes</option>
+                  <option value="hours">Hours</option>
+                  <option value="days">Days</option>
+                </select>
+              </div>
+            </div>
+            <div className="text-[10px] text-gray-500 bg-blue-50/60 p-2 rounded border border-blue-100">
+              Flow will pause for {data.delayValue || '5'} {data.delayUnit || 'minutes'} before executing the next node.
+            </div>
+          </div>
+        );
+      case 'assign-agent':
+        return (
+          <div className="flex flex-col gap-2">
+            <div>
+              <label className="text-[10px] font-semibold text-gray-500 uppercase tracking-wider mb-1 block">Select Agent / Team</label>
+              <select 
+                value={data.agentId || 'support-team'}
+                onChange={(e) => updateNodeData(id, { agentId: e.target.value })}
+                className="w-full border border-gray-200 rounded-lg px-3 py-1.5 bg-gray-50 text-xs font-semibold text-gray-700 outline-none"
+              >
+                <option value="support-team">Support Team (Auto Assign)</option>
+                <option value="trainer-sneha">Sneha (Yoga Instructor)</option>
+                <option value="sales-lead">Sales & Enrollments</option>
+              </select>
+            </div>
+          </div>
+        );
       case 'request-intervention':
         return (
           <div className="bg-blue-50 border border-blue-100 rounded p-2 text-[10px] text-blue-800 leading-tight">
@@ -65,7 +116,7 @@ const ActionNode = ({ id, data, isConnectable }: any) => {
       case 'connect-flow':
         return (
           <div>
-            <label className="text-[10px] font-semibold text-gray-500 uppercase tracking-wider mb-1 block">Select Flow to trigger</label>
+            <label className="text-[10px] font-semibold text-gray-500 uppercase tracking-wider mb-1 block">Select Sub-Flow</label>
             <select 
               value={data.flowId || ''}
               onChange={(e) => updateNodeData(id, { flowId: e.target.value })}
@@ -74,6 +125,7 @@ const ActionNode = ({ id, data, isConnectable }: any) => {
               <option value="">-- Choose Flow --</option>
               <option value="f1">Summer Camp Flow</option>
               <option value="f2">Welcome Journey</option>
+              <option value="f3">Feedback Follow-up</option>
             </select>
           </div>
         );
