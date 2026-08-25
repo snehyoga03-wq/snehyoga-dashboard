@@ -60,27 +60,50 @@ async function sendWhatsAppTemplate(
         });
     }
 
-    const body: Record<string, unknown> = {
+    const bodyWithParams: Record<string, unknown> = {
         messaging_product: "whatsapp",
         to: toPhone,
         type: "template",
         template: {
             name: templateName,
             language: { code: languageCode },
-            components,
+            ...(components.length > 0 ? { components } : {}),
         },
     };
 
-    const res = await fetch(url, {
+    let res = await fetch(url, {
         method: "POST",
         headers: {
             "Content-Type": "application/json",
             "Authorization": `Bearer ${token}`,
         },
-        body: JSON.stringify(body),
+        body: JSON.stringify(bodyWithParams),
     });
 
-    const json = await res.json();
+    let json = await res.json();
+
+    // Automatic Fallback for Error #132000 (Parameter mismatch)
+    if (!res.ok && json.error && (json.error.code === 132000 || String(json.error.message).includes("parameters"))) {
+        console.log(`⚠️ Template '${templateName}' does not take parameters. Retrying without parameters...`);
+        const bodyNoParams: Record<string, unknown> = {
+            messaging_product: "whatsapp",
+            to: toPhone,
+            type: "template",
+            template: {
+                name: templateName,
+                language: { code: languageCode },
+            },
+        };
+        res = await fetch(url, {
+            method: "POST",
+            headers: {
+                "Content-Type": "application/json",
+                "Authorization": `Bearer ${token}`,
+            },
+            body: JSON.stringify(bodyNoParams),
+        });
+        json = await res.json();
+    }
 
     if (!res.ok || json.error) {
         const errMsg = json.error?.message || json.error?.error_data?.details || `HTTP ${res.status}`;
@@ -110,10 +133,10 @@ Deno.serve(async (req) => {
         if (settingsError) throw new Error(`Settings error: ${settingsError.message}`);
 
         const waToken = settings?.wa_api_token;
-        const phoneNumberId = settings?.wa_phone_number_id || "808910018982018";
-        const languageCode = settings?.wa_language_code || "en";
+        const phoneNumberId = settings?.wa_phone_number_id || "1230157110176906";
+        const languageCode = settings?.wa_language_code || "mr";
 
-        console.log(`🔍 [QueueProcessor] WA Token present: ${!!waToken}, Phone ID: ${phoneNumberId}`);
+        console.log(`🔍 [QueueProcessor] WA Token present: ${!!waToken}, Phone ID: ${phoneNumberId}, Lang: ${languageCode}`);
 
         if (!waToken) {
             console.error(`❌ [QueueProcessor] Missing WhatsApp API token in session_settings`);
@@ -268,13 +291,11 @@ Deno.serve(async (req) => {
 
         console.log(`📊 Done: ${deliveredCount} delivered, ${failedCount} failed`);
 
-        // 6. If we processed a full batch, there might be more messages waiting in the queue.
-        // Trigger this edge function again asynchronously.
         if (messages.length === BATCH_SIZE) {
             console.log("🔄 Re-triggering process-message-queue for remaining messages...");
             try {
                 const fnUrl = `${supabaseUrl}/functions/v1/process-message-queue`;
-                fetch(fnUrl, { // Fire and forget loosely
+                fetch(fnUrl, {
                     method: "POST",
                     headers: {
                         "Content-Type": "application/json",
