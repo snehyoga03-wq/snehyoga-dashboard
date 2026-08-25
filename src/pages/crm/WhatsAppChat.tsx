@@ -1,15 +1,17 @@
 import { useState, useRef, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { Search, Send, Paperclip, Smile, Phone, Video, MoreVertical, ArrowLeft, Check, CheckCheck, Image, FileText, Clock, MessageCircle, Plus, Filter, Star, Archive, Bot, Zap, ChevronDown, X, Copy, Sparkles } from "lucide-react";
-import { Input } from "@/components/ui/input";
-import { Button } from "@/components/ui/button";
+import { 
+  Search, Send, Paperclip, Smile, Phone, Video, MoreVertical, ArrowLeft, 
+  Check, CheckCheck, MessageCircle, Plus, Filter, Zap, X, Sparkles, RefreshCw, Loader2 
+} from "lucide-react";
+import { supabase } from "@/integrations/supabase/client";
+import { useToast } from "@/components/ui/use-toast";
 
 // ── Types ──
 interface Contact {
-  id: string;
+  id: string;          // user_phone
   name: string;
   phone: string;
-  avatar?: string;
   lastMessage: string;
   lastTime: string;
   unreadCount: number;
@@ -20,12 +22,12 @@ interface Contact {
 interface Message {
   id: string;
   text: string;
-  sender: "user" | "admin";
+  sender: "user" | "admin" | "bot";
   timestamp: string;
+  rawDate: Date;
   status: "sent" | "delivered" | "read";
-  type: "text" | "image" | "template" | "document";
+  type: "text" | "template";
   templateName?: string;
-  mediaUrl?: string;
 }
 
 interface Template {
@@ -37,49 +39,19 @@ interface Template {
   language: string;
 }
 
-// ── Demo Data ──
-const DEMO_CONTACTS: Contact[] = [
-  { id: "1", name: "Rahul Sharma", phone: "919876543210", lastMessage: "Thank you for the session link!", lastTime: "10:47 AM", unreadCount: 2, isOnline: true, labels: ["Active"] },
-  { id: "2", name: "Priya Patel", phone: "919123456780", lastMessage: "When is the next yoga session?", lastTime: "9:30 AM", unreadCount: 0, isOnline: false, labels: ["Premium"] },
-  { id: "3", name: "Amit Kumar", phone: "918765432109", lastMessage: "I missed today's class 😔", lastTime: "Yesterday", unreadCount: 1, isOnline: false, labels: ["Expiring"] },
-  { id: "4", name: "Sneha Gupta", phone: "917654321098", lastMessage: "Can I change my batch timing?", lastTime: "Yesterday", unreadCount: 0, isOnline: true, labels: ["Active", "Premium"] },
-  { id: "5", name: "Vikram Singh", phone: "916543210987", lastMessage: "Payment done ✅", lastTime: "May 9", unreadCount: 0, isOnline: false, labels: [] },
-  { id: "6", name: "Anita Desai", phone: "915432109876", lastMessage: "Thank you so much! 🙏", lastTime: "May 8", unreadCount: 0, isOnline: false, labels: ["Active"] },
-];
-
-const DEMO_MESSAGES: Record<string, Message[]> = {
-  "1": [
-    { id: "m1", text: "Hello! Welcome to Snehayoga. Your registration is confirmed 🎉", sender: "admin", timestamp: "10:30 AM", status: "read", type: "text" },
-    { id: "m2", text: "WE ARE LIVE\nThank you for registering for the Webinar.\n🔴 we are live!\n🔗 Join now: https://padhoindia.live\nBest regards,\nPadho India", sender: "admin", timestamp: "10:45 AM", status: "read", type: "template", templateName: "session_reminder_v1" },
-    { id: "m3", text: "Thank you for the session link!", sender: "user", timestamp: "10:47 AM", status: "read", type: "text" },
-    { id: "m4", text: "Ok", sender: "user", timestamp: "10:47 AM", status: "read", type: "text" },
-  ],
-  "2": [
-    { id: "m5", text: "Hi Priya! Your 3-month plan is active.", sender: "admin", timestamp: "9:00 AM", status: "read", type: "text" },
-    { id: "m6", text: "When is the next yoga session?", sender: "user", timestamp: "9:30 AM", status: "read", type: "text" },
-  ],
-  "3": [
-    { id: "m7", text: "Good morning! Don't forget today's session at 6 AM 🧘", sender: "admin", timestamp: "5:30 AM", status: "delivered", type: "text" },
-    { id: "m8", text: "I missed today's class 😔", sender: "user", timestamp: "8:00 AM", status: "read", type: "text" },
-  ],
-};
-
-const DEMO_TEMPLATES: Template[] = [
-  { id: "t1", name: "session_reminder_v1", category: "UTILITY", status: "APPROVED", body: "Hi {{1}}, your yoga session starts in 30 minutes! Join here: {{2}}", language: "en" },
-  { id: "t2", name: "welcome_message", category: "MARKETING", status: "APPROVED", body: "Welcome to Snehayoga, {{1}}! 🧘 Your journey to wellness begins now.", language: "en" },
-  { id: "t3", name: "payment_reminder", category: "UTILITY", status: "APPROVED", body: "Hi {{1}}, your subscription expires in {{2}} days. Renew now to continue your sessions.", language: "en" },
-  { id: "t4", name: "batch_change_confirm", category: "UTILITY", status: "APPROVED", body: "Hi {{1}}, your batch timing has been updated to {{2}}. See you there! 🎯", language: "en" },
-  { id: "t5", name: "memoryv5002", category: "MARKETING", status: "APPROVED", body: "🧠 10X Memory Power Webinar\nJoin us for an amazing session!\n🔗 Register now", language: "en" },
-];
-
 // ── Helper Components ──
+const normalizePhone = (phoneStr: string) => {
+  let p = (phoneStr || "").replace(/\D/g, "");
+  if (p.length === 12 && p.startsWith("91")) p = p.substring(2);
+  return p;
+};
 const Avatar = ({ name, isOnline }: { name: string; isOnline?: boolean }) => {
   const colors = ["#25D366", "#128C7E", "#075E54", "#34B7F1", "#00A884", "#667781"];
-  const idx = name.charCodeAt(0) % colors.length;
+  const idx = (name || "U").charCodeAt(0) % colors.length;
   return (
     <div className="relative shrink-0">
       <div className="w-12 h-12 rounded-full flex items-center justify-center text-white font-semibold text-lg" style={{ background: colors[idx] }}>
-        {name.charAt(0).toUpperCase()}
+        {(name || "U").charAt(0).toUpperCase()}
       </div>
       {isOnline && <div className="absolute bottom-0 right-0 w-3.5 h-3.5 bg-green-500 border-2 border-white rounded-full" />}
     </div>
@@ -94,70 +66,315 @@ const StatusIcon = ({ status }: { status: string }) => {
 
 // ── Main Component ──
 export function WhatsAppChat() {
+  const { toast } = useToast();
   const [selectedContact, setSelectedContact] = useState<Contact | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
   const [messageInput, setMessageInput] = useState("");
-  const [messages, setMessages] = useState<Record<string, Message[]>>(DEMO_MESSAGES);
-  const [contacts, setContacts] = useState<Contact[]>(DEMO_CONTACTS);
+  const [allMessages, setAllMessages] = useState<any[]>([]);
+  const [contacts, setContacts] = useState<Contact[]>([]);
+  const [templates, setTemplates] = useState<Template[]>([]);
   const [showTemplates, setShowTemplates] = useState(false);
   const [activeFilter, setActiveFilter] = useState<string>("all");
-  const [showEmojiHint, setShowEmojiHint] = useState(false);
+  const [isLoading, setIsLoading] = useState(true);
+  const [isSending, setIsSending] = useState(false);
   const chatEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
+  // 1. Fetch live chat messages & group into contact conversations
+  const fetchLiveChatData = async () => {
+    try {
+      const { data: dbMsgs, error } = await supabase
+        .from("chat_messages")
+        .select("*")
+        .order("created_at", { ascending: true });
+
+      if (error) {
+        console.warn("chat_messages fetch notice:", error);
+        setIsLoading(false);
+        return;
+      }
+
+      const rawMsgs = dbMsgs || [];
+      setAllMessages(rawMsgs);
+
+      // Group by user_phone
+      const groupedContacts: Record<string, { phone: string; name: string; lastMsg: string; lastTime: string; unread: number; rawTime: number } > = {};
+
+      for (const m of rawMsgs) {
+        const rawP = m.user_phone || "unknown";
+        const p = normalizePhone(rawP) || rawP;
+        const name = m.user_name && m.user_name !== "User" ? m.user_name : (rawP || p);
+        const msgTime = new Date(m.created_at);
+        const timeStr = msgTime.toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" });
+
+        if (!groupedContacts[p]) {
+          groupedContacts[p] = {
+            phone: p,
+            name: name,
+            lastMsg: m.message || "",
+            lastTime: timeStr,
+            unread: m.sender_type === "user" && !m.is_read ? 1 : 0,
+            rawTime: msgTime.getTime()
+          };
+        } else {
+          groupedContacts[p].lastMsg = m.message || "";
+          groupedContacts[p].lastTime = timeStr;
+          groupedContacts[p].rawTime = msgTime.getTime();
+          if (m.user_name && m.user_name !== "User") groupedContacts[p].name = m.user_name;
+          if (m.sender_type === "user" && !m.is_read) groupedContacts[p].unread += 1;
+        }
+      }
+
+      // Convert to array sorted by latest activity
+      const contactList: Contact[] = Object.values(groupedContacts)
+        .sort((a, b) => b.rawTime - a.rawTime)
+        .map(c => ({
+          id: c.phone,
+          name: c.name,
+          phone: c.phone,
+          lastMessage: c.lastMsg,
+          lastTime: c.lastTime,
+          unreadCount: c.unread,
+          isOnline: true,
+          labels: ["Live Webhook"]
+        }));
+
+      setContacts(contactList);
+
+      // Keep selected contact synced if open
+      if (selectedContact) {
+        const updatedSel = contactList.find(c => c.id === selectedContact.id);
+        if (updatedSel) setSelectedContact(updatedSel);
+      }
+    } catch (e) {
+      console.error("Error loading chat data:", e);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  // 2. Initial load + Supabase Realtime Subscription for incoming webhooks
+  useEffect(() => {
+    fetchLiveChatData();
+    fetchLiveTemplates();
+
+    // Subscribe to new incoming messages inserted by webhook or system
+    const channel = supabase
+      .channel("realtime-whatsapp-chats")
+      .on("postgres_changes", { event: "INSERT", schema: "public", table: "chat_messages" }, (payload) => {
+        console.log("⚡ Realtime new chat message received:", payload.new);
+        fetchLiveChatData();
+      })
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, []);
+
+  // 3. Fetch Meta WABA Approved Templates
+  const fetchLiveTemplates = async () => {
+    try {
+      const { data: settings } = await supabase
+        .from("session_settings")
+        .select("wa_api_token, wa_waba_id")
+        .maybeSingle();
+
+      const waToken = (settings?.wa_api_token || localStorage.getItem("wa_api_token") || "").trim();
+      const wabaId = (settings?.wa_waba_id || localStorage.getItem("wa_waba_id") || "1564657775051850").trim();
+
+      if (waToken && wabaId) {
+        const url = `https://graph.facebook.com/v20.0/${wabaId}/message_templates?fields=name,status,category,language,components&limit=50&access_token=${waToken}`;
+        const res = await fetch(url);
+        const json = await res.json();
+
+        if (res.ok && json.data) {
+          const tpls: Template[] = json.data.map((t: any) => {
+            const bodyComp = t.components?.find((c: any) => c.type === "BODY");
+            return {
+              id: t.id || t.name,
+              name: t.name,
+              category: t.category || "UTILITY",
+              status: t.status || "APPROVED",
+              body: bodyComp?.text || "",
+              language: t.language || "en"
+            };
+          });
+          setTemplates(tpls);
+        }
+      }
+    } catch (e) {
+      console.warn("Templates load notice:", e);
+    }
+  };
+
+  // 4. Auto Scroll to Bottom on Message Update
   useEffect(() => {
     chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [selectedContact, messages]);
+  }, [selectedContact, allMessages]);
 
+  // Filtered contacts based on search query and filter chips
   const filteredContacts = contacts.filter(c => {
     const matchesSearch = c.name.toLowerCase().includes(searchQuery.toLowerCase()) || c.phone.includes(searchQuery);
     if (activeFilter === "unread") return matchesSearch && c.unreadCount > 0;
-    if (activeFilter === "active") return matchesSearch && c.labels.includes("Active");
+    if (activeFilter === "active") return matchesSearch && c.labels.includes("Live Webhook");
     return matchesSearch;
   });
 
-  const handleSendMessage = () => {
-    if (!messageInput.trim() || !selectedContact) return;
-    const newMsg: Message = {
-      id: `msg-${Date.now()}`,
-      text: messageInput,
-      sender: "admin",
-      timestamp: new Date().toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" }),
-      status: "sent",
-      type: "text",
-    };
-    setMessages(prev => ({
-      ...prev,
-      [selectedContact.id]: [...(prev[selectedContact.id] || []), newMsg],
-    }));
-    setContacts(prev => prev.map(c => c.id === selectedContact.id ? { ...c, lastMessage: messageInput, lastTime: "Just now" } : c));
-    setMessageInput("");
-    inputRef.current?.focus();
-    // Simulate delivery after 1s
-    setTimeout(() => {
-      setMessages(prev => ({
-        ...prev,
-        [selectedContact.id]: (prev[selectedContact.id] || []).map(m => m.id === newMsg.id ? { ...m, status: "delivered" } : m),
-      }));
-    }, 1000);
+  // Current contact's messages from allMessages
+  const currentChatMessages: Message[] = selectedContact 
+    ? allMessages
+        .filter(m => normalizePhone(m.user_phone) === normalizePhone(selectedContact.phone))
+        .map(m => ({
+          id: m.id,
+          text: m.message || "",
+          sender: m.sender_type === "user" ? "user" : m.sender_type === "bot" ? "bot" : "admin",
+          timestamp: new Date(m.created_at).toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" }),
+          rawDate: new Date(m.created_at),
+          status: "read",
+          type: m.message?.includes("Template") ? "template" : "text"
+        }))
+    : [];
+
+  // Mark conversation as read when clicked
+  const handleSelectContact = async (contact: Contact) => {
+    setSelectedContact(contact);
+    setContacts(prev => prev.map(c => c.id === contact.id ? { ...c, unreadCount: 0 } : c));
+    try {
+      await supabase
+        .from("chat_messages")
+        .update({ is_read: true })
+        .eq("user_phone", contact.phone)
+        .eq("sender_type", "user");
+    } catch (_) {}
   };
 
-  const handleSendTemplate = (template: Template) => {
-    if (!selectedContact) return;
-    const newMsg: Message = {
-      id: `msg-${Date.now()}`,
-      text: template.body.replace("{{1}}", selectedContact.name).replace("{{2}}", "https://yoga.snehyoga.com"),
-      sender: "admin",
-      timestamp: new Date().toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" }),
-      status: "sent",
-      type: "template",
-      templateName: template.name,
-    };
-    setMessages(prev => ({
-      ...prev,
-      [selectedContact.id]: [...(prev[selectedContact.id] || []), newMsg],
-    }));
-    setShowTemplates(false);
+  // 5. Send LIVE WhatsApp Text Message via Meta API
+  const handleSendMessage = async () => {
+    if (!messageInput.trim() || !selectedContact || isSending) return;
+
+    const text = messageInput.trim();
+    setMessageInput("");
+    setIsSending(true);
+
+    try {
+      // Load WhatsApp API credentials from session_settings or localStorage
+      const { data: settings } = await supabase
+        .from("session_settings")
+        .select("wa_api_token, wa_phone_number_id")
+        .maybeSingle();
+
+      const waToken = (
+        settings?.wa_api_token || 
+        localStorage.getItem("wa_api_token") || 
+        "EAAX2HQ7QpvUBSZAK3krfGE7pLN8pW3WoUZCSJZCJsZB4oallIQNagAXwCqENBRZBO3kOGbABFyeI0IqrkZAsuA5lft4kVWrtuoy9MylP9RDz2BV5uEFLjNFBNuU9CJqzFMEMYLZBTn8ZCswZCE8CubZCg0KliOITU9t43FlGZA6HBSyS819nxhAdvTZBOl8IhT5tbV2LHQZDZD"
+      ).trim();
+
+      const phoneNumberId = (settings?.wa_phone_number_id || "808910018982018").trim();
+
+      // Format recipient phone number (remove + sign, prepend 91 for 10-digit indian numbers)
+      let cleanPhone = selectedContact.phone.replace(/\D/g, "");
+      if (cleanPhone.length === 10) cleanPhone = "91" + cleanPhone;
+
+      // Call Meta WhatsApp Cloud API directly
+      const url = `https://graph.facebook.com/v20.0/${phoneNumberId}/messages`;
+      const res = await fetch(url, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${waToken}`
+        },
+        body: JSON.stringify({
+          messaging_product: "whatsapp",
+          to: cleanPhone,
+          type: "text",
+          text: { body: text }
+        })
+      });
+
+      const json = await res.json();
+
+      if (!res.ok || json.error) {
+        throw new Error(json.error?.message || `Failed to send WhatsApp message`);
+      }
+
+      // Store outgoing message in chat_messages table
+      await supabase.from("chat_messages").insert({
+        user_phone: selectedContact.phone,
+        user_name: selectedContact.name,
+        message: text,
+        sender_type: "admin",
+        is_read: true,
+        created_at: new Date().toISOString()
+      });
+
+      toast({ title: "Sent Live ✅", description: `Message delivered to ${selectedContact.name}` });
+      fetchLiveChatData();
+    } catch (err: any) {
+      console.error("Live send error:", err);
+      toast({ title: "Send Error", description: err.message, variant: "destructive" });
+    } finally {
+      setIsSending(false);
+      inputRef.current?.focus();
+    }
+  };
+
+  // 6. Send LIVE WhatsApp Template Message
+  const handleSendTemplate = async (template: Template) => {
+    if (!selectedContact || isSending) return;
+    setIsSending(true);
+
+    try {
+      const { data: settings } = await supabase
+        .from("session_settings")
+        .select("wa_api_token, wa_phone_number_id")
+        .maybeSingle();
+
+      const waToken = (settings?.wa_api_token || localStorage.getItem("wa_api_token") || "").trim();
+      const phoneNumberId = (settings?.wa_phone_number_id || "808910018982018").trim();
+
+      let cleanPhone = selectedContact.phone.replace(/\D/g, "");
+      if (cleanPhone.length === 10) cleanPhone = "91" + cleanPhone;
+
+      const url = `https://graph.facebook.com/v20.0/${phoneNumberId}/messages`;
+      const res = await fetch(url, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${waToken}`
+        },
+        body: JSON.stringify({
+          messaging_product: "whatsapp",
+          to: cleanPhone,
+          type: "template",
+          template: {
+            name: template.name,
+            language: { code: template.language || "en" }
+          }
+        })
+      });
+
+      const json = await res.json();
+      if (!res.ok || json.error) throw new Error(json.error?.message || "Failed to send template");
+
+      const tplPreview = `[Template: ${template.name}]\n${template.body}`;
+      await supabase.from("chat_messages").insert({
+        user_phone: selectedContact.phone,
+        user_name: selectedContact.name,
+        message: tplPreview,
+        sender_type: "admin",
+        is_read: true,
+        created_at: new Date().toISOString()
+      });
+
+      toast({ title: "Template Sent Live! ⚡", description: `Delivered template "${template.name}"` });
+      setShowTemplates(false);
+      fetchLiveChatData();
+    } catch (err: any) {
+      toast({ title: "Template Error", description: err.message, variant: "destructive" });
+    } finally {
+      setIsSending(false);
+    }
   };
 
   // ── Render ──
@@ -168,13 +385,24 @@ export function WhatsAppChat() {
         {/* Header */}
         <div className="px-4 py-3 bg-[#f0f2f5] border-b border-gray-200">
           <div className="flex items-center justify-between mb-3">
-            <h2 className="text-xl font-bold text-[#111b21]">Chats</h2>
+            <div className="flex items-center gap-2">
+              <h2 className="text-xl font-bold text-[#111b21]">Chats</h2>
+              <span className="bg-[#25d366] text-white text-[10px] font-bold px-2 py-0.5 rounded-full uppercase tracking-wider flex items-center gap-1">
+                <span className="w-1.5 h-1.5 bg-white rounded-full animate-ping" /> LIVE
+              </span>
+            </div>
             <div className="flex items-center gap-1">
-              <button className="p-2 hover:bg-gray-200 rounded-full transition-colors"><Plus size={20} className="text-[#54656f]" /></button>
-              <button className="p-2 hover:bg-gray-200 rounded-full transition-colors"><Filter size={20} className="text-[#54656f]" /></button>
-              <button className="p-2 hover:bg-gray-200 rounded-full transition-colors"><MoreVertical size={20} className="text-[#54656f]" /></button>
+              <button 
+                onClick={fetchLiveChatData} 
+                className="p-2 hover:bg-gray-200 rounded-full transition-colors"
+                title="Refresh Live Chats"
+              >
+                <RefreshCw size={18} className={`text-[#54656f] ${isLoading ? "animate-spin" : ""}`} />
+              </button>
+              <button className="p-2 hover:bg-gray-200 rounded-full transition-colors"><MoreVertical size={18} className="text-[#54656f]" /></button>
             </div>
           </div>
+
           {/* Search */}
           <div className="relative">
             <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-[#54656f]" />
@@ -186,12 +414,13 @@ export function WhatsAppChat() {
               className="w-full pl-10 pr-4 py-2 bg-white rounded-lg text-sm border-0 outline-none focus:ring-1 focus:ring-[#00a884] placeholder:text-[#667781]"
             />
           </div>
+
           {/* Filter chips */}
           <div className="flex gap-2 mt-3 overflow-x-auto pb-1">
             {[
               { key: "all", label: "All" },
               { key: "unread", label: "Unread" },
-              { key: "active", label: "Active" },
+              { key: "active", label: "Live Webhooks" },
             ].map(f => (
               <button
                 key={f.key}
@@ -210,20 +439,23 @@ export function WhatsAppChat() {
 
         {/* Contact List */}
         <div className="flex-1 overflow-y-auto">
-          {filteredContacts.length === 0 ? (
-            <div className="flex flex-col items-center justify-center h-full text-gray-400 px-8">
+          {isLoading ? (
+            <div className="flex items-center justify-center h-48 text-gray-400 gap-2">
+              <Loader2 size={20} className="animate-spin text-[#00a884]" />
+              <span className="text-xs">Loading live Webhook chats...</span>
+            </div>
+          ) : filteredContacts.length === 0 ? (
+            <div className="flex flex-col items-center justify-center h-full text-gray-400 px-8 py-12">
               <MessageCircle size={48} strokeWidth={1} />
-              <p className="mt-3 text-sm text-center">No conversations found</p>
+              <p className="mt-3 text-sm text-center font-medium">No live Webhook chats yet</p>
+              <p className="text-xs text-gray-400 text-center mt-1">When users send a message or tap a WhatsApp button, their conversation will appear here live!</p>
             </div>
           ) : (
             filteredContacts.map(contact => (
               <motion.div
                 key={contact.id}
                 whileHover={{ backgroundColor: "#f0f2f5" }}
-                onClick={() => {
-                  setSelectedContact(contact);
-                  setContacts(prev => prev.map(c => c.id === contact.id ? { ...c, unreadCount: 0 } : c));
-                }}
+                onClick={() => handleSelectContact(contact)}
                 className={`flex items-center gap-3 px-4 py-3 cursor-pointer border-b border-gray-100 transition-colors ${
                   selectedContact?.id === contact.id ? "bg-[#f0f2f5]" : ""
                 }`}
@@ -232,7 +464,7 @@ export function WhatsAppChat() {
                 <div className="flex-1 min-w-0">
                   <div className="flex justify-between items-baseline">
                     <h3 className="font-semibold text-[#111b21] text-[15px] truncate">{contact.name}</h3>
-                    <span className={`text-xs shrink-0 ml-2 ${contact.unreadCount > 0 ? "text-[#00a884] font-medium" : "text-[#667781]"}`}>{contact.lastTime}</span>
+                    <span className={`text-xs shrink-0 ml-2 ${contact.unreadCount > 0 ? "text-[#00a884] font-bold" : "text-[#667781]"}`}>{contact.lastTime}</span>
                   </div>
                   <div className="flex items-center gap-1 mt-0.5">
                     <p className="text-sm text-[#667781] truncate flex-1">{contact.lastMessage}</p>
@@ -240,17 +472,11 @@ export function WhatsAppChat() {
                       <span className="shrink-0 bg-[#25d366] text-white text-xs font-bold min-w-[20px] h-5 flex items-center justify-center rounded-full px-1.5">{contact.unreadCount}</span>
                     )}
                   </div>
-                  {contact.labels.length > 0 && (
-                    <div className="flex gap-1 mt-1">
-                      {contact.labels.map(l => (
-                        <span key={l} className={`text-[10px] px-1.5 py-0.5 rounded font-medium ${
-                          l === "Premium" ? "bg-amber-100 text-amber-700" :
-                          l === "Expiring" ? "bg-red-100 text-red-600" :
-                          "bg-green-100 text-green-700"
-                        }`}>{l}</span>
-                      ))}
-                    </div>
-                  )}
+                  <div className="flex gap-1 mt-1">
+                    <span className="text-[10px] px-1.5 py-0.5 rounded font-medium bg-green-100 text-green-700 flex items-center gap-1">
+                      ⚡ Live Webhook
+                    </span>
+                  </div>
                 </div>
               </motion.div>
             ))
@@ -267,39 +493,48 @@ export function WhatsAppChat() {
             <Avatar name={selectedContact.name} isOnline={selectedContact.isOnline} />
             <div className="flex-1 min-w-0">
               <h3 className="font-semibold text-[#111b21] text-base">{selectedContact.name}</h3>
-              <p className="text-xs text-[#667781]">{selectedContact.isOnline ? "online" : `+${selectedContact.phone}`}</p>
+              <p className="text-xs text-[#667781] flex items-center gap-1">
+                <span className="w-2 h-2 rounded-full bg-green-500 inline-block" /> +{selectedContact.phone}
+              </p>
             </div>
             <div className="flex items-center gap-1">
-              <button className="p-2 hover:bg-gray-200 rounded-full transition-colors"><Phone size={20} className="text-[#54656f]" /></button>
-              <button className="p-2 hover:bg-gray-200 rounded-full transition-colors"><Video size={20} className="text-[#54656f]" /></button>
-              <button className="p-2 hover:bg-gray-200 rounded-full transition-colors"><MoreVertical size={20} className="text-[#54656f]" /></button>
+              <button onClick={fetchLiveChatData} className="p-2 hover:bg-gray-200 rounded-full transition-colors" title="Sync Latest Messages">
+                <RefreshCw size={18} className="text-[#54656f]" />
+              </button>
             </div>
           </div>
 
           {/* Messages Area */}
-          <div className="flex-1 overflow-y-auto px-4 md:px-12 py-4 space-y-1" style={{ backgroundImage: "url(\"data:image/svg+xml,%3Csvg width='60' height='60' viewBox='0 0 60 60' xmlns='http://www.w3.org/2000/svg'%3E%3Cg fill='none' fill-rule='evenodd'%3E%3Cg fill='%23d4cfc6' fill-opacity='0.15'%3E%3Cpath d='M36 34v-4h-2v4h-4v2h4v4h2v-4h4v-2h-4zm0-30V0h-2v4h-4v2h4v4h2V6h4V4h-4zM6 34v-4H4v4H0v2h4v4h2v-4h4v-2H6zM6 4V0H4v4H0v2h4v4h2V6h4V4H6z'/%3E%3C/g%3E%3C/g%3E%3C/svg%3E\")" }}>
-            {(messages[selectedContact.id] || []).map((msg) => (
+          <div className="flex-1 overflow-y-auto px-4 md:px-12 py-4 space-y-2" style={{ backgroundImage: "url(\"data:image/svg+xml,%3Csvg width='60' height='60' viewBox='0 0 60 60' xmlns='http://www.w3.org/2000/svg'%3E%3Cg fill='none' fill-rule='evenodd'%3E%3Cg fill='%23d4cfc6' fill-opacity='0.15'%3E%3Cpath d='M36 34v-4h-2v4h-4v2h4v4h2v-4h4v-2h-4zm0-30V0h-2v4h-4v2h4v4h2V6h4V4h-4zM6 34v-4H4v4H0v2h4v4h2v-4h4v-2H6zM6 4V0H4v4H0v2h4v4h2V6h4V4H6z'/%3E%3C/g%3E%3C/g%3E%3C/svg%3E\")" }}>
+            {currentChatMessages.map((msg) => (
               <motion.div
                 key={msg.id}
                 initial={{ opacity: 0, y: 8, scale: 0.95 }}
                 animate={{ opacity: 1, y: 0, scale: 1 }}
-                className={`flex ${msg.sender === "admin" ? "justify-end" : "justify-start"}`}
+                className={`flex ${msg.sender === "admin" || msg.sender === "bot" ? "justify-end" : "justify-start"}`}
               >
-                <div className={`relative max-w-[75%] md:max-w-[65%] px-3 py-1.5 rounded-lg shadow-sm ${
+                <div className={`relative max-w-[75%] md:max-w-[65%] px-3 py-2 rounded-lg shadow-sm ${
                   msg.sender === "admin"
-                    ? "bg-[#d9fdd3] rounded-tr-none"
-                    : "bg-white rounded-tl-none"
+                    ? "bg-[#d9fdd3] rounded-tr-none border border-emerald-200"
+                    : msg.sender === "bot"
+                    ? "bg-emerald-50 rounded-tr-none border border-emerald-300 text-emerald-950"
+                    : "bg-white rounded-tl-none border border-gray-100"
                 }`}>
+                  {msg.sender === "bot" && (
+                    <div className="flex items-center gap-1 mb-1 pb-1 border-b border-emerald-200/60 text-[10px] font-bold text-emerald-700 uppercase">
+                      <Sparkles size={11} className="text-emerald-600" /> Bot Auto-Reply
+                    </div>
+                  )}
                   {msg.type === "template" && (
                     <div className="flex items-center gap-1.5 mb-1 pb-1 border-b border-gray-200/60">
                       <Zap size={12} className="text-amber-500" />
-                      <span className="text-[10px] font-medium text-amber-600 uppercase tracking-wider">Template • {msg.templateName}</span>
+                      <span className="text-[10px] font-medium text-amber-600 uppercase tracking-wider">Template Sent</span>
                     </div>
                   )}
                   <p className="text-[14.2px] text-[#111b21] whitespace-pre-wrap leading-[19px]">{msg.text}</p>
-                  <div className={`flex items-center gap-1 justify-end mt-0.5 ${msg.sender === "admin" ? "" : ""}`}>
-                    <span className="text-[11px] text-[#667781]">{msg.timestamp}</span>
-                    {msg.sender === "admin" && <StatusIcon status={msg.status} />}
+                  <div className="flex items-center gap-1 justify-end mt-1">
+                    <span className="text-[10px] text-[#667781]">{msg.timestamp}</span>
+                    {(msg.sender === "admin" || msg.sender === "bot") && <StatusIcon status={msg.status} />}
                   </div>
                 </div>
               </motion.div>
@@ -319,31 +554,34 @@ export function WhatsAppChat() {
                 <div className="p-3 max-h-[250px] overflow-y-auto">
                   <div className="flex items-center justify-between mb-2">
                     <h4 className="font-semibold text-sm text-gray-800 flex items-center gap-1.5">
-                      <Sparkles size={14} className="text-amber-500" /> Templates
+                      <Sparkles size={14} className="text-amber-500" /> Live Meta Templates
                     </h4>
                     <button onClick={() => setShowTemplates(false)} className="p-1 hover:bg-gray-100 rounded-full"><X size={16} /></button>
                   </div>
-                  <div className="grid gap-2">
-                    {DEMO_TEMPLATES.map(t => (
-                      <button
-                        key={t.id}
-                        onClick={() => handleSendTemplate(t)}
-                        className="text-left p-3 rounded-lg border border-gray-100 hover:border-[#25d366] hover:bg-green-50/40 transition-all group"
-                      >
-                        <div className="flex items-center justify-between mb-1">
-                          <span className="font-medium text-sm text-[#111b21]">{t.name}</span>
-                          <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-medium ${
-                            t.status === "APPROVED" ? "bg-green-100 text-green-700" : "bg-amber-100 text-amber-700"
-                          }`}>{t.status}</span>
-                        </div>
-                        <p className="text-xs text-[#667781] line-clamp-2">{t.body}</p>
-                        <div className="flex items-center gap-2 mt-1.5">
-                          <span className="text-[10px] bg-gray-100 px-1.5 py-0.5 rounded text-gray-500">{t.category}</span>
-                          <span className="text-[10px] text-gray-400">{t.language}</span>
-                        </div>
-                      </button>
-                    ))}
-                  </div>
+                  {templates.length === 0 ? (
+                    <p className="text-xs text-gray-400 py-4 text-center">No Meta WABA templates fetched yet. Save credentials in CRM settings.</p>
+                  ) : (
+                    <div className="grid gap-2">
+                      {templates.map(t => (
+                        <button
+                          key={t.id || t.name}
+                          onClick={() => handleSendTemplate(t)}
+                          disabled={isSending}
+                          className="text-left p-3 rounded-lg border border-gray-100 hover:border-[#25d366] hover:bg-green-50/40 transition-all group"
+                        >
+                          <div className="flex items-center justify-between mb-1">
+                            <span className="font-medium text-sm text-[#111b21]">{t.name}</span>
+                            <span className="text-[10px] px-1.5 py-0.5 rounded-full font-medium bg-green-100 text-green-700">{t.status}</span>
+                          </div>
+                          <p className="text-xs text-[#667781] line-clamp-2">{t.body}</p>
+                          <div className="flex items-center gap-2 mt-1.5">
+                            <span className="text-[10px] bg-gray-100 px-1.5 py-0.5 rounded text-gray-500">{t.category}</span>
+                            <span className="text-[10px] text-gray-400">Lang: {t.language}</span>
+                          </div>
+                        </button>
+                      ))}
+                    </div>
+                  )}
                 </div>
               </motion.div>
             )}
@@ -351,28 +589,34 @@ export function WhatsAppChat() {
 
           {/* Input Bar */}
           <div className="flex items-center gap-2 px-3 py-2 bg-[#f0f2f5] border-t border-gray-200 shrink-0">
-            <button onClick={() => setShowTemplates(!showTemplates)} className={`p-2 rounded-full transition-colors ${showTemplates ? "bg-[#00a884] text-white" : "hover:bg-gray-200 text-[#54656f]"}`}>
+            <button 
+              onClick={() => setShowTemplates(!showTemplates)} 
+              className={`p-2 rounded-full transition-colors ${showTemplates ? "bg-[#00a884] text-white" : "hover:bg-gray-200 text-[#54656f]"}`}
+              title="Send Template Message"
+            >
               <Zap size={22} />
             </button>
-            <button className="p-2 hover:bg-gray-200 rounded-full transition-colors text-[#54656f]"><Paperclip size={22} /></button>
             <div className="flex-1 relative">
               <input
                 ref={inputRef}
                 type="text"
-                placeholder='Type "/" for canned messages'
+                placeholder={`Type a live WhatsApp reply to ${selectedContact.name}...`}
                 value={messageInput}
                 onChange={e => setMessageInput(e.target.value)}
                 onKeyDown={e => e.key === "Enter" && handleSendMessage()}
                 className="w-full px-4 py-2.5 bg-white rounded-lg text-sm border-0 outline-none focus:ring-1 focus:ring-[#00a884] placeholder:text-[#667781]"
               />
             </div>
-            <button className="p-2 hover:bg-gray-200 rounded-full transition-colors text-[#54656f]"><Smile size={22} /></button>
             <button
               onClick={handleSendMessage}
-              disabled={!messageInput.trim()}
-              className={`p-2.5 rounded-full transition-all ${messageInput.trim() ? "bg-[#00a884] text-white hover:bg-[#008f72] shadow-md" : "bg-gray-200 text-gray-400"}`}
+              disabled={!messageInput.trim() || isSending}
+              className={`p-2.5 rounded-full transition-all ${
+                messageInput.trim() && !isSending 
+                  ? "bg-[#00a884] text-white hover:bg-[#008f72] shadow-md" 
+                  : "bg-gray-200 text-gray-400"
+              }`}
             >
-              <Send size={20} />
+              {isSending ? <Loader2 size={20} className="animate-spin" /> : <Send size={20} />}
             </button>
           </div>
         </div>
@@ -386,14 +630,14 @@ export function WhatsAppChat() {
                 <MessageCircle size={64} className="text-[#25d366]" strokeWidth={1} />
               </div>
             </div>
-            <h2 className="text-3xl font-light text-[#41525d] mb-3">Snehayoga WhatsApp</h2>
+            <h2 className="text-3xl font-light text-[#41525d] mb-3">Sneha Yoga Live Webhook Chats</h2>
             <p className="text-sm text-[#667781] leading-relaxed">
-              Send and receive messages directly from Meta WhatsApp Business API. 
-              Select a conversation to start messaging.
+              Real-time synchronization with Meta WhatsApp Cloud API. 
+              Select a conversation to reply live to customers.
             </p>
             <div className="mt-8 flex items-center justify-center gap-2 text-xs text-[#8696a0]">
               <span className="inline-flex items-center gap-1 px-3 py-1.5 bg-white rounded-full shadow-sm">
-                <Zap size={12} className="text-[#00a884]" /> Meta Business API Connected
+                <Zap size={12} className="text-[#00a884]" /> Realtime Sync Active
               </span>
             </div>
           </div>

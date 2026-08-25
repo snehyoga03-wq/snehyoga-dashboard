@@ -306,11 +306,11 @@ const CRM = () => {
   const [templateStatus, setTemplateStatus] = useState("");
   const [templateBody, setTemplateBody] = useState("");
   const [templateVariables, setTemplateVariables] = useState("");
-  const [pabblyToken, setPabblyToken] = useState("");
+  const [pabblyToken, setPabblyToken] = useState(() => localStorage.getItem("wa_api_token") || localStorage.getItem("pabbly_token") || "");
   const [waPhoneNumberId, setWaPhoneNumberId] = useState("808910018982018");
   const [waWabaId, setWaWabaId] = useState(() => localStorage.getItem("wa_waba_id") || "1564657775051850");
   const [waLanguageCode, setWaLanguageCode] = useState("en");
-  const [fetchedTemplates, setFetchedTemplates] = useState<{ id: string, name: string, category: string, status: string, body: string }[]>([]);
+  const [fetchedTemplates, setFetchedTemplates] = useState<{ id: string, name: string, category: string, status: string, language?: string, body: string }[]>([]);
   const [isFetchingTemplates, setIsFetchingTemplates] = useState(false);
   const [metaBalanceInfo, setMetaBalanceInfo] = useState<any>(null);
   const [isFetchingBalance, setIsFetchingBalance] = useState(false);
@@ -864,12 +864,24 @@ const CRM = () => {
 
   const fetchSessionLink = async () => {
     try {
-      const { data, error } = await supabase
+      let data: any = null;
+      let { data: sData, error: sError } = await supabase
         .from('session_settings')
         .select('session_link, premium_session_link, pabbly_reminder_url, wa_api_token, wa_phone_number_id, wa_language_code, wa_waba_id')
         .maybeSingle();
 
-      if (error) { console.error('Error fetching session settings:', error); return; }
+      if (sError && sError.message?.includes('wa_waba_id')) {
+        const { data: fallbackData, error: fallbackError } = await supabase
+          .from('session_settings')
+          .select('session_link, premium_session_link, pabbly_reminder_url, wa_api_token, wa_phone_number_id, wa_language_code')
+          .maybeSingle();
+        if (!fallbackError) data = fallbackData;
+      } else if (!sError) {
+        data = sData;
+      } else {
+        console.error('Error fetching session settings:', sError);
+        return;
+      }
 
       if (data) {
         let parsedLinks: any = {};
@@ -883,7 +895,13 @@ const CRM = () => {
         setPremiumSessionLink(data.premium_session_link || "");
         setNewPremiumLink(data.premium_session_link || "");
         setPabblyUrl(data.pabbly_reminder_url || "");
-        setPabblyToken(data.wa_api_token || "");
+        if (data.wa_api_token) {
+          setPabblyToken(data.wa_api_token);
+          localStorage.setItem("wa_api_token", data.wa_api_token);
+        } else {
+          const cachedToken = localStorage.getItem("wa_api_token") || localStorage.getItem("pabbly_token");
+          if (cachedToken) setPabblyToken(cachedToken);
+        }
         setWaPhoneNumberId(data.wa_phone_number_id || "808910018982018");
         if (data.wa_waba_id) {
           setWaWabaId(data.wa_waba_id);
@@ -2165,7 +2183,10 @@ const CRM = () => {
                           type="password"
                           placeholder="EAAUtx..."
                           value={pabblyToken}
-                          onChange={(e) => setPabblyToken(e.target.value)}
+                          onChange={(e) => {
+                            setPabblyToken(e.target.value);
+                            localStorage.setItem("wa_api_token", e.target.value);
+                          }}
                         />
                       </div>
                     </div>
@@ -2215,12 +2236,35 @@ const CRM = () => {
                           updated_at: new Date().toISOString()
                         };
 
+                        let err: any = null;
                         if (settings?.id) {
-                          const { error: err } = await supabase.from('session_settings').update(updates).eq('id', settings.id);
-                          if (err) throw err;
+                          const res = await supabase.from('session_settings').update(updates).eq('id', settings.id);
+                          err = res.error;
                         } else {
-                          const { error: err } = await supabase.from('session_settings').insert(updates);
-                          if (err) throw err;
+                          const res = await supabase.from('session_settings').insert(updates);
+                          err = res.error;
+                        }
+
+                        if (err) {
+                          // If wa_waba_id column is missing in DB schema, retry without wa_waba_id so token & phone ID save successfully!
+                          if (err.message?.includes('wa_waba_id')) {
+                            delete updates.wa_waba_id;
+                            let retryErr;
+                            if (settings?.id) {
+                              const retryRes = await supabase.from('session_settings').update(updates).eq('id', settings.id);
+                              retryErr = retryRes.error;
+                            } else {
+                              const retryRes = await supabase.from('session_settings').insert(updates);
+                              retryErr = retryRes.error;
+                            }
+                            if (retryErr) throw retryErr;
+                            toast({ 
+                              title: "Saved ✅ (Note: Add wa_waba_id column to DB)", 
+                              description: "WhatsApp credentials saved successfully! Please run the SQL migration in Supabase to save WABA ID." 
+                            });
+                            return;
+                          }
+                          throw err;
                         }
                         toast({ title: "Saved ✅", description: "WhatsApp API configuration saved to database successfully!" });
                       } catch (e: any) { 
@@ -2263,7 +2307,14 @@ const CRM = () => {
                               })
                             });
                             const json = await res.json();
-                            if (!res.ok || json.error) throw new Error(json.error?.message || `HTTP ${res.status}`);
+                            if (!res.ok || json.error) {
+                              const errCode = json.error?.code;
+                              let errMsg = json.error?.message || `HTTP ${res.status}`;
+                              if (errCode === 132001 || errMsg.includes("132001")) {
+                                errMsg = `Template "${templateName}" not found in language "${waLanguageCode || 'en'}". Click "Connect & Fetch" below to select an approved template and auto-sync its language code (e.g. en_US, en, hi).`;
+                              }
+                              throw new Error(errMsg);
+                            }
                             toast({ title: "Sent!", description: `Demo message sent to ${testMobile}` });
                           } catch (e: any) {
                             toast({ title: "Failed to send", description: e.message, variant: "destructive" });
@@ -2331,7 +2382,7 @@ const CRM = () => {
                                 throw new Error("The WABA Account ID cannot be the same as your Phone Number ID. Please enter your WhatsApp Business Account ID (WABA ID) from Meta Business Manager.");
                               }
                               localStorage.setItem("wa_waba_id", targetWabaId);
-                              const url = `https://graph.facebook.com/v20.0/${targetWabaId}/message_templates?fields=name,status,category,components&limit=100&access_token=${pabblyToken}`;
+                              const url = `https://graph.facebook.com/v20.0/${targetWabaId}/message_templates?fields=name,status,category,language,components&limit=100&access_token=${pabblyToken}`;
                               const res = await fetch(url);
                               const json = await res.json();
                               if (!res.ok || json.error) {
@@ -2344,6 +2395,7 @@ const CRM = () => {
                                   name: t.name,
                                   category: t.category,
                                   status: t.status,
+                                  language: t.language || "en",
                                   body: bodyComp?.text || "",
                                 };
                               });
@@ -2365,7 +2417,7 @@ const CRM = () => {
                       <div className="space-y-2 pt-2">
                         <label className="text-sm font-medium text-green-700">Select Extracted Template</label>
                         <select
-                          className="flex h-10 w-full rounded-md border border-input bg-green-50 px-3 py-2 text-sm"
+                          className="flex h-10 w-full rounded-md border border-input bg-green-50 px-3 py-2 text-sm font-medium"
                           onChange={(e) => {
                             const t = fetchedTemplates.find(x => x.name === e.target.value);
                             if (t) {
@@ -2374,12 +2426,15 @@ const CRM = () => {
                               setTemplateCategory(t.category);
                               setTemplateStatus(t.status);
                               setTemplateBody(t.body);
-                              toast({ title: "Template Applied", description: `Loaded ${t.name}` });
+                              if (t.language) {
+                                setWaLanguageCode(t.language);
+                              }
+                              toast({ title: "Template Applied ✅", description: `Loaded "${t.name}" (Lang: ${t.language || 'en'})` });
                             }
                           }}
                         >
                           <option value="">-- Choose a template to apply --</option>
-                          {fetchedTemplates.map(t => <option key={t.name} value={t.name}>{t.name}</option>)}
+                          {fetchedTemplates.map(t => <option key={t.id || t.name} value={t.name}>{t.name} ({t.category} - {t.language || 'en'})</option>)}
                         </select>
                       </div>
                     )}

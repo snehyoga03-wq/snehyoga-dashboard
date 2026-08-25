@@ -26,7 +26,8 @@ const MessageNode = ({ id, data, isConnectable }: any) => {
     setSyncMessage(null);
     try {
       // Fetch WhatsApp API credentials directly from Database session_settings table
-      const { data: sessionData, error: dbError } = await supabase
+      let sessionData: any = null;
+      const { data: sData, error: dbError } = await supabase
         .from('session_settings')
         .select('wa_api_token, wa_waba_id, wa_phone_number_id')
         .order('updated_at', { ascending: false })
@@ -34,7 +35,19 @@ const MessageNode = ({ id, data, isConnectable }: any) => {
         .maybeSingle();
 
       if (dbError) {
-        console.warn("DB Session Settings fetch notice:", dbError);
+        if (dbError.message?.includes('wa_waba_id')) {
+          const { data: fallbackData } = await supabase
+            .from('session_settings')
+            .select('wa_api_token, wa_phone_number_id')
+            .order('updated_at', { ascending: false })
+            .limit(1)
+            .maybeSingle();
+          sessionData = fallbackData;
+        } else {
+          console.warn("DB Session Settings fetch notice:", dbError);
+        }
+      } else {
+        sessionData = sData;
       }
 
       const currentToken = (
