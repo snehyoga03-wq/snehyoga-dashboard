@@ -46,7 +46,9 @@ const EXISTING_PLANS = [
   "YMC - 99",
   "YMC - 66000",
   "OFFLINE - 501",
-  "OFFLINE - 199"
+  "OFFLINE - 199",
+  "FTC - 12000",
+  "YTC - 39000"
 ];
 
 const LEAD_STATUSES = [
@@ -1171,7 +1173,13 @@ export function LeadsManagement() {
           // Clean Plan
           let finalPlan = null;
           if (existingPlan) {
-            const match = EXISTING_PLANS.find(p => p.toLowerCase() === String(existingPlan).trim().toLowerCase());
+            const rawPlanStr = String(existingPlan).trim().toLowerCase();
+            const normalizedInputStr = rawPlanStr.replace(/\s*-\s*/g, " ").replace(/\s+/g, " ");
+            const match = EXISTING_PLANS.find(p => {
+              const pLower = p.toLowerCase();
+              const pNorm = pLower.replace(/\s*-\s*/g, " ").replace(/\s+/g, " ");
+              return pLower === rawPlanStr || pNorm === normalizedInputStr;
+            });
             if (match) finalPlan = match;
             else finalPlan = String(existingPlan).trim();
           }
