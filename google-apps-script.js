@@ -1,5 +1,5 @@
 // ==============================================================================
-// SNEHYOGA CRM - Google Sheet Auto Sync Script (1-Minute Automated Scanner)
+// SNEHYOGA CRM - Google Sheet Auto Sync Script (Quota-Optimized Batch Scanner)
 // ==============================================================================
 //
 // INSTRUCTIONS FOR GOOGLE SHEET:
@@ -8,19 +8,18 @@
 //    Client Name | Contact | Email | Amount Paid | Admission Date | End Date | Plan | Status | ASSIGNED TO | lead CRM status
 // 3. Go to Extensions > Apps Script in the Google Sheet menu.
 // 4. Erase any default code, paste THIS complete file, and click Save (Ctrl + S).
-// 5. Select function "setup1MinuteTrigger" from the dropdown and click "Run".
+// 5. Select function "setup5MinuteTrigger" (Recommended) or "setup1MinuteTrigger" from the dropdown and click "Run".
 // 6. Authorize permissions when prompted by Google.
-// 7. Your Google Sheet will automatically scan every 1 minute, add new leads to CRM with ASSIGNED TO staff,
-//    update existing leads if ASSIGNED TO is changed, and update Column J ("lead CRM status") to "Done"!
+// 7. Your Google Sheet will automatically scan and batch sync new leads and staff assignments to CRM!
 // ==============================================================================
 
 var SUPABASE_URL = "https://bzqwaxqzggejpejyxhde.supabase.co";
 var SUPABASE_KEY = "sb_publishable_aWZ6_LgTmBCAj7RHgmoDwg_YB4H1Ts4";
 
 /**
- * Main Sync Function: Scans Google Sheet every minute, checks for duplicates,
- * posts new leads to Supabase CRM (including ASSIGNED TO staff), updates existing lead assignments,
- * and updates "lead CRM status" column to "Done".
+ * Main Sync Function: Scans Google Sheet, checks for duplicates,
+ * posts new leads to Supabase CRM in batches, batch updates existing lead assignments,
+ * and marks "lead CRM status" column to "Done".
  */
 function scanAndSyncLeads() {
   try {
@@ -81,7 +80,7 @@ function scanAndSyncLeads() {
       sheet.getRange(1, 10).setValue("lead CRM status").setFontWeight("bold");
     }
 
-    // 2. Fetch ALL existing leads from Supabase using PAGINATION (bypasses 1,000 row default limit)
+    // 2. Fetch ALL existing leads from Supabase using PAGINATION
     var existingLeads = [];
     var offset = 0;
     var pageSize = 1000;
@@ -141,7 +140,7 @@ function scanAndSyncLeads() {
     }
 
     // Standardize staff names case-insensitively (e.g. "Ragini k" -> "Ragini K")
-    var KNOWN_STAFF = ["Mayuri K", "Ragini K", "Shreya K"];
+    var KNOWN_STAFF = ["Mayuri K", "Ragini K", "Shreya K", "Janhavi V", "Janhavi Vaidya"];
     function formatAssignedTo(val) {
       if (!val) return null;
       var str = String(val).trim();
@@ -196,6 +195,8 @@ function scanAndSyncLeads() {
         if (assignedTo && (existingItem.assigned_to || "").toLowerCase() !== assignedTo.toLowerCase()) {
           existingLeadsToUpdate.push({
             id: existingItem.id,
+            client_name: existingItem.client_name || clientName,
+            contact: existingItem.contact || contact,
             assigned_to: assignedTo
           });
           existingItem.assigned_to = assignedTo; // update in-memory map
@@ -230,24 +231,35 @@ function scanAndSyncLeads() {
       existingMap[comboKey] = newItem;
     }
 
-    // 4. Update existing leads in Supabase if ASSIGNED TO was added/changed in Google Sheet
+    // 4. Batch update existing lead assignments in CHUNKS of 50 (1 request per batch instead of 1 per row!)
     if (existingLeadsToUpdate.length > 0) {
-      Logger.log("[Sync] Updating assigned_to for " + existingLeadsToUpdate.length + " existing lead(s)...");
-      for (var u = 0; u < existingLeadsToUpdate.length; u++) {
-        var updateObj = existingLeadsToUpdate[u];
-        var patchOptions = {
-          method: "patch",
+      Logger.log("[Sync] Batch updating assigned_to for " + existingLeadsToUpdate.length + " existing lead(s)...");
+      var batchSize = 50;
+      for (var u = 0; u < existingLeadsToUpdate.length; u += batchSize) {
+        var chunkUpdate = existingLeadsToUpdate.slice(u, u + batchSize);
+        var payloadDataUpdate = chunkUpdate.map(function(item) {
+          return {
+            id: item.id,
+            client_name: item.client_name,
+            contact: item.contact,
+            assigned_to: item.assigned_to
+          };
+        });
+
+        var upsertOptions = {
+          method: "post",
           headers: {
             "apikey": SUPABASE_KEY,
             "Authorization": "Bearer " + SUPABASE_KEY,
             "Content-Type": "application/json",
-            "Prefer": "return=minimal"
+            "Prefer": "resolution=merge-duplicates,return=minimal"
           },
-          payload: JSON.stringify({ assigned_to: updateObj.assigned_to }),
+          payload: JSON.stringify(payloadDataUpdate),
           muteHttpExceptions: true
         };
-        var patchResponse = UrlFetchApp.fetch(SUPABASE_URL + "/rest/v1/leads?id=eq." + updateObj.id, patchOptions);
-        Logger.log("[Sync Patch] Lead ID " + updateObj.id + " updated to assigned_to=" + updateObj.assigned_to + " (Status: " + patchResponse.getResponseCode() + ")");
+
+        var upsertResponse = UrlFetchApp.fetch(SUPABASE_URL + "/rest/v1/leads", upsertOptions);
+        Logger.log("[Sync Batch Update] Status: " + upsertResponse.getResponseCode());
       }
     }
 
@@ -327,7 +339,21 @@ function parseSheetDate(val) {
 }
 
 /**
- * Run this function ONCE to set up automatic scanning every 1 minute.
+ * Recommended Trigger: Runs automatic scanning every 5 minutes.
+ */
+function setup5MinuteTrigger() {
+  deleteExistingTriggers();
+
+  ScriptApp.newTrigger("scanAndSyncLeads")
+    .timeBased()
+    .everyMinutes(5)
+    .create();
+
+  Logger.log("[Trigger] Successfully set up 5-minute automatic scanner trigger!");
+}
+
+/**
+ * 1-Minute Trigger option.
  */
 function setup1MinuteTrigger() {
   deleteExistingTriggers();
@@ -360,3 +386,4 @@ function testManualSync() {
   scanAndSyncLeads();
   Logger.log("Manual test scan completed.");
 }
+
