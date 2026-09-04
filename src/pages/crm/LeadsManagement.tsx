@@ -376,9 +376,11 @@ export function LeadsManagement() {
     uniqueLeadsById.forEach(lead => {
       const cleanContact = (lead.contact || "").replace(/\D/g, "");
       const last10 = cleanContact.length >= 10 ? cleanContact.slice(-10) : cleanContact;
-      const key = last10 || (lead.client_name || "").trim().toLowerCase();
+      const baseKey = last10 || (lead.client_name || "").trim().toLowerCase();
+      const planKey = (lead.lead_existing_plan || "").trim().toLowerCase();
 
-      if (!key) return;
+      if (!baseKey) return;
+      const key = `${baseKey}|${planKey}`;
       if (!groups[key]) groups[key] = [];
       groups[key].push(lead);
     });
@@ -1214,17 +1216,29 @@ export function LeadsManagement() {
           return;
         }
 
-        // Deduplicate against existing contacts in state
-        const existingContactSet = new Set(
+        // Deduplicate against existing contacts & plans in state
+        const existingComboSet = new Set(
           leads
-            .map(l => (l.contact || "").replace(/\D/g, "").slice(-10))
-            .filter(c => c.length >= 7)
+            .map(l => {
+              const clean = (l.contact || "").replace(/\D/g, "");
+              const last10 = clean.length >= 10 ? clean.slice(-10) : clean;
+              const plan = (l.lead_existing_plan || "").trim().toLowerCase();
+              return last10 ? `${last10}|${plan}` : null;
+            })
+            .filter(Boolean) as string[]
         );
+
+        const seenImportCombos = new Set<string>();
 
         const nonDuplicateLeads = validLeads.filter(l => {
           const clean = (l.contact || "").replace(/\D/g, "");
           const last10 = clean.length >= 10 ? clean.slice(-10) : clean;
-          if (last10 && existingContactSet.has(last10)) return false;
+          const plan = (l.lead_existing_plan || "").trim().toLowerCase();
+          const combo = last10 ? `${last10}|${plan}` : null;
+          if (combo) {
+            if (existingComboSet.has(combo) || seenImportCombos.has(combo)) return false;
+            seenImportCombos.add(combo);
+          }
           return true;
         });
 
