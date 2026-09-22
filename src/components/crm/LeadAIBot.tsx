@@ -178,7 +178,7 @@ export const LeadAIBot: React.FC<LeadAIBotProps> = ({ leads, onApplyAction }) =>
                   <div className="flex items-center gap-1.5">
                     <h3 className="font-bold text-sm leading-tight text-white">Lead AI Assistant</h3>
                     <span className="inline-flex items-center px-1.5 py-0.5 rounded-full text-[9px] font-medium bg-emerald-500/30 text-emerald-200 border border-emerald-400/30">
-                      Gemini 3.6 + Live DB
+                      Gemini AI Online • Live DB
                     </span>
                   </div>
                   <p className="text-[10px] text-gray-200 flex items-center gap-1">
@@ -275,7 +275,7 @@ export const LeadAIBot: React.FC<LeadAIBotProps> = ({ leads, onApplyAction }) =>
                   </div>
 
                   <span className="text-[9px] text-gray-400 mt-1 px-1">
-                    {msg.timestamp} {msg.source === "local" ? "• Direct Supabase" : "• Gemini 3.6 + Live DB"}
+                    {msg.timestamp} {msg.source === "gemini" ? "• ⚡ Gemini Live" : "• 🚀 Instant Local"}
                   </span>
                 </div>
               ))}
