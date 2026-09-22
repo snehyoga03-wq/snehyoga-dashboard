@@ -285,7 +285,7 @@ export const LeadAIBot: React.FC<LeadAIBotProps> = ({ leads, onApplyAction }) =>
                 <div className="flex items-start gap-2">
                   <div className="bg-white border border-gray-200 rounded-2xl rounded-bl-none px-4 py-3 text-xs text-gray-500 shadow-xs flex items-center gap-1.5">
                     <Sparkles className="w-3.5 h-3.5 text-amber-500 animate-spin" />
-                    <span>Analyzing leads dataset...</span>
+                    <span>AI is thinking...</span>
                   </div>
                 </div>
               )}

@@ -175,9 +175,27 @@ export async function executeDirectSupabaseCount(filters: {
 /** Local Intelligent Query Resolver using live database aggregates */
 export async function queryLeadsLocally(userQuery: string, leads: Lead[]): Promise<LeadAiResponse> {
   const q = userQuery.toLowerCase().trim();
+
+  // 0. Instant Greetings & Casual Chat Handler (No delay, no full database dump!)
+  const isGreeting = /^(hi|hello|hey|hola|namaste|good\s*(morning|afternoon|evening)|wassup|what'?s\s*up|who\s*are\s*you|how\s*are\s*you)\b/i.test(q) 
+    || q === "hi" || q === "hello" || q === "hey";
+
+  if (isGreeting) {
+    return {
+      reply: `👋 **Hello! How can I help you today?**\n\nI can answer questions about your leads or filter the table for you:\n- 🏆 *"How many deals were closed?"*\n- 🔍 *"Show me unassigned leads"*\n- 📅 *"What follow-ups are due today?"*\n- 👤 *"Show leads assigned to Shreya / Ragini / Janhavi"*\n- 🧘 *"How many Faceyoga leads do we have?"*\n\nJust ask me anything or click one of the quick chips above!`,
+      source: "local"
+    };
+  }
+
+  // 0.1 Help & Capabilities
+  if (q.includes("help") || q.includes("what can you do") || q.includes("features")) {
+    return {
+      reply: `🤖 **Here is what I can do:**\n\n1. **Lead Counts & Stats**: Ask for live database counts on any program, status, or agent.\n2. **Automated Table Filtering**: Tell me to *"show deal done leads"* and I will filter the table immediately.\n3. **Call Connectivity**: Ask *"What is our call connection rate?"* to see live stats.\n4. **Follow-up Reminders**: Ask *"What are today's follow-ups?"* to track pending leads.`,
+      source: "local"
+    };
+  }
+
   const dbStats = await fetchLiveDatabaseStats();
-  
-  // Use live DB stats if available, otherwise fallback to active leads array length
   const totalCount = dbStats.totalLeads > 0 ? dbStats.totalLeads : leads.length;
   let action: LeadAiAction | undefined;
 
@@ -186,7 +204,7 @@ export async function queryLeadsLocally(userQuery: string, leads: Lead[]): Promi
     action = { assignedToFilter: "unassigned" };
     const unassignedCount = dbStats.assignedCounts["Unassigned"] ?? leads.filter(l => !l.assigned_to).length;
     return {
-      reply: `🔍 **Live Database Query: Unassigned Leads**\n\n- **Total Unassigned in Supabase**: **${unassignedCount}** out of **${totalCount} total leads** across the entire database.\n\nClick the button below to filter the unassigned leads directly in your table.`,
+      reply: `🔍 **Unassigned Leads**\n\nThere are **${unassignedCount} unassigned leads** out of **${totalCount} total leads** across the entire database.\n\nClick below to filter unassigned leads in your table.`,
       action,
       source: "local",
       isDirectDbQuery: true
@@ -197,7 +215,7 @@ export async function queryLeadsLocally(userQuery: string, leads: Lead[]): Promi
   if (q.includes("today") && (q.includes("follow") || q.includes("calling"))) {
     action = { autoDateFilter: dbStats.todayStr, statusFilter: "all" };
     return {
-      reply: `📅 **Live Database Query: Today's Follow-ups**\n\n- **Scheduled for Follow-up Today (${dbStats.todayStr})**: **${dbStats.todayFollowUps} leads**.\n\nTable filter is ready to view today's scheduled follow-ups.`,
+      reply: `📅 **Today's Follow-ups**\n\nYou have **${dbStats.todayFollowUps} leads scheduled for follow-up today** (${dbStats.todayStr}).\n\nClick below to view today's follow-up leads in the table.`,
       action,
       source: "local",
       isDirectDbQuery: true
@@ -208,7 +226,7 @@ export async function queryLeadsLocally(userQuery: string, leads: Lead[]): Promi
   if (q.includes("deal done") || q.includes("conversion") || q.includes("converted") || q.includes("closed")) {
     action = { statusFilter: "Deal Done" };
     return {
-      reply: `🏆 **Live Database Query: Deal Conversions**\n\n- **Total Deals Converted**: **${dbStats.dealDoneCount}**\n- **Database Total Leads**: **${totalCount}**\n- **Overall Conversion Rate**: **${dbStats.conversionRate}**\n\nTable filter updated to display all **Deal Done** leads.`,
+      reply: `🏆 **Deal Conversions**\n\n- **Total Deals Converted**: **${dbStats.dealDoneCount}**\n- **Database Total Leads**: **${totalCount}**\n- **Overall Conversion Rate**: **${dbStats.conversionRate}**\n\nClick below to filter all **Deal Done** leads.`,
       action,
       source: "local",
       isDirectDbQuery: true
@@ -232,7 +250,7 @@ export async function queryLeadsLocally(userQuery: string, leads: Lead[]): Promi
       const liveProgCount = await executeDirectSupabaseCount({ lead_type: prog.name });
       action = { typeFilter: prog.name };
       return {
-        reply: `🧘 **Live Database Query: ${prog.name}**\n\n- **Total Leads for ${prog.name}**: **${liveProgCount}** records found in Supabase.\n\nYou can click below to filter the table for **${prog.name}**.`,
+        reply: `🧘 **${prog.name} Program**\n\nFound **${liveProgCount} leads** registered for **${prog.name}** in the database.\n\nClick below to view them in the table.`,
         action,
         source: "local",
         isDirectDbQuery: true
@@ -243,7 +261,7 @@ export async function queryLeadsLocally(userQuery: string, leads: Lead[]): Promi
   // 5. Call connection stats
   if (q.includes("call") || q.includes("connected") || q.includes("reachable") || q.includes("not connected")) {
     return {
-      reply: `📞 **Live Database Query: Call Connectivity**\n\n- **Connected Calls in Supabase**: **${dbStats.connectedCount}** ✅\n- **Not Connected Calls in Supabase**: **${dbStats.notConnectedCount}** ❌\n- **Database Connection Rate**: **${dbStats.callConnectionRate}**`,
+      reply: `📞 **Call Connectivity Stats**\n\n- **Connected Calls**: **${dbStats.connectedCount}** ✅\n- **Not Connected Calls**: **${dbStats.notConnectedCount}** ❌\n- **Connection Rate**: **${dbStats.callConnectionRate}**`,
       source: "local",
       isDirectDbQuery: true
     };
@@ -261,7 +279,7 @@ export async function queryLeadsLocally(userQuery: string, leads: Lead[]): Promi
       const agentCount = dbStats.assignedCounts[agent.name] ?? 0;
       action = { assignedToFilter: agent.name };
       return {
-        reply: `👤 **Live Database Query: ${agent.name}**\n\n- **Total Leads Assigned**: **${agentCount}**\n- **Share of Database**: **${totalCount > 0 ? ((agentCount / totalCount) * 100).toFixed(1) : 0}%**\n\nTable filter ready to display leads assigned to **${agent.name}**.`,
+        reply: `👤 **${agent.name}'s Leads**\n\n- **Assigned Leads**: **${agentCount}**\n- **Share of Total Leads**: **${totalCount > 0 ? ((agentCount / totalCount) * 100).toFixed(1) : 0}%**\n\nClick below to view leads assigned to **${agent.name}**.`,
         action,
         source: "local",
         isDirectDbQuery: true
@@ -269,7 +287,7 @@ export async function queryLeadsLocally(userQuery: string, leads: Lead[]): Promi
     }
   }
 
-  // 7. General overall summary from Supabase database
+  // 7. General overall summary (Only when user explicitly asks for overview, summary, stats, or unknown question)
   const statusSummaryText = Object.entries(dbStats.statusCounts)
     .map(([status, count]) => `  - **${status}**: ${count}`)
     .join("\n");
@@ -279,7 +297,7 @@ export async function queryLeadsLocally(userQuery: string, leads: Lead[]): Promi
     .join("\n");
 
   return {
-    reply: `📊 **Live Supabase Database Overview**\n\n- **Total Database Records**: **${totalCount} leads**\n- **Closed Deals**: **${dbStats.dealDoneCount}** (${dbStats.conversionRate})\n- **Follow-ups Due Today**: **${dbStats.todayFollowUps}**\n- **Call Connection Rate**: **${dbStats.callConnectionRate}**\n\n**Status Breakdown (Entire Database):**\n${statusSummaryText}\n\n**Agent Distribution (Entire Database):**\n${agentSummaryText}`,
+    reply: `📊 **Lead Management Overview**\n\n- **Total Database Leads**: **${totalCount}**\n- **Closed Deals**: **${dbStats.dealDoneCount}** (${dbStats.conversionRate})\n- **Follow-ups Due Today**: **${dbStats.todayFollowUps}**\n- **Call Connection Rate**: **${dbStats.callConnectionRate}**\n\n**Status Breakdown:**\n${statusSummaryText}\n\n**Team Distribution:**\n${agentSummaryText}`,
     source: "local",
     isDirectDbQuery: true
   };
@@ -287,17 +305,24 @@ export async function queryLeadsLocally(userQuery: string, leads: Lead[]): Promi
 
 /** Ask AI Bot with direct Supabase database analytics & Gemini 3.6 Flash reasoning */
 export async function askLeadAiBot(userQuery: string, leads: Lead[]): Promise<LeadAiResponse> {
-  const apiKey = import.meta.env.VITE_GEMINI_API_KEY || (window as any).VITE_GEMINI_API_KEY;
+  const q = userQuery.toLowerCase().trim();
 
-  // Fetch live database metrics directly from Supabase
-  const dbStats = await fetchLiveDatabaseStats();
+  // Instant greeting check: avoid any network delay for simple hellos!
+  if (/^(hi|hello|hey|hola|namaste|good\s*(morning|afternoon|evening))\b/i.test(q) || q === "hi" || q === "hello" || q === "hey") {
+    return queryLeadsLocally(userQuery, leads);
+  }
+
+  const apiKey = import.meta.env.VITE_GEMINI_API_KEY || (window as any).VITE_GEMINI_API_KEY;
 
   // Fallback to local resolver if no API key is provided
   if (!apiKey || apiKey === "your_api_key_here") {
     return queryLeadsLocally(userQuery, leads);
   }
 
-  const systemInstruction = `You are Snehyoga Lead Assistant, an AI CRM bot embedded in the Lead Management dashboard.
+  // Fetch live database metrics directly from Supabase
+  const dbStats = await fetchLiveDatabaseStats();
+
+  const systemInstruction = `You are Snehyoga Lead Assistant, a friendly and smart AI CRM bot embedded in the Lead Management dashboard.
 Your job is to answer user questions using LIVE SUPABASE DATABASE STATISTICS across the full CRM database.
 
 Full Database Statistics (Queried Directly From Supabase):
@@ -313,12 +338,15 @@ Available UI Filter Options:
 - Lead Types: "all", "SNEHYOGA 365", "FACEYOGA", "MSP - 9 Days", "AMP - 30 Days", "YMC", "NIDRA MASTERY", "CALM YOUR MIND", "1:1 CONSULTATION", "OFFLINE"
 - Assigned Users: "all", "unassigned", "Ragini K", "Shreya K", "Janhavi V"
 
-SECURITY INSTRUCTION:
-Do NOT output database connection strings, API keys, URLs, or access tokens in any response.
+IMPORTANT INSTRUCTIONS:
+1. GREETINGS: If user says "hi" or casual greeting, greet them warmly and suggest 2-3 specific questions they can ask. NEVER dump the full database overview on a greeting.
+2. DIRECT CONCISE ANSWERS: When the user asks a specific question (e.g. "how many deals done?"), answer that question directly and concisely.
+3. OVERVIEW: Only output the full statistics report if the user explicitly asks for "overview", "summary", or "stats".
+4. SECURITY: Do NOT output database connection strings, API keys, URLs, or access tokens in any response.
 
 Always respond with a JSON object in this format (no extra markdown code fences, pure JSON):
 {
-  "reply": "Your clear, markdown formatted response highlighting exact database numbers and metrics",
+  "reply": "Your clear, friendly response formatted with markdown",
   "action": {
     "statusFilter": "optional status filter value",
     "typeFilter": "optional lead type filter value",
@@ -329,15 +357,19 @@ Always respond with a JSON object in this format (no extra markdown code fences,
 }
 If no table filter action is needed, omit the "action" key.`;
 
-  // Try primary model gemini-3.6-flash, fallback to gemini-flash-latest
+  // Try primary model gemini-3.6-flash, fallback to gemini-flash-latest with 4-second timeout
   const modelsToTry = ["gemini-3.6-flash", "gemini-flash-latest"];
 
   for (const model of modelsToTry) {
     try {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 4000);
+
       const response = await fetch(
         `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`,
         {
           method: "POST",
+          signal: controller.signal,
           headers: {
             "Content-Type": "application/json",
             "x-goog-api-key": apiKey
@@ -350,12 +382,14 @@ If no table filter action is needed, omit the "action" key.`;
               }
             ],
             generationConfig: {
-              temperature: 0.2,
+              temperature: 0.3,
               responseMimeType: "application/json"
             }
           })
         }
       );
+
+      clearTimeout(timeoutId);
 
       if (!response.ok) {
         console.warn(`Gemini API request failed for model ${model}, trying next...`);
@@ -368,16 +402,16 @@ If no table filter action is needed, omit the "action" key.`;
 
       const parsed = JSON.parse(rawText.trim());
       return {
-        reply: parsed.reply || "Here is the live database summary.",
+        reply: parsed.reply || "Here is what I found for you.",
         action: parsed.action,
         source: "gemini",
         isDirectDbQuery: true
       };
     } catch (err) {
-      console.error(`Error connecting to Gemini API model ${model}:`, err);
+      console.warn(`Gemini API attempt timed out or failed for ${model}, using fast local resolver.`);
     }
   }
 
-  // Fallback to local database resolver if API fails
+  // Fallback to local database resolver if API times out or fails
   return queryLeadsLocally(userQuery, leads);
 }
