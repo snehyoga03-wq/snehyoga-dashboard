@@ -177,68 +177,130 @@ export async function executeDirectSupabaseCount(filters: {
   return count || 0;
 }
 
-/** Local Intelligent Query Resolver using live database aggregates (Fast Fallback) */
+/** Local Intelligent Query & Intent Resolver */
 export async function queryLeadsLocally(userQuery: string, leads: Lead[]): Promise<LeadAiResponse> {
   const q = userQuery.toLowerCase().trim();
 
-  // 0. Instant Greetings & Casual Chat Handler (0ms delay, no stats dump!)
+  // 1. Instant Greetings & Casual Chat Handler (0ms delay, no unprompted stats!)
   const isGreeting = /^(hi|hello|hey|hola|namaste|good\s*(morning|afternoon|evening)|wassup|what'?s\s*up|who\s*are\s*you|how\s*are\s*you)\b/i.test(q) 
     || q === "hi" || q === "hello" || q === "hey";
 
   if (isGreeting) {
     return {
-      reply: `👋 **Hello! How can I help you today?**\n\nI am connected to your live leads database. You can ask me:\n- 🏆 *"How many deals were closed?"*\n- 🔍 *"Show me unassigned leads"*\n- 📅 *"What follow-ups are due today?"*\n- 👤 *"Show leads assigned to Shreya"* \n- 🧘 *"How many Faceyoga leads do we have?"*\n\nOr click one of the quick chips above to get started!`,
+      reply: `👋 **Hello! How can I help you today?**\n\nI can answer questions about your leads or filter the table directly:\n- 🏆 *"How many deals were closed?"*\n- 🔍 *"Filter unassigned leads"*\n- 📅 *"What follow-ups are due today?"*\n- 👤 *"Show leads for Shreya / Ragini / Janhavi"*\n- 🧘 *"How many Faceyoga leads do we have?"*\n\nJust tell me what you'd like to find or click any quick chip above!`,
       source: "local"
     };
   }
 
-  // 0.1 Help & Capabilities
+  // 2. Help & Capabilities
   if (q.includes("help") || q.includes("what can you do") || q.includes("features")) {
     return {
-      reply: `🤖 **Here is what I can do for you:**\n\n1. **Live Lead Counts**: Ask for counts on any program, agent, or status.\n2. **Dynamic Table Filtering**: Tell me to *"show deal done leads"* to update the table.\n3. **Call Connectivity**: Ask *"What is our call connection rate?"* to see live metrics.\n4. **Follow-up Reminders**: Ask *"What are today's follow-ups?"* to view scheduled calls.`,
+      reply: `🤖 **Here is what I can do:**\n\n1. **Lead Counts**: Ask for live counts on any program, agent, or status.\n2. **Dynamic Table Filtering**: Tell me to *"filter deal done"* or *"filter Shreya"* to update the table immediately.\n3. **Call Connectivity**: Ask *"What is our call connection rate?"* to see live stats.\n4. **Follow-up Reminders**: Ask *"What are today's follow-ups?"* to track pending leads.`,
       source: "local"
     };
   }
 
+  // 3. Filter Actions & Inquiries (e.g. "are you able to add the filter", "can you filter", "filter deal done")
+  if (q.includes("filter") || q.includes("search") || q.includes("show me") || q.includes("display")) {
+    if (q.includes("deal done") || q.includes("conversion") || q.includes("converted") || q.includes("closed")) {
+      return {
+        reply: `✅ **Filtering Deal Done Leads**\n\nI have updated the table to show all **Deal Done** leads.`,
+        action: { statusFilter: "Deal Done" },
+        source: "local",
+        isDirectDbQuery: true
+      };
+    }
+    if (q.includes("unassigned") || q.includes("not assigned")) {
+      return {
+        reply: `✅ **Filtering Unassigned Leads**\n\nI have updated the table to show all **Unassigned** leads.`,
+        action: { assignedToFilter: "unassigned" },
+        source: "local",
+        isDirectDbQuery: true
+      };
+    }
+    if (q.includes("shreya")) {
+      return {
+        reply: `✅ **Filtering Leads for Shreya K**\n\nTable filter applied for **Shreya K**.`,
+        action: { assignedToFilter: "Shreya K" },
+        source: "local",
+        isDirectDbQuery: true
+      };
+    }
+    if (q.includes("ragini")) {
+      return {
+        reply: `✅ **Filtering Leads for Ragini K**\n\nTable filter applied for **Ragini K**.`,
+        action: { assignedToFilter: "Ragini K" },
+        source: "local",
+        isDirectDbQuery: true
+      };
+    }
+    if (q.includes("janhavi")) {
+      return {
+        reply: `✅ **Filtering Leads for Janhavi V**\n\nTable filter applied for **Janhavi V**.`,
+        action: { assignedToFilter: "Janhavi V" },
+        source: "local",
+        isDirectDbQuery: true
+      };
+    }
+    if (q.includes("faceyoga")) {
+      return {
+        reply: `✅ **Filtering Faceyoga Leads**\n\nTable filter applied for **FACEYOGA**.`,
+        action: { typeFilter: "FACEYOGA" },
+        source: "local",
+        isDirectDbQuery: true
+      };
+    }
+    if (q.includes("clear") || q.includes("reset") || q.includes("remove")) {
+      return {
+        reply: `🔄 **Filters Reset**\n\nAll table filters have been cleared.`,
+        action: { statusFilter: "all", typeFilter: "all", assignedToFilter: "all", autoDateFilter: "", searchQuery: "" },
+        source: "local"
+      };
+    }
+
+    // General filter inquiry (e.g. "are you able to add 5the filter", "can you filter")
+    return {
+      reply: `⚡ **Yes! I can filter the table directly for you.**\n\nTell me what you'd like to filter, or click any option:\n- 🎯 *"Filter Deal Done leads"*\n- 🔍 *"Filter Unassigned leads"*\n- 👤 *"Filter leads for Shreya / Ragini / Janhavi"*\n- 📅 *"Filter today's follow-ups"*\n- 🧘 *"Filter Faceyoga leads"*\n- 🔄 *"Reset all filters"*\n\nWhich leads would you like me to show in the table?`,
+      source: "local"
+    };
+  }
+
+  // Fetch live stats for metrics queries
   const dbStats = await fetchLiveDatabaseStats();
   const totalCount = dbStats.totalLeads > 0 ? dbStats.totalLeads : leads.length;
-  let action: LeadAiAction | undefined;
 
-  // 1. Unassigned check
+  // 4. Unassigned count inquiry
   if (q.includes("unassigned") || q.includes("not assigned") || q.includes("free lead")) {
-    action = { assignedToFilter: "unassigned" };
     const unassignedCount = dbStats.assignedCounts["Unassigned"] ?? leads.filter(l => !l.assigned_to).length;
     return {
-      reply: `🔍 **Unassigned Leads**\n\nThere are **${unassignedCount} unassigned leads** out of **${totalCount} total leads** in Supabase.\n\nClick below to filter unassigned leads in your table.`,
-      action,
+      reply: `🔍 **Unassigned Leads**\n\nThere are **${unassignedCount} unassigned leads** out of **${totalCount} total leads** in Supabase.\n\nClick below to view them in the table.`,
+      action: { assignedToFilter: "unassigned" },
       source: "local",
       isDirectDbQuery: true
     };
   }
 
-  // 2. Today follow ups
+  // 5. Today follow ups
   if (q.includes("today") && (q.includes("follow") || q.includes("calling"))) {
-    action = { autoDateFilter: dbStats.todayStr, statusFilter: "all" };
     return {
       reply: `📅 **Today's Follow-ups**\n\nYou have **${dbStats.todayFollowUps} leads scheduled for follow-up today** (${dbStats.todayStr}).\n\nClick below to view them in the table.`,
-      action,
+      action: { autoDateFilter: dbStats.todayStr, statusFilter: "all" },
       source: "local",
       isDirectDbQuery: true
     };
   }
 
-  // 3. Deal Done / Conversion
+  // 6. Deal Done / Conversion count inquiry
   if (q.includes("deal done") || q.includes("conversion") || q.includes("converted") || q.includes("closed")) {
-    action = { statusFilter: "Deal Done" };
     return {
-      reply: `🏆 **Deal Conversions**\n\n- **Total Closed Deals**: **${dbStats.dealDoneCount}**\n- **Database Total Leads**: **${totalCount}**\n- **Overall Conversion Rate**: **${dbStats.conversionRate}**\n\nClick below to filter all **Deal Done** leads.`,
-      action,
+      reply: `🏆 **Deal Conversions**\n\n- **Total Closed Deals**: **${dbStats.dealDoneCount}**\n- **Database Total Leads**: **${totalCount}**\n- **Overall Conversion Rate**: **${dbStats.conversionRate}**\n\nClick below to view all **Deal Done** leads in the table.`,
+      action: { statusFilter: "Deal Done" },
       source: "local",
       isDirectDbQuery: true
     };
   }
 
-  // 4. Specific Program check (e.g. Faceyoga, Snehyoga 365, etc.)
+  // 7. Specific Program check (e.g. Faceyoga, Snehyoga 365, etc.)
   const knownPrograms = [
     { key: "faceyoga", name: "FACEYOGA" },
     { key: "365", name: "SNEHYOGA 365" },
@@ -253,17 +315,16 @@ export async function queryLeadsLocally(userQuery: string, leads: Lead[]): Promi
   for (const prog of knownPrograms) {
     if (q.includes(prog.key)) {
       const liveProgCount = await executeDirectSupabaseCount({ lead_type: prog.name });
-      action = { typeFilter: prog.name };
       return {
         reply: `🧘 **${prog.name} Program**\n\nFound **${liveProgCount} leads** registered for **${prog.name}** in the database.\n\nClick below to view them in the table.`,
-        action,
+        action: { typeFilter: prog.name },
         source: "local",
         isDirectDbQuery: true
       };
     }
   }
 
-  // 5. Call connection stats
+  // 8. Call connection stats
   if (q.includes("call") || q.includes("connected") || q.includes("reachable") || q.includes("not connected")) {
     return {
       reply: `📞 **Call Connectivity Stats**\n\n- **Connected Calls**: **${dbStats.connectedCount}** ✅\n- **Not Connected Calls**: **${dbStats.notConnectedCount}** ❌\n- **Connection Rate**: **${dbStats.callConnectionRate}**`,
@@ -272,7 +333,7 @@ export async function queryLeadsLocally(userQuery: string, leads: Lead[]): Promi
     };
   }
 
-  // 6. Check agent names (Ragini, Shreya, Janhavi)
+  // 9. Agent queries (Ragini, Shreya, Janhavi)
   const agents = [
     { key: "ragini", name: "Ragini K" },
     { key: "shreya", name: "Shreya K" },
@@ -282,29 +343,37 @@ export async function queryLeadsLocally(userQuery: string, leads: Lead[]): Promi
   for (const agent of agents) {
     if (q.includes(agent.key)) {
       const agentCount = dbStats.assignedCounts[agent.name] ?? 0;
-      action = { assignedToFilter: agent.name };
       return {
         reply: `👤 **${agent.name}'s Leads**\n\n- **Assigned Leads**: **${agentCount}**\n- **Share of Total Leads**: **${totalCount > 0 ? ((agentCount / totalCount) * 100).toFixed(1) : 0}%**\n\nClick below to view leads assigned to **${agent.name}**.`,
-        action,
+        action: { assignedToFilter: agent.name },
         source: "local",
         isDirectDbQuery: true
       };
     }
   }
 
-  // 7. General overall summary (When user asks for overview, summary, or stats)
-  const statusSummaryText = Object.entries(dbStats.statusCounts)
-    .map(([status, count]) => `  - **${status}**: ${count}`)
-    .join("\n");
+  // 10. General overall summary (ONLY when user explicitly asks for overview, summary, or stats)
+  const isOverviewRequest = q.includes("overview") || q.includes("summary") || q.includes("stats") || q.includes("statistics") || q.includes("report") || q.includes("all data");
+  if (isOverviewRequest) {
+    const statusSummaryText = Object.entries(dbStats.statusCounts)
+      .map(([status, count]) => `  - **${status}**: ${count}`)
+      .join("\n");
 
-  const agentSummaryText = Object.entries(dbStats.assignedCounts)
-    .map(([agent, count]) => `  - **${agent}**: ${count}`)
-    .join("\n");
+    const agentSummaryText = Object.entries(dbStats.assignedCounts)
+      .map(([agent, count]) => `  - **${agent}**: ${count}`)
+      .join("\n");
 
+    return {
+      reply: `📊 **Lead Management Overview**\n\n- **Total Database Leads**: **${totalCount}**\n- **Closed Deals**: **${dbStats.dealDoneCount}** (${dbStats.conversionRate})\n- **Follow-ups Due Today**: **${dbStats.todayFollowUps}**\n- **Call Connection Rate**: **${dbStats.callConnectionRate}**\n\n**Status Breakdown:**\n${statusSummaryText}\n\n**Team Distribution:**\n${agentSummaryText}`,
+      source: "local",
+      isDirectDbQuery: true
+    };
+  }
+
+  // 11. Default fallback for unknown or unclear inputs (DO NOT dump stats!)
   return {
-    reply: `📊 **Lead Management Overview**\n\n- **Total Database Leads**: **${totalCount}**\n- **Closed Deals**: **${dbStats.dealDoneCount}** (${dbStats.conversionRate})\n- **Follow-ups Due Today**: **${dbStats.todayFollowUps}**\n- **Call Connection Rate**: **${dbStats.callConnectionRate}**\n\n**Status Breakdown:**\n${statusSummaryText}\n\n**Team Distribution:**\n${agentSummaryText}`,
-    source: "local",
-    isDirectDbQuery: true
+    reply: `🤔 **I'm not sure what you mean by "${userQuery}".**\n\nYou can ask me:\n- ⚡ *"Filter Deal Done leads"* or *"Filter unassigned"*\n- 👤 *"Show Shreya's leads"*\n- 📊 *"Show overall statistics"*\n- 📅 *"What follow-ups are due today?"*\n\nOr tap any of the quick action chips above!`,
+    source: "local"
   };
 }
 
@@ -347,7 +416,8 @@ IMPORTANT BEHAVIOR INSTRUCTIONS:
 1. GREETINGS & CASUAL TALK: Be warm and helpful. Do NOT dump raw database reports on a simple hello or general question!
 2. DIRECT CONCISE ANSWERS: When the user asks a specific question (e.g. "how many deals done?" or "who has the most leads?"), answer that question directly in 1-2 friendly sentences.
 3. OVERVIEW: Only output the full statistics report if the user explicitly asks for "overview", "summary", or "stats".
-4. SECURITY: Do NOT output database connection strings, API keys, URLs, or access tokens in any response.
+4. FILTERING: If the user asks to filter or view a subset of leads, populate the "action" object with the appropriate filter fields.
+5. SECURITY: Do NOT output database connection strings, API keys, URLs, or access tokens in any response.
 
 Always respond with a JSON object in this format (no extra markdown code fences, pure JSON):
 {
@@ -362,7 +432,7 @@ Always respond with a JSON object in this format (no extra markdown code fences,
 }
 If no table filter action is needed, omit the "action" key.`;
 
-  // Try fast gemini-3.1-flash-lite first (reliable, low latency, no 503 spikes), then fallback to 3.6-flash
+  // Try fast gemini-3.1-flash-lite first, then fallback to 3.6-flash and flash-latest
   const modelsToTry = [
     "gemini-3.1-flash-lite",
     "gemini-3.6-flash",
@@ -372,7 +442,7 @@ If no table filter action is needed, omit the "action" key.`;
   for (const model of modelsToTry) {
     try {
       const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 6000);
+      const timeoutId = setTimeout(() => controller.abort(), 4000);
 
       const response = await fetch(
         `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`,
