@@ -16,8 +16,12 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Label } from "@/components/ui/label";
 import { Checkbox } from "@/components/ui/checkbox";
 import * as XLSX from "xlsx";
+import { LeadAIBot } from "@/components/crm/LeadAIBot";
+import { LeadAiAction } from "@/services/leadAiService";
 
-const ASSIGNED_USERS = ["Ragini K", "Shreya K", "Janhavi V"];
+export const ASSIGNED_USERS = ["Ragini K", "Shreya K", "Janhavi V"];
+
+
 
 // Dropdown Constants
 const LEAD_TYPES = [
@@ -291,9 +295,16 @@ export function LeadsManagement() {
   const [currentPage, setCurrentPage] = useState(1);
   const itemsPerPage = 50;
 
-  useEffect(() => {
-    setCurrentPage(1);
-  }, [searchQuery, statusFilter, typeFilter, autoDateFilter, addedDateFilter, assignedToFilter]);
+  const handleApplyAiAction = (action: LeadAiAction) => {
+    if (action.statusFilter !== undefined) setStatusFilter(action.statusFilter);
+    if (action.typeFilter !== undefined) setTypeFilter(action.typeFilter);
+    if (action.assignedToFilter !== undefined) setAssignedToFilter(action.assignedToFilter);
+    if (action.autoDateFilter !== undefined) {
+      setAutoDateFilter(action.autoDateFilter);
+      setAddedDateFilter("");
+    }
+    if (action.searchQuery !== undefined) setSearchQuery(action.searchQuery);
+  };
 
   // Bulk Selection & Assignment States
   const [selectedLeadIds, setSelectedLeadIds] = useState<string[]>([]);
@@ -2360,6 +2371,9 @@ function scanAndSyncLeads() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {/* Floating AI Bot Assistant */}
+      <LeadAIBot leads={leads} onApplyAction={handleApplyAiAction} />
     </div>
   );
 }
