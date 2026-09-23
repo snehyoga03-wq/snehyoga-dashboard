@@ -19,7 +19,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { useToast } from "@/hooks/use-toast";
-import { LogOut, Search, Edit2, Save, X, Download, Eye, FileText, MessageCircle, Send, Paperclip, Upload, Users, Link2, BarChart3, ClipboardList, Activity, Calendar, Settings, Plus, Trash2, ToggleLeft, ToggleRight, Play, AlertTriangle } from "lucide-react";
+import { LogOut, Search, Edit2, Save, X, Download, Eye, FileText, MessageCircle, Send, Paperclip, Upload, Users, Link2, BarChart3, ClipboardList, Activity, Calendar, Settings, Plus, Trash2, ToggleLeft, ToggleRight, Play, AlertTriangle, Zap } from "lucide-react";
 import { read, utils, writeFile } from "xlsx";
 import {
   Dialog,
@@ -36,6 +36,7 @@ import { LeadsManagement } from "./crm/LeadsManagement";
 import WeeklyReportDashboard from "./crm/WeeklyReportDashboard";
 import { formatPhone } from "@/lib/utils";
 import WhatsAppFlowManager from "./crm/flow-builder/WhatsAppFlowManager";
+import { WhatsAppAutomation } from "./crm/whatsapp-automation/WhatsAppAutomation";
 
 // Helper functions for formatting records
 const formatPhoneNumber = (phone: string) => {
@@ -1353,6 +1354,9 @@ const CRM = () => {
                         <h3 className="font-semibold text-gray-800">Quick Actions</h3>
                       </div>
                       <div className="p-4 space-y-3">
+                        <Button onClick={() => setCurrentSection('whatsapp-automation')} className="w-full justify-start text-left bg-gradient-to-r from-indigo-600 to-blue-600 text-white hover:from-indigo-700 hover:to-blue-700 shadow-md border-0" variant="default">
+                          <Zap className="w-4 h-4 mr-3 text-amber-300" /> WhatsApp Automation & Broadcast
+                        </Button>
                         <Button onClick={() => setCurrentSection('users')} className="w-full justify-start text-left bg-white text-gray-700 border hover:bg-gray-50 border-gray-200 shadow-sm" variant="outline">
                           <Users className="w-4 h-4 mr-3 text-blue-500" /> Manage All Users
                         </Button>
@@ -2909,6 +2913,18 @@ const CRM = () => {
             {/* RETENTION OS SECTION */}
             {currentSection === 'retention' && !selectedUser && (
               <RetentionDashboard />
+            )}
+
+            {/* WHATSAPP AUTOMATION SECTION */}
+            {currentSection === 'whatsapp-automation' && !selectedUser && (
+              <motion.div
+                key="whatsapp-automation-section"
+                initial={{ opacity: 0, y: 10 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: -10 }}
+              >
+                <WhatsAppAutomation users={users} />
+              </motion.div>
             )}
 
             {/* WHATSAPP CHATS SECTION */}

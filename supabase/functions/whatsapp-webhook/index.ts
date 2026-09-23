@@ -168,14 +168,27 @@ Deno.serve(async (req) => {
         let waToken = DEFAULT_META_TOKEN;
         let phoneNumberId = DEFAULT_PHONE_ID;
 
+        let googleAiKey = "";
+        let aiSystemPrompt = "You are the official Snehyoga AI Counselor. Assist students warmly with batch timings (6 AM, 11 AM, 4 PM), subscription plans, and links. Be concise.";
+        let aiEnabled = false;
+        let aiAllowedNumbers = "*";
+
         try {
           const { data: settings } = await supabase
             .from("session_settings")
-            .select("wa_api_token, wa_phone_number_id")
+            .select("wa_api_token, wa_phone_number_id, whatsapp_api_token, whatsapp_phone_number_id, google_ai_studio_key, ai_system_prompt, ai_enabled, ai_allowed_numbers")
             .maybeSingle();
 
-          if (settings?.wa_api_token) waToken = settings.wa_api_token.trim();
-          if (settings?.wa_phone_number_id) phoneNumberId = settings.wa_phone_number_id.trim();
+          if (settings?.whatsapp_api_token || settings?.wa_api_token) {
+            waToken = (settings.whatsapp_api_token || settings.wa_api_token).trim();
+          }
+          if (settings?.whatsapp_phone_number_id || settings?.wa_phone_number_id) {
+            phoneNumberId = (settings.whatsapp_phone_number_id || settings.wa_phone_number_id).trim();
+          }
+          if (settings?.google_ai_studio_key) googleAiKey = settings.google_ai_studio_key.trim();
+          if (settings?.ai_system_prompt) aiSystemPrompt = settings.ai_system_prompt.trim();
+          if (settings?.ai_enabled !== undefined) aiEnabled = Boolean(settings.ai_enabled);
+          if (settings?.ai_allowed_numbers) aiAllowedNumbers = settings.ai_allowed_numbers.trim();
         } catch (_) {}
 
         // 3. Determine Response Message using Flow Graph Edge Traversal Engine
@@ -184,6 +197,7 @@ Deno.serve(async (req) => {
           { id: "btn_class", text: "Yoga Class Schedule" },
           { id: "btn_pricing", text: "Subscription Plans" }
         ];
+        let flowMatched = false;
 
         // 4. Graph Edge Traversal for Flow Builder
         try {
@@ -264,6 +278,7 @@ Deno.serve(async (req) => {
                   replyText = replyText
                     .replace(/{{user_name}}/g, userName)
                     .replace(/{{session_link}}/g, "https://yoga.snehyoga.com");
+                  flowMatched = true;
                   break;
                 }
               }
@@ -273,11 +288,107 @@ Deno.serve(async (req) => {
           console.warn("Could not traverse flow graph:", flowErr);
         }
 
-        // 5. Send Auto-Reply back to WhatsApp User
-        console.log(`🚀 Sending flow auto-reply to ${fromPhone}...`);
+        // 5. If unhandled by Flow Builder and AI is enabled -> Query Google Gemini with Knowledge Base
+        if (!flowMatched && aiEnabled && googleAiKey) {
+          try {
+            // Whitelist verification
+            let isAllowed = true;
+            if (aiAllowedNumbers && aiAllowedNumbers !== "*") {
+              const allowedList = aiAllowedNumbers.split(",").map(p => p.replace(/\D/g, ""));
+              const cleanFrom = fromPhone.replace(/\D/g, "");
+              isAllowed = allowedList.some(num => cleanFrom.includes(num) || num.includes(cleanFrom));
+            }
+
+            if (isAllowed) {
+              console.log(`🤖 AI Auto-Responder triggered for ${fromPhone}...`);
+
+              // Fetch Knowledge Base
+              const { data: kbData } = await supabase
+                .from("ai_knowledge_base")
+                .select("category, question, answer");
+
+              const kbText = (kbData || [])
+                .map((k: any, i: number) => `${i + 1}. [${k.category}] Q: ${k.question}\nA: ${k.answer}`)
+                .join("\n\n");
+
+              // Fetch recent chat history for context
+              const { data: recentHistory } = await supabase
+                .from("chat_messages")
+                .select("sender_type, message")
+                .eq("user_phone", fromPhone)
+                .order("created_at", { ascending: false })
+                .limit(4);
+
+              const historyText = (recentHistory || [])
+                .reverse()
+                .map((m: any) => `${m.sender_type === "user" ? "Student" : "Assistant"}: ${m.message}`)
+                .join("\n");
+
+              const prompt = `${aiSystemPrompt}
+
+Verified Snehyoga Knowledge Base:
+${kbText}
+
+Recent Chat History:
+${historyText}
+
+Latest Student Message: "${userMsgText}"
+
+INSTRUCTIONS:
+1. Respond in strict JSON format:
+   {"type": "trigger_flow", "flowId": "<flow_id>"} OR {"type": "reply", "text": "<your answer>"}
+2. Answer student questions using the Knowledge Base. Keep the response polite, inspiring, and concise.`;
+
+              const geminiRes = await fetch(
+                `https://generativelanguage.googleapis.com/v1beta/models/gemini-flash-lite-latest:generateContent?key=${googleAiKey}`,
+                {
+                  method: "POST",
+                  headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify({
+                    contents: [{ role: "user", parts: [{ text: prompt }] }]
+                  })
+                }
+              );
+
+              const geminiJson = await geminiRes.json();
+              const rawAiOutput = geminiJson.candidates?.[0]?.content?.parts?.[0]?.text || "";
+              const cleanedJson = rawAiOutput.replace(/```json/g, "").replace(/```/g, "").trim();
+
+              try {
+                const parsedAi = JSON.parse(cleanedJson);
+                if (parsedAi.type === "reply" && parsedAi.text) {
+                  replyText = parsedAi.text;
+                  replyButtons = []; // AI text response
+                } else if (parsedAi.type === "trigger_flow" && parsedAi.flowId) {
+                  // Attempt trigger flow
+                  const { data: targetFlow } = await supabase
+                    .from("whatsapp_flows")
+                    .select("*")
+                    .eq("id", parsedAi.flowId)
+                    .maybeSingle();
+
+                  if (targetFlow?.nodes?.[0]?.data?.text) {
+                    replyText = targetFlow.nodes[0].data.text.replace(/{{user_name}}/g, userName);
+                    replyButtons = targetFlow.nodes[0].data.buttons || [];
+                  }
+                }
+              } catch (_) {
+                if (cleanedJson && cleanedJson.length > 5) {
+                  replyText = cleanedJson;
+                  replyButtons = [];
+                }
+              }
+            }
+          } catch (aiErr) {
+            console.warn("AI Auto-Responder error:", aiErr);
+          }
+        }
+
+        // 6. Send Auto-Reply back to WhatsApp User
+        console.log(`🚀 Sending auto-reply to ${fromPhone}...`);
         await sendWAMessage(phoneNumberId, waToken, fromPhone, replyText, replyButtons);
 
-        // 6. Log outgoing bot message in chat_messages table
+        // 7. Log outgoing bot message in chat_messages table
         try {
           await supabase.from("chat_messages").insert({
             user_phone: fromPhone,
