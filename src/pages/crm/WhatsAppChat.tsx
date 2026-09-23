@@ -76,12 +76,29 @@ export function WhatsAppChat() {
   const [showTemplates, setShowTemplates] = useState(false);
   const [activeFilter, setActiveFilter] = useState<string>("all");
   const [isLoading, setIsLoading] = useState(true);
+  const [isSyncing, setIsSyncing] = useState(false);
+  const [isWindowActive, setIsWindowActive] = useState(true);
+  const [lastSyncTime, setLastSyncTime] = useState<Date>(new Date());
   const [isSending, setIsSending] = useState(false);
   const chatEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
+  const selectedContactRef = useRef<Contact | null>(null);
+  const prevMsgCountRef = useRef<number>(0);
+
+  // Keep selectedContactRef synced with state
+  useEffect(() => {
+    selectedContactRef.current = selectedContact;
+    prevMsgCountRef.current = 0; // reset so chat scrolls to bottom when switching contact
+  }, [selectedContact]);
 
   // 1. Fetch live chat messages & group into contact conversations
-  const fetchLiveChatData = async () => {
+  const fetchLiveChatData = async (silent: boolean = false) => {
+    if (!silent) {
+      setIsLoading(true);
+    } else {
+      setIsSyncing(true);
+    }
+
     try {
       const { data: dbMsgs, error } = await supabase
         .from("chat_messages")
@@ -90,7 +107,6 @@ export function WhatsAppChat() {
 
       if (error) {
         console.warn("chat_messages fetch notice:", error);
-        setIsLoading(false);
         return;
       }
 
@@ -141,33 +157,89 @@ export function WhatsAppChat() {
 
       setContacts(contactList);
 
-      // Keep selected contact synced if open
-      if (selectedContact) {
-        const updatedSel = contactList.find(c => c.id === selectedContact.id);
-        if (updatedSel) setSelectedContact(updatedSel);
+      // Keep selected contact synced if open using the current ref
+      const currentSelected = selectedContactRef.current;
+      if (currentSelected) {
+        const updatedSel = contactList.find(c => c.id === currentSelected.id);
+        if (updatedSel) {
+          setSelectedContact(prev => prev ? { ...prev, ...updatedSel } : updatedSel);
+        }
       }
+
+      setLastSyncTime(new Date());
     } catch (e) {
       console.error("Error loading chat data:", e);
     } finally {
-      setIsLoading(false);
+      if (!silent) setIsLoading(false);
+      setIsSyncing(false);
     }
   };
 
-  // 2. Initial load + Supabase Realtime Subscription for incoming webhooks
+  // 2. Initial load + 10s Window-Scoped Polling Interval + Supabase Realtime Subscription
   useEffect(() => {
-    fetchLiveChatData();
+    let intervalId: any = null;
+    let isMounted = true;
+
+    // Initial fetch on mount
+    fetchLiveChatData(false);
     fetchLiveTemplates();
+
+    // Start 10-second polling interval (strictly active while window is open)
+    const startPolling = () => {
+      if (intervalId) clearInterval(intervalId);
+      intervalId = setInterval(() => {
+        if (!isMounted) return;
+        // Verify this browser window/tab is visible and open
+        if (typeof document !== "undefined" && document.visibilityState === "visible") {
+          fetchLiveChatData(true);
+        }
+      }, 10000); // 10 seconds
+    };
+
+    const stopPolling = () => {
+      if (intervalId) {
+        clearInterval(intervalId);
+        intervalId = null;
+      }
+    };
+
+    // Begin polling
+    startPolling();
+
+    // Visibility Listener: pause interval when window minimized or hidden; resume immediately when active
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === "visible") {
+        setIsWindowActive(true);
+        fetchLiveChatData(true);
+        startPolling();
+      } else {
+        setIsWindowActive(false);
+        stopPolling();
+      }
+    };
+
+    // Window Unload: guarantee immediate cleanup on tab or window close
+    const handleBeforeUnload = () => {
+      stopPolling();
+    };
+
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+    window.addEventListener("beforeunload", handleBeforeUnload);
 
     // Subscribe to new incoming messages inserted by webhook or system
     const channel = supabase
       .channel("realtime-whatsapp-chats")
       .on("postgres_changes", { event: "INSERT", schema: "public", table: "chat_messages" }, (payload) => {
         console.log("⚡ Realtime new chat message received:", payload.new);
-        fetchLiveChatData();
+        fetchLiveChatData(true);
       })
       .subscribe();
 
     return () => {
+      isMounted = false;
+      stopPolling();
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
+      window.removeEventListener("beforeunload", handleBeforeUnload);
       supabase.removeChannel(channel);
     };
   }, []);
@@ -208,9 +280,18 @@ export function WhatsAppChat() {
     }
   };
 
-  // 4. Auto Scroll to Bottom on Message Update
+  // 4. Auto Scroll to Bottom on Message Update (only if messages added or contact changed)
   useEffect(() => {
-    chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
+    if (selectedContact) {
+      const currentChatLen = allMessages.filter(
+        m => normalizePhone(m.user_phone) === normalizePhone(selectedContact.phone)
+      ).length;
+
+      if (currentChatLen !== prevMsgCountRef.current) {
+        prevMsgCountRef.current = currentChatLen;
+        chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
+      }
+    }
   }, [selectedContact, allMessages]);
 
   // Filtered contacts based on search query and filter chips
@@ -309,7 +390,7 @@ export function WhatsAppChat() {
       });
 
       toast({ title: "Sent Live ✅", description: `Message delivered to ${selectedContact.name}` });
-      fetchLiveChatData();
+      fetchLiveChatData(true);
     } catch (err: any) {
       console.error("Live send error:", err);
       toast({ title: "Send Error", description: err.message, variant: "destructive" });
@@ -369,7 +450,7 @@ export function WhatsAppChat() {
 
       toast({ title: "Template Sent Live! ⚡", description: `Delivered template "${template.name}"` });
       setShowTemplates(false);
-      fetchLiveChatData();
+      fetchLiveChatData(true);
     } catch (err: any) {
       toast({ title: "Template Error", description: err.message, variant: "destructive" });
     } finally {
@@ -387,19 +468,34 @@ export function WhatsAppChat() {
           <div className="flex items-center justify-between mb-3">
             <div className="flex items-center gap-2">
               <h2 className="text-xl font-bold text-[#111b21]">Chats</h2>
-              <span className="bg-[#25d366] text-white text-[10px] font-bold px-2 py-0.5 rounded-full uppercase tracking-wider flex items-center gap-1">
+              <span className="bg-[#25d366] text-white text-[10px] font-bold px-2 py-0.5 rounded-full uppercase tracking-wider flex items-center gap-1 shadow-sm">
                 <span className="w-1.5 h-1.5 bg-white rounded-full animate-ping" /> LIVE
               </span>
             </div>
-            <div className="flex items-center gap-1">
-              <button 
-                onClick={fetchLiveChatData} 
-                className="p-2 hover:bg-gray-200 rounded-full transition-colors"
-                title="Refresh Live Chats"
+            <div className="flex items-center gap-1.5">
+              {/* Active Chats Number Badge */}
+              <div 
+                className={`flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[11px] font-semibold transition-colors ${
+                  isWindowActive 
+                    ? "bg-emerald-50 text-emerald-700 border border-emerald-200" 
+                    : "bg-amber-50 text-amber-700 border border-amber-200"
+                }`}
+                title={isWindowActive ? `${contacts.length} active chats • Auto-refreshing every 10s while window is open` : "Window paused while tab is inactive"}
               >
-                <RefreshCw size={18} className={`text-[#54656f] ${isLoading ? "animate-spin" : ""}`} />
+                <span className={`w-1.5 h-1.5 rounded-full ${isWindowActive ? "bg-emerald-500 animate-pulse" : "bg-amber-400"}`} />
+                <span>
+                  {isSyncing ? "Syncing..." : `${contacts.length} Active ${contacts.length === 1 ? 'Chat' : 'Chats'}`}
+                </span>
+              </div>
+
+              <button 
+                onClick={() => fetchLiveChatData(false)} 
+                className="p-1.5 hover:bg-gray-200 rounded-full transition-colors"
+                title="Refresh Live Chats manually"
+              >
+                <RefreshCw size={17} className={`text-[#54656f] ${isLoading || isSyncing ? "animate-spin text-[#00a884]" : ""}`} />
               </button>
-              <button className="p-2 hover:bg-gray-200 rounded-full transition-colors"><MoreVertical size={18} className="text-[#54656f]" /></button>
+              <button className="p-1.5 hover:bg-gray-200 rounded-full transition-colors"><MoreVertical size={18} className="text-[#54656f]" /></button>
             </div>
           </div>
 
@@ -498,8 +594,12 @@ export function WhatsAppChat() {
               </p>
             </div>
             <div className="flex items-center gap-1">
-              <button onClick={fetchLiveChatData} className="p-2 hover:bg-gray-200 rounded-full transition-colors" title="Sync Latest Messages">
-                <RefreshCw size={18} className="text-[#54656f]" />
+              <button 
+                onClick={() => fetchLiveChatData(true)} 
+                className="p-1.5 hover:bg-gray-200 rounded-full transition-colors" 
+                title="Sync Latest Messages"
+              >
+                <RefreshCw size={17} className={`text-[#54656f] ${isSyncing ? "animate-spin text-[#00a884]" : ""}`} />
               </button>
             </div>
           </div>
