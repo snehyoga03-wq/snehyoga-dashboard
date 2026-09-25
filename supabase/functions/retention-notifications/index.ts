@@ -1,7 +1,7 @@
 // Supabase Edge Function: retention-notifications
 // =================================================
-// Checks all retention notification triggers and queues messages
-// via the existing publish_messages RPC → message_queue pipeline.
+// Checks all retention notification triggers and sends WhatsApp template
+// messages DIRECTLY via Meta WhatsApp Business API.
 //
 // Runs every 1 hour via pg_cron.
 // All notifications are idempotent — checks retention_notification_log before sending.
@@ -14,6 +14,8 @@ const corsHeaders = {
     "Access-Control-Allow-Origin": "*",
     "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
 };
+
+const WA_API_VERSION = "v20.0";
 
 // Extract slug from referral_link
 const getSlug = (referralLink: string | null): string => {
@@ -38,6 +40,86 @@ const resolveParams = (user: Record<string, any>, paramsStr: string): string[] =
     });
 };
 
+// Direct WhatsApp template message delivery via Meta API
+async function sendWhatsAppTemplateDirect(
+    phoneNumberId: string,
+    token: string,
+    toPhone: string,
+    templateName: string,
+    languageCode: string,
+    params: string[],
+    category?: string,
+): Promise<{ success: boolean; messageId?: string; error?: string }> {
+    const url = `https://graph.facebook.com/${WA_API_VERSION}/${phoneNumberId}/messages`;
+    const components: Record<string, unknown>[] = [];
+
+    if (params.length > 0) {
+        components.push({
+            type: "body",
+            parameters: params.map((p) => ({ type: "text", text: String(p) })),
+        });
+    }
+
+    if (category === "AUTHENTICATION" && params.length > 0) {
+        components.push({
+            type: "button",
+            sub_type: "url",
+            index: "0",
+            parameters: [{ type: "text", text: String(params[0]) }],
+        });
+    }
+
+    const bodyWithParams: Record<string, unknown> = {
+        messaging_product: "whatsapp",
+        to: toPhone,
+        type: "template",
+        template: {
+            name: templateName,
+            language: { code: languageCode },
+            ...(components.length > 0 ? { components } : {}),
+        },
+    };
+
+    let res = await fetch(url, {
+        method: "POST",
+        headers: {
+            "Content-Type": "application/json",
+            "Authorization": `Bearer ${token}`,
+        },
+        body: JSON.stringify(bodyWithParams),
+    });
+
+    let json = await res.json();
+
+    if (!res.ok && json.error && (json.error.code === 132000 || String(json.error.message).includes("parameters"))) {
+        const bodyNoParams: Record<string, unknown> = {
+            messaging_product: "whatsapp",
+            to: toPhone,
+            type: "template",
+            template: {
+                name: templateName,
+                language: { code: languageCode },
+            },
+        };
+        res = await fetch(url, {
+            method: "POST",
+            headers: {
+                "Content-Type": "application/json",
+                "Authorization": `Bearer ${token}`,
+            },
+            body: JSON.stringify(bodyNoParams),
+        });
+        json = await res.json();
+    }
+
+    if (!res.ok || json.error) {
+        const errMsg = json.error?.message || json.error?.error_data?.details || `HTTP ${res.status}`;
+        return { success: false, error: errMsg };
+    }
+
+    return { success: true, messageId: json.messages?.[0]?.id };
+}
+
 interface FlowConfig {
     trigger_code: string;
     enabled: boolean;
@@ -60,6 +142,24 @@ Deno.serve(async (req) => {
 
         console.log("🔔 [RetentionNotify] Starting notification check...");
 
+        // Load WhatsApp API Credentials
+        const { data: settings } = await supabase
+            .from("session_settings")
+            .select("wa_api_token, wa_phone_number_id, wa_language_code")
+            .maybeSingle();
+
+        const waToken = settings?.wa_api_token;
+        const phoneNumberId = settings?.wa_phone_number_id || "1230157110176906";
+        const languageCode = settings?.wa_language_code || "mr";
+
+        if (!waToken) {
+            console.error("❌ Missing WhatsApp API token in session_settings");
+            return new Response(
+                JSON.stringify({ success: false, error: "WhatsApp API token not configured" }),
+                { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+            );
+        }
+
         // Load flow configs
         const { data: flowConfigs } = await supabase
             .from("retention_flow_config")
@@ -68,7 +168,7 @@ Deno.serve(async (req) => {
 
         if (!flowConfigs || flowConfigs.length === 0) {
             return new Response(
-                JSON.stringify({ success: true, message: "No enabled flows", queued: 0 }),
+                JSON.stringify({ success: true, message: "No enabled flows", sent: 0 }),
                 { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } }
             );
         }
@@ -83,7 +183,7 @@ Deno.serve(async (req) => {
 
         if (!users || users.length === 0) {
             return new Response(
-                JSON.stringify({ success: true, message: "No users", queued: 0 }),
+                JSON.stringify({ success: true, message: "No users", sent: 0 }),
                 { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } }
             );
         }
@@ -112,7 +212,7 @@ Deno.serve(async (req) => {
         };
 
         const now = new Date();
-        const toQueue: { triggerCode: string; user: Record<string, any> }[] = [];
+        const toSend: { triggerCode: string; user: Record<string, any> }[] = [];
 
         for (const user of users) {
             const daysLeft = user.days_left || 0;
@@ -127,80 +227,71 @@ Deno.serve(async (req) => {
             const state = user.lifecycle_state || "JUST_JOINED";
 
             // ── First 30-day flows ───────────────────────────────
-            // WELCOME_D0: within first 24h of joining
             if (daysSinceJoin <= 1 && configMap["WELCOME_D0"]) {
                 if (!alreadySent(user.mobile_number, "WELCOME_D0", 99999)) {
-                    toQueue.push({ triggerCode: "WELCOME_D0", user });
+                    toSend.push({ triggerCode: "WELCOME_D0", user });
                 }
             }
 
-            // ONBOARDING_D2: 2 days since join, no session
             if (daysSinceJoin >= 2 && daysSinceJoin <= 3 && !user.is_activated && configMap["ONBOARDING_D2"]) {
                 if (!alreadySent(user.mobile_number, "ONBOARDING_D2", 99999)) {
-                    toQueue.push({ triggerCode: "ONBOARDING_D2", user });
+                    toSend.push({ triggerCode: "ONBOARDING_D2", user });
                 }
             }
 
-            // ONBOARDING_D5: 5 days since join, no session
             if (daysSinceJoin >= 5 && daysSinceJoin <= 6 && !user.is_activated && configMap["ONBOARDING_D5"]) {
                 if (!alreadySent(user.mobile_number, "ONBOARDING_D5", 99999)) {
-                    toQueue.push({ triggerCode: "ONBOARDING_D5", user });
+                    toSend.push({ triggerCode: "ONBOARDING_D5", user });
                 }
             }
 
-            // FIRST_WIN_D1: first session attended (first_session_at within last 24h)
             if (user.is_activated && user.first_session_at && configMap["FIRST_WIN_D1"]) {
                 const firstAt = new Date(user.first_session_at);
                 const hoursSinceFirst = (now.getTime() - firstAt.getTime()) / (1000 * 60 * 60);
                 if (hoursSinceFirst <= 24 && !alreadySent(user.mobile_number, "FIRST_WIN_D1", 99999)) {
-                    toQueue.push({ triggerCode: "FIRST_WIN_D1", user });
+                    toSend.push({ triggerCode: "FIRST_WIN_D1", user });
                 }
             }
 
-            // RHYTHM_D10: 2+ sessions in first 14 days
             if (user.is_activated && daysSinceJoin <= 14 && (user.sessions_last_14d || 0) >= 2 && configMap["RHYTHM_D10"]) {
                 if (!alreadySent(user.mobile_number, "RHYTHM_D10", 99999)) {
-                    toQueue.push({ triggerCode: "RHYTHM_D10", user });
+                    toSend.push({ triggerCode: "RHYTHM_D10", user });
                 }
             }
 
-            // PROGRESS_D15: day 15
             if (daysSinceJoin >= 15 && daysSinceJoin <= 16 && (user.sessions_last_14d || 0) >= 2 && configMap["PROGRESS_D15"]) {
                 if (!alreadySent(user.mobile_number, "PROGRESS_D15", 99999)) {
-                    toQueue.push({ triggerCode: "PROGRESS_D15", user });
+                    toSend.push({ triggerCode: "PROGRESS_D15", user });
                 }
             }
 
-            // RENEWAL_D27: 3 days before plan end (days_left = 3)
             if (daysLeft === 3 && !isPaused && configMap["RENEWAL_D27"]) {
                 if (!alreadySent(user.mobile_number, "RENEWAL_D27", 99999)) {
-                    toQueue.push({ triggerCode: "RENEWAL_D27", user });
+                    toSend.push({ triggerCode: "RENEWAL_D27", user });
                 }
             }
 
-            // RENEWAL_D30: 1 day before plan end
             if (daysLeft === 1 && !isPaused && configMap["RENEWAL_D30"]) {
                 if (!alreadySent(user.mobile_number, "RENEWAL_D30", 99999)) {
-                    toQueue.push({ triggerCode: "RENEWAL_D30", user });
+                    toSend.push({ triggerCode: "RENEWAL_D30", user });
                 }
             }
 
             // ── Rescue flows ─────────────────────────────────────
             if (state === "INCONSISTENT" && daysSinceLastSession >= 7 && configMap["RESCUE_7D"]) {
                 if (!alreadySent(user.mobile_number, "RESCUE_7D", 168)) {
-                    toQueue.push({ triggerCode: "RESCUE_7D", user });
+                    toSend.push({ triggerCode: "RESCUE_7D", user });
                 }
             }
 
             if (state === "AT_RISK" && daysSinceLastSession >= 14 && configMap["RESCUE_14D"]) {
                 if (!alreadySent(user.mobile_number, "RESCUE_14D", 168)) {
-                    toQueue.push({ triggerCode: "RESCUE_14D", user });
+                    toSend.push({ triggerCode: "RESCUE_14D", user });
                 }
             }
 
             if (state === "AT_RISK" && daysSinceLastSession >= 21 && configMap["RESCUE_21D"]) {
                 if (!alreadySent(user.mobile_number, "RESCUE_21D", 99999)) {
-                    // Insert into outreach queue for human intervention
                     await supabase.from("retention_outreach_queue").insert({
                         user_id: user.id,
                         mobile_number: user.mobile_number,
@@ -208,7 +299,7 @@ Deno.serve(async (req) => {
                         reason: `21+ days without session (last: ${daysSinceLastSession}d ago)`,
                         lifecycle_state: state,
                     });
-                    toQueue.push({ triggerCode: "RESCUE_21D", user });
+                    toSend.push({ triggerCode: "RESCUE_21D", user });
                 }
             }
 
@@ -216,12 +307,12 @@ Deno.serve(async (req) => {
             if (planType === "monthly" && !isPaused && daysLeft > 0) {
                 if (daysSinceJoin >= 20 && daysSinceJoin <= 21 && state === "ACTIVE_CORE" && configMap["MTY_INTRO"]) {
                     if (!alreadySent(user.mobile_number, "MTY_INTRO", 99999)) {
-                        toQueue.push({ triggerCode: "MTY_INTRO", user });
+                        toSend.push({ triggerCode: "MTY_INTRO", user });
                     }
                 }
                 if (daysSinceJoin >= 25 && daysSinceJoin <= 26 && state === "ACTIVE_CORE" && configMap["MTY_INVITE"]) {
                     if (!alreadySent(user.mobile_number, "MTY_INVITE", 99999)) {
-                        toQueue.push({ triggerCode: "MTY_INVITE", user });
+                        toSend.push({ triggerCode: "MTY_INVITE", user });
                     }
                 }
             }
@@ -230,38 +321,38 @@ Deno.serve(async (req) => {
             if (daysLeft === 7 && !isPaused) {
                 if ((state === "ACTIVE_CORE" || state === "YEARLY") && configMap["EXPIRY_7D_ACTIVE"]) {
                     if (!alreadySent(user.mobile_number, "EXPIRY_7D_ACTIVE", 99999)) {
-                        toQueue.push({ triggerCode: "EXPIRY_7D_ACTIVE", user });
+                        toSend.push({ triggerCode: "EXPIRY_7D_ACTIVE", user });
                     }
                 }
                 if (state === "AT_RISK" && configMap["EXPIRY_7D_ATRISK"]) {
                     if (!alreadySent(user.mobile_number, "EXPIRY_7D_ATRISK", 99999)) {
-                        toQueue.push({ triggerCode: "EXPIRY_7D_ATRISK", user });
+                        toSend.push({ triggerCode: "EXPIRY_7D_ATRISK", user });
                     }
                 }
             }
 
             if (daysLeft === 1 && !isPaused && configMap["EXPIRY_1D"]) {
                 if (!alreadySent(user.mobile_number, "EXPIRY_1D", 99999)) {
-                    toQueue.push({ triggerCode: "EXPIRY_1D", user });
+                    toSend.push({ triggerCode: "EXPIRY_1D", user });
                 }
             }
 
             // ── Win-back flows ───────────────────────────────────
             if (state === "EXPIRED") {
-                const expiredDaysAgo = Math.abs(daysLeft); // days_left is negative when expired
+                const expiredDaysAgo = Math.abs(daysLeft);
                 if (expiredDaysAgo >= 7 && expiredDaysAgo <= 8 && configMap["WINBACK_7D"]) {
                     if (!alreadySent(user.mobile_number, "WINBACK_7D", 99999)) {
-                        toQueue.push({ triggerCode: "WINBACK_7D", user });
+                        toSend.push({ triggerCode: "WINBACK_7D", user });
                     }
                 }
                 if (expiredDaysAgo >= 30 && expiredDaysAgo <= 31 && configMap["WINBACK_30D"]) {
                     if (!alreadySent(user.mobile_number, "WINBACK_30D", 99999)) {
-                        toQueue.push({ triggerCode: "WINBACK_30D", user });
+                        toSend.push({ triggerCode: "WINBACK_30D", user });
                     }
                 }
                 if (expiredDaysAgo >= 60 && expiredDaysAgo <= 61 && (user.total_sessions || 0) >= 5 && configMap["WINBACK_60D"]) {
                     if (!alreadySent(user.mobile_number, "WINBACK_60D", 99999)) {
-                        toQueue.push({ triggerCode: "WINBACK_60D", user });
+                        toSend.push({ triggerCode: "WINBACK_60D", user });
                     }
                 }
             }
@@ -270,31 +361,34 @@ Deno.serve(async (req) => {
             if (planType === "yearly" && !isPaused && daysLeft > 0) {
                 if (daysSinceJoin >= 90 && daysSinceJoin <= 91 && configMap["YEARLY_M3"]) {
                     if (!alreadySent(user.mobile_number, "YEARLY_M3", 99999)) {
-                        toQueue.push({ triggerCode: "YEARLY_M3", user });
+                        toSend.push({ triggerCode: "YEARLY_M3", user });
                     }
                 }
                 if (daysSinceJoin >= 180 && daysSinceJoin <= 181 && configMap["YEARLY_M6"]) {
                     if (!alreadySent(user.mobile_number, "YEARLY_M6", 99999)) {
-                        toQueue.push({ triggerCode: "YEARLY_M6", user });
+                        toSend.push({ triggerCode: "YEARLY_M6", user });
                     }
                 }
                 if (daysLeft <= 30 && daysLeft >= 29 && configMap["YEARLY_M11"]) {
                     if (!alreadySent(user.mobile_number, "YEARLY_M11", 99999)) {
-                        toQueue.push({ triggerCode: "YEARLY_M11", user });
+                        toSend.push({ triggerCode: "YEARLY_M11", user });
                     }
                 }
             }
         }
 
-        // ── Queue messages via publish_messages ──────────────────
-        let totalQueued = 0;
+        // ── Direct Send via WhatsApp Business API ─────────────
+        let totalSent = 0;
+        let totalFailed = 0;
 
-        // Group by trigger_code for batching
+        // Group by trigger_code
         const grouped: Record<string, Record<string, any>[]> = {};
-        for (const item of toQueue) {
+        for (const item of toSend) {
             if (!grouped[item.triggerCode]) grouped[item.triggerCode] = [];
             grouped[item.triggerCode].push(item.user);
         }
+
+        const CHUNK_SIZE = 20;
 
         for (const [triggerCode, triggerUsers] of Object.entries(grouped)) {
             const config = configMap[triggerCode];
@@ -303,63 +397,69 @@ Deno.serve(async (req) => {
                 continue;
             }
 
-            const queuePayload = triggerUsers.map((u) => {
-                let phone = (u.mobile_number || "").replace(/\D/g, "");
-                if (phone.length === 10) phone = "91" + phone;
-                return {
-                    phone,
-                    name: u.name || "User",
-                    params: resolveParams(u, config.template_params),
-                };
-            });
+            for (let i = 0; i < triggerUsers.length; i += CHUNK_SIZE) {
+                const chunk = triggerUsers.slice(i, i + CHUNK_SIZE);
+                await Promise.all(
+                    chunk.map(async (u) => {
+                        let phone = (u.mobile_number || "").replace(/\D/g, "");
+                        if (phone.length === 10) phone = "91" + phone;
 
-            const { data: batchId, error: rpcError } = await supabase.rpc("publish_messages", {
-                p_batch_label: `Retention: ${triggerCode}`,
-                p_template_name: config.template_name,
-                p_template_id: config.template_id || "",
-                p_template_category: config.template_category || "UTILITY",
-                p_users: queuePayload,
-            });
+                        if (!phone) return;
 
-            if (rpcError) {
-                console.error(`❌ Failed to queue ${triggerCode}: ${rpcError.message}`);
-                continue;
+                        const params = resolveParams(u, config.template_params);
+                        const result = await sendWhatsAppTemplateDirect(
+                            phoneNumberId,
+                            waToken,
+                            phone,
+                            config.template_name,
+                            languageCode,
+                            params,
+                            config.template_category
+                        );
+
+                        if (result.success) {
+                            totalSent++;
+                            await supabase.from("retention_notification_log").insert({
+                                user_id: u.id,
+                                mobile_number: u.mobile_number,
+                                trigger_code: triggerCode,
+                                channel: "whatsapp",
+                                status: "sent",
+                                message_preview: `Template: ${config.template_name}`,
+                            });
+
+                            try {
+                                await supabase.from("chat_messages").insert({
+                                    user_phone: phone,
+                                    user_name: u.name || "User",
+                                    message: `[Retention Automation: ${config.template_name}]\nFlow: ${triggerCode}`,
+                                    sender_type: "admin",
+                                    is_read: true,
+                                    created_at: new Date().toISOString()
+                                });
+                            } catch (_) {}
+                        } else {
+                            totalFailed++;
+                            await supabase.from("retention_notification_log").insert({
+                                user_id: u.id,
+                                mobile_number: u.mobile_number,
+                                trigger_code: triggerCode,
+                                channel: "whatsapp",
+                                status: "failed",
+                                message_preview: `Failed: ${result.error}`,
+                            });
+                        }
+                    })
+                );
             }
 
-            // Log notifications
-            for (const u of triggerUsers) {
-                await supabase.from("retention_notification_log").insert({
-                    user_id: u.id,
-                    mobile_number: u.mobile_number,
-                    trigger_code: triggerCode,
-                    channel: "whatsapp",
-                    status: "queued",
-                    message_preview: `Template: ${config.template_name}`,
-                });
-            }
-
-            totalQueued += triggerUsers.length;
-            console.log(`📤 Queued ${triggerUsers.length} messages for ${triggerCode} (batch: ${batchId})`);
+            console.log(`📤 Direct sent retention notifications for ${triggerCode}`);
         }
 
-        // Trigger queue processing
-        if (totalQueued > 0) {
-            try {
-                await fetch(`${supabaseUrl}/functions/v1/process-message-queue`, {
-                    method: "POST",
-                    headers: {
-                        "Content-Type": "application/json",
-                        "Authorization": `Bearer ${supabaseServiceKey}`,
-                    },
-                    body: JSON.stringify({}),
-                });
-            } catch (_) { /* fire and forget */ }
-        }
-
-        console.log(`✅ [RetentionNotify] Done. Queued ${totalQueued} notifications across ${Object.keys(grouped).length} flows`);
+        console.log(`✅ [RetentionNotify] Done. Sent ${totalSent} direct notifications (${totalFailed} failed) across ${Object.keys(grouped).length} flows`);
 
         return new Response(
-            JSON.stringify({ success: true, queued: totalQueued, flows: Object.keys(grouped).length }),
+            JSON.stringify({ success: true, sent: totalSent, failed: totalFailed, flows: Object.keys(grouped).length }),
             { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } }
         );
 

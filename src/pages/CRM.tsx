@@ -130,7 +130,7 @@ interface ChatMessage {
   attachment_type?: string;
 }
 
-type Section = 'users' | 'session-links' | 'analytics' | 'followup' | 'chats' | 'dashboard' | 'message-queue' | 'sap-portal' | 'retention' | 'whatsapp-flow';
+type Section = 'users' | 'session-links' | 'analytics' | 'followup' | 'chats' | 'dashboard' | 'sap-portal' | 'retention' | 'whatsapp-flow';
 
 const CRM = () => {
   const navigate = useNavigate();
@@ -325,15 +325,7 @@ const CRM = () => {
   // Constants
   const BATCH_TIMINGS = ["5:00 AM", "6:00 AM", "8:00 AM", "5:00 PM", "6:00 PM", "7:00 PM"];
 
-  type Section = 'users' | 'session-links' | 'analytics' | 'followup' | 'chats' | 'dashboard' | 'reminders' | 'message-queue' | 'sap-portal' | 'retention' | 'whatsapp-flow';
-
-  // Message Queue (Pub/Sub)
-  const [messageBatches, setMessageBatches] = useState<any[]>([]);
-  const [queueStats, setQueueStats] = useState({ pending: 0, processing: 0, delivered: 0, failed: 0, dead_letter: 0 });
-  const [isLoadingQueue, setIsLoadingQueue] = useState(false);
-  const [selectedBatchMessages, setSelectedBatchMessages] = useState<any[]>([]);
-  const [showBatchDetailDialog, setShowBatchDetailDialog] = useState(false);
-  const [selectedBatchDetail, setSelectedBatchDetail] = useState<any>(null);
+  type Section = 'users' | 'session-links' | 'analytics' | 'followup' | 'chats' | 'dashboard' | 'reminders' | 'sap-portal' | 'retention' | 'whatsapp-flow';
 
   // SAP Portal
   interface SapPortalItem {
@@ -476,109 +468,7 @@ const CRM = () => {
     }
   }, [currentSection, isAuthenticated]);
 
-  // Fetch message queue data when entering message-queue section
-  useEffect(() => {
-    if (currentSection === 'message-queue' && isAuthenticated) {
-      fetchMessageQueue();
-      fetchQueueStats();
-      // Auto-refresh every 10 seconds
-      const interval = setInterval(() => {
-        fetchMessageQueue();
-        fetchQueueStats();
-      }, 10000);
-      return () => clearInterval(interval);
-    }
-  }, [currentSection, isAuthenticated]);
 
-  const fetchMessageQueue = async () => {
-    setIsLoadingQueue(true);
-    try {
-      const { data } = await supabase
-        .from('message_batches')
-        .select('*')
-        .order('created_at', { ascending: false })
-        .limit(20);
-      setMessageBatches(data || []);
-    } catch (e) {
-      console.error('Error fetching message batches:', e);
-    } finally {
-      setIsLoadingQueue(false);
-    }
-  };
-
-  const fetchQueueStats = async () => {
-    try {
-      const statuses = ['pending', 'processing', 'delivered', 'failed', 'dead_letter'];
-      const counts: any = {};
-      for (const status of statuses) {
-        const { count } = await supabase
-          .from('message_queue')
-          .select('*', { count: 'exact', head: true })
-          .eq('status', status);
-        counts[status] = count || 0;
-      }
-      setQueueStats(counts);
-    } catch (e) {
-      console.error('Error fetching queue stats:', e);
-    }
-  };
-
-  const viewBatchDetails = async (batch: any) => {
-    setSelectedBatchDetail(batch);
-    try {
-      const { data } = await supabase
-        .from('message_queue')
-        .select('*')
-        .eq('batch_id', batch.id)
-        .order('created_at', { ascending: true });
-      setSelectedBatchMessages(data || []);
-      setShowBatchDetailDialog(true);
-    } catch (e) {
-      console.error('Error fetching batch messages:', e);
-    }
-  };
-
-  const retryFailedMessages = async (batchId: string) => {
-    try {
-      const { error } = await supabase
-        .from('message_queue')
-        .update({
-          status: 'pending',
-          next_retry_at: new Date().toISOString(),
-          updated_at: new Date().toISOString(),
-        })
-        .eq('batch_id', batchId)
-        .in('status', ['failed', 'dead_letter']);
-
-      if (error) throw error;
-
-      // Reset batch status
-      await supabase
-        .from('message_batches')
-        .update({ status: 'queued', completed_at: null })
-        .eq('id', batchId);
-
-      toast({ title: "Retry Queued", description: "Failed messages have been re-queued for processing." });
-      fetchMessageQueue();
-      fetchQueueStats();
-    } catch (e) {
-      toast({ title: "Error", description: "Failed to retry messages", variant: "destructive" });
-    }
-  };
-
-  const triggerQueueProcessing = async () => {
-    try {
-      const { data, error } = await supabase.functions.invoke('process-message-queue', {
-        body: {},
-      });
-      if (error) throw error;
-      toast({ title: "Queue Processing Triggered", description: `Processed: ${data?.processed || 0}, Delivered: ${data?.delivered || 0}, Failed: ${data?.failed || 0}` });
-      fetchMessageQueue();
-      fetchQueueStats();
-    } catch (e) {
-      toast({ title: "Error", description: "Failed to trigger queue processing", variant: "destructive" });
-    }
-  };
 
   const handleLogin = (e: React.FormEvent) => {
     e.preventDefault();
@@ -831,6 +721,42 @@ const CRM = () => {
       });
     } catch (error: any) {
       console.error("Error extending zero-day users:", error);
+      toast({ title: "Error", description: error?.message || "Failed to extend subscriptions", variant: "destructive" });
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const handleAdd30DaysToAllUsers = async () => {
+    if (users.length === 0) {
+      toast({ title: "No Users", description: "No users found in database." });
+      return;
+    }
+
+    try {
+      setIsLoading(true);
+      for (const u of users) {
+        const currentDays = Number(u.days_left || 0);
+        const newDays = (currentDays <= 0 ? 0 : currentDays) + 30;
+        await supabase
+          .from("main_data_registration")
+          .update({ days_left: newDays })
+          .eq("id", u.id);
+      }
+
+      setUsers((prev) =>
+        prev.map((u) => ({
+          ...u,
+          days_left: (Number(u.days_left || 0) <= 0 ? 0 : Number(u.days_left)) + 30
+        }))
+      );
+
+      toast({
+        title: "Subscriptions Extended 🎉",
+        description: `Successfully added +30 days to all ${users.length} members!`,
+      });
+    } catch (error: any) {
+      console.error("Error extending all users:", error);
       toast({ title: "Error", description: error?.message || "Failed to extend subscriptions", variant: "destructive" });
     } finally {
       setIsLoading(false);
@@ -1436,6 +1362,9 @@ const CRM = () => {
                     <p className="text-gray-500">Manage all registered users and subscriptions</p>
                   </div>
                   <div className="flex flex-wrap gap-2">
+                    <Button onClick={handleAdd30DaysToAllUsers} variant="secondary" className="bg-emerald-50 hover:bg-emerald-100 text-emerald-900 border border-emerald-200 shadow-sm font-medium">
+                      <Calendar className="w-4 h-4 mr-2 text-emerald-600" /> +30 Days (ALL Users)
+                    </Button>
                     <Button onClick={handleAdd30DaysToZeroUsers} variant="secondary" className="bg-amber-50 hover:bg-amber-100 text-amber-900 border border-amber-200 shadow-sm font-medium">
                       <Calendar className="w-4 h-4 mr-2 text-amber-600" /> +30 Days (0-Day Users)
                     </Button>
@@ -2619,53 +2548,31 @@ const CRM = () => {
                               return;
                             }
 
-                            // 2. Prepare users array for pub/sub queue
-                            const batchLabel = targetAudience === 'batch'
-                              ? `${selectedBatchTime} batch`
-                              : `Manual: ${targetAudience.toUpperCase()}`;
-
-                            const queueUsers = targetUsers.map(u => ({
-                              phone: formatPhoneNumber(u.mobile_number || u.phone),
-                              name: u.name || 'User',
-                              params: getParamsForUser(u, templateVariables)
-                            }));
-
-                            // 3. Publish to message queue via Supabase RPC
-                            const { data: batchId, error: rpcError } = await supabase.rpc('publish_messages', {
-                              p_batch_label: batchLabel,
-                              p_template_name: templateName || 'unnamed',
-                              p_template_id: templateId || '',
-                              p_template_category: templateCategory || '',
-                              p_users: queueUsers,
+                            // 2. Trigger send-daily-reminders edge function directly
+                            const { data: resData, error: fnError } = await supabase.functions.invoke('send-daily-reminders', {
+                              body: { batch_time: selectedBatchTime }
                             });
 
-                            if (rpcError) throw rpcError;
+                            if (fnError) throw fnError;
 
                             toast({
-                              title: "📨 Messages Queued!",
-                              description: `${targetUsers.length} messages published to queue. They will be delivered automatically.`
+                              title: "🚀 Messages Sent Directly!",
+                              description: resData?.message || `${targetUsers.length} reminders sent directly via Meta WhatsApp API.`
                             });
 
                             if (targetAudience === 'custom') {
                               setCustomUsers([]); // clear after sending
                             }
 
-                            // Optionally trigger immediate processing
-                            try {
-                              await supabase.functions.invoke('process-message-queue', { body: {} });
-                            } catch (_) {
-                              // Non-critical: queue will be processed by scheduled cron
-                            }
-
-                          } catch (e) {
+                          } catch (e: any) {
                             console.error(e);
-                            toast({ title: "Error", description: "Failed to publish messages to queue", variant: "destructive" });
+                            toast({ title: "Error", description: e?.message || "Failed to send messages directly", variant: "destructive" });
                           } finally {
                             setIsTriggering(false);
                           }
                         }}
                       >
-                        {isTriggering ? "Publishing..." : `Queue ${targetAudience === 'batch' ? users.filter(u => u.batch_timing === selectedBatchTime && !u.subscription_paused).length : ''} Messages`}
+                        {isTriggering ? "Sending..." : `Send ${targetAudience === 'batch' ? users.filter(u => u.batch_timing === selectedBatchTime && !u.subscription_paused).length : ''} Reminders Directly`}
                       </Button>
                     </div>
                   </CardContent>
@@ -2673,157 +2580,7 @@ const CRM = () => {
               </motion.div>
             )}
 
-            {/* MESSAGE QUEUE SECTION (Pub/Sub Dashboard) */}
-            {currentSection === 'message-queue' && !selectedUser && (
-              <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="space-y-6">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <h1 className="text-2xl font-bold text-gray-900">Message Queue</h1>
-                    <p className="text-gray-500 text-sm">Pub/Sub message delivery dashboard — auto-refreshes every 10s</p>
-                  </div>
-                  <div className="flex gap-2">
-                    <Button variant="outline" onClick={() => { fetchMessageQueue(); fetchQueueStats(); }}>
-                      Refresh
-                    </Button>
-                    <Button className="bg-indigo-600 hover:bg-indigo-700 text-white" onClick={triggerQueueProcessing}>
-                      ⚡ Process Queue Now
-                    </Button>
-                  </div>
-                </div>
 
-                {/* Queue Stats Cards */}
-                <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
-                  {[
-                    { label: 'Pending', value: queueStats.pending, color: 'amber', emoji: '⏳' },
-                    { label: 'Processing', value: queueStats.processing, color: 'blue', emoji: '⚙️' },
-                    { label: 'Delivered', value: queueStats.delivered, color: 'green', emoji: '✅' },
-                    { label: 'Failed', value: queueStats.failed, color: 'red', emoji: '❌' },
-                    { label: 'Dead Letter', value: queueStats.dead_letter, color: 'gray', emoji: '💀' },
-                  ].map(stat => (
-                    <motion.div
-                      key={stat.label}
-                      initial={{ opacity: 0, y: 8 }}
-                      animate={{ opacity: 1, y: 0 }}
-                      className={`bg-${stat.color}-50 border border-${stat.color}-200 rounded-xl p-4 text-center`}
-                      style={{
-                        backgroundColor: stat.color === 'amber' ? '#fffbeb' : stat.color === 'blue' ? '#eff6ff' : stat.color === 'green' ? '#f0fdf4' : stat.color === 'red' ? '#fef2f2' : '#f9fafb',
-                        borderColor: stat.color === 'amber' ? '#fde68a' : stat.color === 'blue' ? '#bfdbfe' : stat.color === 'green' ? '#bbf7d0' : stat.color === 'red' ? '#fecaca' : '#e5e7eb',
-                      }}
-                    >
-                      <div className="text-2xl mb-1">{stat.emoji}</div>
-                      <div className="text-2xl font-bold text-gray-900">{stat.value}</div>
-                      <div className="text-xs font-medium text-gray-500 mt-1">{stat.label}</div>
-                    </motion.div>
-                  ))}
-                </div>
-
-                {/* Batch History */}
-                <Card className="shadow-sm border-gray-100">
-                  <CardHeader>
-                    <CardTitle className="flex items-center gap-2">
-                      <FileText className="w-5 h-5 text-indigo-500" />
-                      Batch History
-                    </CardTitle>
-                  </CardHeader>
-                  <CardContent>
-                    {isLoadingQueue ? (
-                      <p className="text-center text-gray-400 py-4">Loading batches...</p>
-                    ) : messageBatches.length === 0 ? (
-                      <div className="text-center py-8 text-gray-400">
-                        <p className="text-sm">No message batches yet</p>
-                        <p className="text-xs mt-1">Messages will appear here when you send reminders from the Reminders section.</p>
-                      </div>
-                    ) : (
-                      <div className="overflow-x-auto">
-                        <Table>
-                          <TableHeader>
-                            <TableRow className="hover:bg-transparent">
-                              <TableHead>Batch</TableHead>
-                              <TableHead>Template</TableHead>
-                              <TableHead className="text-center">Total</TableHead>
-                              <TableHead className="text-center">Delivered</TableHead>
-                              <TableHead className="text-center">Failed</TableHead>
-                              <TableHead>Status</TableHead>
-                              <TableHead>Created</TableHead>
-                              <TableHead className="text-right">Actions</TableHead>
-                            </TableRow>
-                          </TableHeader>
-                          <TableBody>
-                            {messageBatches.map((batch: any) => (
-                              <TableRow key={batch.id} className="cursor-pointer hover:bg-gray-50" onClick={() => viewBatchDetails(batch)}>
-                                <TableCell className="font-medium text-gray-900">{batch.label}</TableCell>
-                                <TableCell className="text-gray-500 text-sm">{batch.template_name || '—'}</TableCell>
-                                <TableCell className="text-center font-medium">{batch.total_messages}</TableCell>
-                                <TableCell className="text-center">
-                                  <span className="text-green-600 font-medium">{batch.delivered_count}</span>
-                                </TableCell>
-                                <TableCell className="text-center">
-                                  <span className={batch.failed_count > 0 ? "text-red-600 font-medium" : "text-gray-400"}>{batch.failed_count}</span>
-                                </TableCell>
-                                <TableCell>
-                                  <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${batch.status === 'completed' ? 'bg-green-100 text-green-800' :
-                                      batch.status === 'processing' ? 'bg-blue-100 text-blue-800' :
-                                        batch.status === 'partial_failure' ? 'bg-amber-100 text-amber-800' :
-                                          'bg-gray-100 text-gray-800'
-                                    }`}>
-                                    {batch.status === 'completed' ? '✅ Completed' :
-                                      batch.status === 'processing' ? '⚙️ Processing' :
-                                        batch.status === 'partial_failure' ? '⚠️ Partial Failure' :
-                                          '📋 Queued'}
-                                  </span>
-                                </TableCell>
-                                <TableCell className="text-gray-500 text-sm">
-                                  {new Date(batch.created_at).toLocaleString('en-IN', {
-                                    day: 'numeric', month: 'short',
-                                    hour: '2-digit', minute: '2-digit'
-                                  })}
-                                </TableCell>
-                                <TableCell className="text-right">
-                                  {(batch.status === 'partial_failure' || batch.failed_count > 0) && (
-                                    <Button
-                                      variant="ghost"
-                                      size="sm"
-                                      className="text-amber-600 hover:text-amber-700 h-8"
-                                      onClick={(e) => { e.stopPropagation(); retryFailedMessages(batch.id); }}
-                                    >
-                                      🔄 Retry
-                                    </Button>
-                                  )}
-                                  <Button variant="ghost" size="sm" className="text-blue-600 hover:text-blue-700 h-8" onClick={(e) => { e.stopPropagation(); viewBatchDetails(batch); }}>
-                                    View
-                                  </Button>
-                                </TableCell>
-                              </TableRow>
-                            ))}
-                          </TableBody>
-                        </Table>
-                      </div>
-                    )}
-                  </CardContent>
-                </Card>
-
-                {/* Architecture Info */}
-                <Card className="shadow-sm border-gray-100 bg-gradient-to-br from-slate-50 to-indigo-50/30">
-                  <CardContent className="p-6">
-                    <h3 className="font-semibold text-gray-800 mb-3">📐 How Pub/Sub Works</h3>
-                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-sm">
-                      <div className="bg-white/80 rounded-lg p-4 border border-gray-100">
-                        <div className="text-lg mb-1">📤 Publish</div>
-                        <p className="text-gray-600">When you send reminders, messages are <strong>published</strong> to the <code className="bg-gray-100 px-1 rounded text-xs">message_queue</code> table individually — not sent directly to Pabbly.</p>
-                      </div>
-                      <div className="bg-white/80 rounded-lg p-4 border border-gray-100">
-                        <div className="text-lg mb-1">⚙️ Process</div>
-                        <p className="text-gray-600">The <code className="bg-gray-100 px-1 rounded text-xs">process-message-queue</code> Edge Function <strong>subscribes</strong> and processes messages in batches of 10 with rate limiting.</p>
-                      </div>
-                      <div className="bg-white/80 rounded-lg p-4 border border-gray-100">
-                        <div className="text-lg mb-1">🔄 Retry</div>
-                        <p className="text-gray-600">Failed messages are automatically retried with <strong>exponential backoff</strong> (30s → 2m → 8m). After 3 failures → dead letter.</p>
-                      </div>
-                    </div>
-                  </CardContent>
-                </Card>
-              </motion.div>
-            )}
 
             {/* SAP PORTAL SECTION */}
             {currentSection === 'sap-portal' && !selectedUser && (
@@ -3133,82 +2890,7 @@ const CRM = () => {
         </DialogContent>
       </Dialog>
 
-      {/* Batch Detail Dialog (Message Queue) */}
-      <Dialog open={showBatchDetailDialog} onOpenChange={setShowBatchDetailDialog}>
-        <DialogContent className="max-w-4xl max-h-[85vh] overflow-hidden flex flex-col">
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2">
-              📨 Batch: {selectedBatchDetail?.label}
-              <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ml-2 ${selectedBatchDetail?.status === 'completed' ? 'bg-green-100 text-green-800' :
-                  selectedBatchDetail?.status === 'processing' ? 'bg-blue-100 text-blue-800' :
-                    selectedBatchDetail?.status === 'partial_failure' ? 'bg-amber-100 text-amber-800' :
-                      'bg-gray-100 text-gray-800'
-                }`}>
-                {selectedBatchDetail?.status}
-              </span>
-            </DialogTitle>
-          </DialogHeader>
-          <div className="flex-1 overflow-y-auto mt-4 rounded-md border">
-            <Table>
-              <TableHeader className="bg-gray-50 sticky top-0">
-                <TableRow>
-                  <TableHead>Phone</TableHead>
-                  <TableHead>Name</TableHead>
-                  <TableHead>Status</TableHead>
-                  <TableHead>Retries</TableHead>
-                  <TableHead>Processed At</TableHead>
-                  <TableHead>Error</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {selectedBatchMessages.map((msg: any) => (
-                  <TableRow key={msg.id}>
-                    <TableCell className="font-medium text-gray-900">{msg.phone}</TableCell>
-                    <TableCell className="text-gray-500">{msg.user_name || '—'}</TableCell>
-                    <TableCell>
-                      <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${msg.status === 'delivered' ? 'bg-green-100 text-green-800' :
-                          msg.status === 'pending' ? 'bg-gray-100 text-gray-800' :
-                            msg.status === 'processing' ? 'bg-blue-100 text-blue-800' :
-                              msg.status === 'failed' ? 'bg-red-100 text-red-800' :
-                                'bg-gray-200 text-gray-600'
-                        }`}>
-                        {msg.status === 'delivered' ? '✅' : msg.status === 'pending' ? '⏳' : msg.status === 'processing' ? '⚙️' : msg.status === 'failed' ? '❌' : '💀'} {msg.status}
-                      </span>
-                    </TableCell>
-                    <TableCell className="text-gray-500">{msg.retry_count}/{msg.max_retries}</TableCell>
-                    <TableCell className="text-gray-500 text-sm">
-                      {msg.processed_at ? new Date(msg.processed_at).toLocaleString('en-IN', {
-                        day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit'
-                      }) : '—'}
-                    </TableCell>
-                    <TableCell className="text-xs text-red-500 max-w-[200px] truncate">
-                      {msg.last_error || '—'}
-                    </TableCell>
-                  </TableRow>
-                ))}
-                {selectedBatchMessages.length === 0 && (
-                  <TableRow>
-                    <TableCell colSpan={6} className="text-center py-6 text-gray-500">No messages in this batch</TableCell>
-                  </TableRow>
-                )}
-              </TableBody>
-            </Table>
-          </div>
-          <div className="pt-4 flex justify-between items-center border-t mt-2">
-            <span className="text-sm text-gray-500">
-              {selectedBatchMessages.length} messages · {selectedBatchMessages.filter((m: any) => m.status === 'delivered').length} delivered
-            </span>
-            <div className="flex gap-2">
-              {selectedBatchDetail && selectedBatchDetail.failed_count > 0 && (
-                <Button variant="outline" className="text-amber-600 border-amber-200 hover:bg-amber-50" onClick={() => { retryFailedMessages(selectedBatchDetail.id); setShowBatchDetailDialog(false); }}>
-                  🔄 Retry Failed
-                </Button>
-              )}
-              <Button variant="ghost" onClick={() => setShowBatchDetailDialog(false)}>Close</Button>
-            </div>
-          </div>
-        </DialogContent>
-      </Dialog>
+
     </div>
   );
 };

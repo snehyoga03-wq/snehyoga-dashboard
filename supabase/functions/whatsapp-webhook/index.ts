@@ -2,8 +2,8 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 
 const VERIFY_TOKEN = Deno.env.get("VERIFY_TOKEN") || "snehyoga_webhook_token_2026";
 const WA_API_VERSION = "v20.0";
-const DEFAULT_META_TOKEN = "EAAX2HQ7QpvUBSZAK3krfGE7pLN8pW3WoUZCSJZCJsZB4oallIQNagAXwCqENBRZBO3kOGbABFyeI0IqrkZAsuA5lft4kVWrtuoy9MylP9RDz2BV5uEFLjNFBNuU9CJqzFMEMYLZBTn8ZCswZCE8CubZCg0KliOITU9t43FlGZA6HBSyS819nxhAdvTZBOl8IhT5tbV2LHQZDZD";
-const DEFAULT_PHONE_ID = "1230157110176906"; // Primary Real Phone ID
+const DEFAULT_META_TOKEN = "EAAPkGZC1jq5YBSk3DxrmHGBbtfrHCWrbFoN1LmMQBi9EbZAnRcbiQtcy72J9abjpQNVURVV7bNdSJGBeG9ZAsZCUhDkFsJc8FYXtTvqhDnaZBFjDVNFuDYOkFZBKFMHZAEhOIrrVaACnKqZCKLhrKnSPmCEZCOAZBER1zS85tKHZCRoyYlcdGBOSQXA4iGjRrpS4AZDZD";
+const DEFAULT_PHONE_ID = "1325180137347203";
 const ALT_PHONE_ID = "808910018982018";
 
 const DEFAULT_SUPABASE_URL = "https://bzqwaxqzggejpejyxhde.supabase.co";
@@ -14,6 +14,17 @@ const corsHeaders = {
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
 };
 
+// Helper: extract slug from referral link e.g. "https://yog.snehyoga.com/?ref=snehfgh05" -> "snehfgh05"
+function getSlug(referralLink: string | null): string {
+  if (!referralLink) return "default";
+  const refMatch = referralLink.match(/ref=([^&]+)/);
+  if (refMatch?.[1]) return refMatch[1];
+  const joinMatch = referralLink.match(/\/join\/([^/?]+)/);
+  if (joinMatch?.[1]) return joinMatch[1];
+  const clean = referralLink.replace(/https?:\/\/[^/]+\/?/, "").replace(/\?.*/, "").trim();
+  return clean || "default";
+}
+
 // Helper: Format recipient phone number with Indian country code 91
 function formatWaPhone(phone: string): string {
   let clean = (phone || "").replace(/\D/g, "");
@@ -23,7 +34,7 @@ function formatWaPhone(phone: string): string {
   return clean;
 }
 
-// Send a WhatsApp message back to user via Meta Cloud API with fallback Phone ID
+// Send a WhatsApp message back to user via Meta Cloud API
 async function sendWAMessage(phoneNumberId: string, waToken: string, toPhone: string, bodyText: string, buttons?: any[]) {
   const formattedPhone = formatWaPhone(toPhone);
   
@@ -68,18 +79,11 @@ async function sendWAMessage(phoneNumberId: string, waToken: string, toPhone: st
     return { ok: res.ok, status: res.status, json };
   };
 
-  // Attempt 1: Try with passed phoneNumberId
   let result = await trySend(phoneNumberId);
-
-  // Attempt 2: If failed, retry with DEFAULT_PHONE_ID if different
   if (!result.ok && phoneNumberId !== DEFAULT_PHONE_ID) {
-    console.log(`⚠️ Primary PhoneID ${phoneNumberId} failed. Retrying with ${DEFAULT_PHONE_ID}...`);
     result = await trySend(DEFAULT_PHONE_ID);
   }
-
-  // Attempt 3: If still failed, try ALT_PHONE_ID
   if (!result.ok && phoneNumberId !== ALT_PHONE_ID) {
-    console.log(`⚠️ Retrying with fallback PhoneID ${ALT_PHONE_ID}...`);
     result = await trySend(ALT_PHONE_ID);
   }
 
@@ -126,7 +130,7 @@ Deno.serve(async (req) => {
         let userMsgText = "";
         let buttonPayload = "";
 
-        // Extract message content based on WhatsApp type
+        // Extract message content based on WhatsApp message type
         if (message.type === "text") {
           userMsgText = message.text?.body || "";
         } else if (message.type === "button") {
@@ -143,14 +147,15 @@ Deno.serve(async (req) => {
           }
         }
 
-        console.log(`💬 Message from ${userName} (${fromPhone}): "${userMsgText}" (payload: "${buttonPayload}")`);
+        const cleanInput = (userMsgText || buttonPayload).toLowerCase().trim();
+        console.log(`💬 Incoming message from ${userName} (${fromPhone}): "${userMsgText}" (payload: "${buttonPayload}", cleanInput: "${cleanInput}")`);
 
         // Initialize Supabase Client
         const supabaseUrl = Deno.env.get("SUPABASE_URL") || DEFAULT_SUPABASE_URL;
         const supabaseServiceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") || Deno.env.get("SUPABASE_ANON_KEY") || DEFAULT_SUPABASE_KEY;
         const supabase = createClient(supabaseUrl, supabaseServiceKey);
 
-        // 1. Store incoming message in chat_messages table for CRM Live Chat
+        // 1. Store incoming user message in chat_messages table for CRM Live Chat timeline
         try {
           await supabase.from("chat_messages").insert({
             user_phone: fromPhone,
@@ -164,19 +169,15 @@ Deno.serve(async (req) => {
           console.warn("Could not insert to chat_messages:", dbErr);
         }
 
-        // 2. Fetch WhatsApp API config from session_settings or use fallback
+        // 2. Fetch WhatsApp API credentials & default links from session_settings
         let waToken = DEFAULT_META_TOKEN;
         let phoneNumberId = DEFAULT_PHONE_ID;
-
-        let googleAiKey = "";
-        let aiSystemPrompt = "You are the official Snehyoga AI Counselor. Assist students warmly with batch timings (6 AM, 11 AM, 4 PM), subscription plans, and links. Be concise.";
-        let aiEnabled = false;
-        let aiAllowedNumbers = "*";
+        let defaultSessionLink = "https://yoga.snehyoga.com";
 
         try {
           const { data: settings } = await supabase
             .from("session_settings")
-            .select("wa_api_token, wa_phone_number_id, whatsapp_api_token, whatsapp_phone_number_id, google_ai_studio_key, ai_system_prompt, ai_enabled, ai_allowed_numbers")
+            .select("wa_api_token, wa_phone_number_id, whatsapp_api_token, whatsapp_phone_number_id, session_link")
             .maybeSingle();
 
           if (settings?.whatsapp_api_token || settings?.wa_api_token) {
@@ -185,29 +186,45 @@ Deno.serve(async (req) => {
           if (settings?.whatsapp_phone_number_id || settings?.wa_phone_number_id) {
             phoneNumberId = (settings.whatsapp_phone_number_id || settings.wa_phone_number_id).trim();
           }
-          if (settings?.google_ai_studio_key) googleAiKey = settings.google_ai_studio_key.trim();
-          if (settings?.ai_system_prompt) aiSystemPrompt = settings.ai_system_prompt.trim();
-          if (settings?.ai_enabled !== undefined) aiEnabled = Boolean(settings.ai_enabled);
-          if (settings?.ai_allowed_numbers) aiAllowedNumbers = settings.ai_allowed_numbers.trim();
+          if (settings?.session_link) {
+            try {
+              const parsedLink = typeof settings.session_link === "string" ? JSON.parse(settings.session_link) : settings.session_link;
+              const days = ["sun", "mon", "tue", "wed", "thu", "fri", "sat"];
+              const todayKey = `w1_${days[new Date().getDay()]}`;
+              if (parsedLink?.[todayKey] || parsedLink?.w1_mon) {
+                defaultSessionLink = parsedLink[todayKey] || parsedLink.w1_mon;
+              }
+            } catch (_) {}
+          }
         } catch (_) {}
 
-        // 3. Determine Response Message using Flow Graph Edge Traversal Engine
-        let replyText = `Namaste ${userName}! Welcome to Sneha Yoga 🙏 How can we help you today?`;
-        let replyButtons: any[] = [
-          { id: "btn_class", text: "Yoga Class Schedule" },
-          { id: "btn_pricing", text: "Subscription Plans" }
-        ];
-        let flowMatched = false;
+        // Look up target user's personal joining link from main_data_registration
+        let userSessionLink = "https://yoga.snehyoga.com/join/default";
+        try {
+          const last10 = fromPhone.slice(-10);
+          const { data: matchedUser } = await supabase
+            .from("main_data_registration")
+            .select("name, referral_link, mobile_number")
+            .ilike("mobile_number", `%${last10}%`)
+            .maybeSingle();
 
-        // 4. Graph Edge Traversal for Flow Builder
+          if (matchedUser?.referral_link?.trim()) {
+            const slug = getSlug(matchedUser.referral_link.trim());
+            userSessionLink = `https://yoga.snehyoga.com/join/${slug}`;
+          }
+        } catch (_) {}
+
+        // 3. Smart Flow Graph & Keyword Traversal Engine
         try {
           const { data: flows } = await supabase
             .from("whatsapp_flows")
             .select("*")
             .eq("status", true);
 
+          let replySent = false;
+
           if (flows && flows.length > 0) {
-            const cleanInput = (userMsgText || buttonPayload).toLowerCase().trim();
+            console.log(`🔍 Checking ${flows.length} active flow(s) for input: "${cleanInput}"`);
 
             for (const flow of flows) {
               const nodes = flow.nodes || [];
@@ -216,34 +233,65 @@ Deno.serve(async (req) => {
               let sourceNode = null;
               let matchedButtonIndex = -1;
 
+              // Step A: Match explicit Trigger Nodes or Message Node Buttons
               for (const n of nodes) {
                 if (n.type === "triggerNode") {
                   const keywords: string[] = n.data?.keywords || [];
-                  if (keywords.length === 0 || keywords.some(k => cleanInput.includes(k.toLowerCase().trim()))) {
+                  if (keywords.length > 0 && keywords.some(k => {
+                    const cleanK = k.toLowerCase().trim();
+                    return cleanInput.includes(cleanK) || cleanK.includes(cleanInput);
+                  })) {
                     sourceNode = n;
+                    console.log(`🎯 Matched TriggerNode (${n.id}) in flow "${flow.name}"`);
                     break;
                   }
                 } else if (n.type === "messageNode") {
                   const buttons = n.data?.buttons || [];
-                  const btnIdx = buttons.findIndex((b: any) => 
-                    cleanInput.includes((b.text || "").toLowerCase().trim()) ||
-                    cleanInput.includes((b.id || "").toLowerCase().trim())
-                  );
+                  const btnIdx = buttons.findIndex((b: any, idx: number) => {
+                    const bText = (b.text || b.title || "").toLowerCase().trim();
+                    const bId = (b.id || "").toLowerCase().trim();
+                    if (!bText && !bId) return false;
+
+                    return (
+                      (bText && (cleanInput.includes(bText) || bText.includes(cleanInput) || bText.startsWith(cleanInput) || cleanInput.startsWith(bText))) ||
+                      (bId && (cleanInput.includes(bId) || bId.includes(cleanInput))) ||
+                      buttonPayload === `btn-${idx}` ||
+                      buttonPayload === `btn_${idx}` ||
+                      buttonPayload === `tpl-btn-${idx}`
+                    );
+                  });
 
                   if (btnIdx !== -1) {
                     sourceNode = n;
                     matchedButtonIndex = btnIdx;
-                    break;
-                  }
-
-                  const aiKeyword = n.data?.aiKeyword || "";
-                  if (aiKeyword && cleanInput.includes(aiKeyword.toLowerCase().trim())) {
-                    sourceNode = n;
+                    console.log(`🎯 Matched MessageNode button index ${btnIdx} (${n.id}) in flow "${flow.name}"`);
                     break;
                   }
                 }
               }
 
+              // Step B: Keyword fallback match for Morning / Evening session links
+              if (!sourceNode) {
+                for (const n of nodes) {
+                  if (n.type === "messageNode") {
+                    const nodeText = (n.data?.text || n.data?.label || "").toLowerCase();
+                    if (nodeText && cleanInput.length >= 3) {
+                      if (cleanInput.includes("morning") && nodeText.includes("morning")) {
+                        sourceNode = n;
+                        console.log(`🎯 Matched Morning Yoga MessageNode (${n.id})`);
+                        break;
+                      }
+                      if (cleanInput.includes("evening") && nodeText.includes("evening")) {
+                        sourceNode = n;
+                        console.log(`🎯 Matched Evening Yoga MessageNode (${n.id})`);
+                        break;
+                      }
+                    }
+                  }
+                }
+              }
+
+              // Step C: Route to target response node
               if (sourceNode) {
                 let targetNode = null;
 
@@ -259,6 +307,7 @@ Deno.serve(async (req) => {
 
                   if (targetEdge) {
                     targetNode = nodes.find((n: any) => n.id === targetEdge.target);
+                    console.log(`➡️ Connected edge to TargetNode (${targetNode?.id})`);
                   }
                 }
 
@@ -269,136 +318,61 @@ Deno.serve(async (req) => {
                   }
                 }
 
-                if (!targetNode) targetNode = sourceNode;
+                if (!targetNode && sourceNode.type === "messageNode") {
+                  targetNode = sourceNode;
+                }
 
                 if (targetNode && targetNode.type === "messageNode") {
-                  replyText = targetNode.data?.text || replyText;
-                  replyButtons = targetNode.data?.buttons || [];
+                  let replyText = targetNode.data?.text || "";
+                  let replyButtons: any[] = targetNode.data?.buttons || [];
 
                   replyText = replyText
                     .replace(/{{user_name}}/g, userName)
-                    .replace(/{{session_link}}/g, "https://yoga.snehyoga.com");
-                  flowMatched = true;
+                    .replace(/{{session_link}}/g, userSessionLink);
+
+                  console.log(`🚀 Sending Flow Response to ${fromPhone}:\n"${replyText}"`);
+                  await sendWAMessage(phoneNumberId, waToken, fromPhone, replyText, replyButtons);
+
+                  // Log outgoing bot reply to chat_messages table for CRM timeline
+                  await supabase.from("chat_messages").insert({
+                    user_phone: fromPhone,
+                    user_name: "Bot",
+                    message: replyText,
+                    sender_type: "bot",
+                    is_read: true,
+                    created_at: new Date().toISOString()
+                  });
+
+                  console.log(`✅ Outgoing Flow Response logged in chat_messages for ${fromPhone}`);
+                  replySent = true;
                   break;
                 }
               }
             }
           }
-        } catch (flowErr) {
-          console.warn("Could not traverse flow graph:", flowErr);
-        }
 
-        // 5. If unhandled by Flow Builder and AI is enabled -> Query Google Gemini with Knowledge Base
-        if (!flowMatched && aiEnabled && googleAiKey) {
-          try {
-            // Whitelist verification
-            let isAllowed = true;
-            if (aiAllowedNumbers && aiAllowedNumbers !== "*") {
-              const allowedList = aiAllowedNumbers.split(",").map(p => p.replace(/\D/g, ""));
-              const cleanFrom = fromPhone.replace(/\D/g, "");
-              isAllowed = allowedList.some(num => cleanFrom.includes(num) || num.includes(cleanFrom));
-            }
+          // Step D: General Fallback for Session Link requests
+          if (!replySent && (cleanInput.includes("morning") || cleanInput.includes("evening") || cleanInput.includes("join") || cleanInput.includes("session") || cleanInput.includes("link"))) {
+            const fallbackText = `Namaste ${userName} 🙏\n\nYour Yoga Session link is ready! 🧘✨\n\nPersonal Joining Link: ${userSessionLink}\n\nPlease join 5 minutes early with your yoga mat ready. Let's start with positive energy!\n\nSneha Yoga Studio 🌸`;
+            
+            console.log(`🚀 Sending Direct Session Link Fallback to ${fromPhone}`);
+            await sendWAMessage(phoneNumberId, waToken, fromPhone, fallbackText);
 
-            if (isAllowed) {
-              console.log(`🤖 AI Auto-Responder triggered for ${fromPhone}...`);
+            await supabase.from("chat_messages").insert({
+              user_phone: fromPhone,
+              user_name: "Bot",
+              message: fallbackText,
+              sender_type: "bot",
+              is_read: true,
+              created_at: new Date().toISOString()
+            });
 
-              // Fetch Knowledge Base
-              const { data: kbData } = await supabase
-                .from("ai_knowledge_base")
-                .select("category, question, answer");
-
-              const kbText = (kbData || [])
-                .map((k: any, i: number) => `${i + 1}. [${k.category}] Q: ${k.question}\nA: ${k.answer}`)
-                .join("\n\n");
-
-              // Fetch recent chat history for context
-              const { data: recentHistory } = await supabase
-                .from("chat_messages")
-                .select("sender_type, message")
-                .eq("user_phone", fromPhone)
-                .order("created_at", { ascending: false })
-                .limit(4);
-
-              const historyText = (recentHistory || [])
-                .reverse()
-                .map((m: any) => `${m.sender_type === "user" ? "Student" : "Assistant"}: ${m.message}`)
-                .join("\n");
-
-              const prompt = `${aiSystemPrompt}
-
-Verified Snehyoga Knowledge Base:
-${kbText}
-
-Recent Chat History:
-${historyText}
-
-Latest Student Message: "${userMsgText}"
-
-INSTRUCTIONS:
-1. Respond in strict JSON format:
-   {"type": "trigger_flow", "flowId": "<flow_id>"} OR {"type": "reply", "text": "<your answer>"}
-2. Answer student questions using the Knowledge Base. Keep the response polite, inspiring, and concise.`;
-
-              const geminiRes = await fetch(
-                `https://generativelanguage.googleapis.com/v1beta/models/gemini-flash-lite-latest:generateContent?key=${googleAiKey}`,
-                {
-                  method: "POST",
-                  headers: { "Content-Type": "application/json" },
-                  body: JSON.stringify({
-                    contents: [{ role: "user", parts: [{ text: prompt }] }]
-                  })
-                }
-              );
-
-              const geminiJson = await geminiRes.json();
-              const rawAiOutput = geminiJson.candidates?.[0]?.content?.parts?.[0]?.text || "";
-              const cleanedJson = rawAiOutput.replace(/```json/g, "").replace(/```/g, "").trim();
-
-              try {
-                const parsedAi = JSON.parse(cleanedJson);
-                if (parsedAi.type === "reply" && parsedAi.text) {
-                  replyText = parsedAi.text;
-                  replyButtons = []; // AI text response
-                } else if (parsedAi.type === "trigger_flow" && parsedAi.flowId) {
-                  // Attempt trigger flow
-                  const { data: targetFlow } = await supabase
-                    .from("whatsapp_flows")
-                    .select("*")
-                    .eq("id", parsedAi.flowId)
-                    .maybeSingle();
-
-                  if (targetFlow?.nodes?.[0]?.data?.text) {
-                    replyText = targetFlow.nodes[0].data.text.replace(/{{user_name}}/g, userName);
-                    replyButtons = targetFlow.nodes[0].data.buttons || [];
-                  }
-                }
-              } catch (_) {
-                if (cleanedJson && cleanedJson.length > 5) {
-                  replyText = cleanedJson;
-                  replyButtons = [];
-                }
-              }
-            }
-          } catch (aiErr) {
-            console.warn("AI Auto-Responder error:", aiErr);
+            console.log(`✅ Direct Session Link Fallback logged in chat_messages for ${fromPhone}`);
           }
+
+        } catch (flowErr) {
+          console.warn("Could not process flow graph:", flowErr);
         }
-
-        // 6. Send Auto-Reply back to WhatsApp User
-        console.log(`🚀 Sending auto-reply to ${fromPhone}...`);
-        await sendWAMessage(phoneNumberId, waToken, fromPhone, replyText, replyButtons);
-
-        // 7. Log outgoing bot message in chat_messages table
-        try {
-          await supabase.from("chat_messages").insert({
-            user_phone: fromPhone,
-            user_name: "Bot",
-            message: replyText,
-            sender_type: "bot",
-            is_read: true,
-            created_at: new Date().toISOString()
-          });
-        } catch (_) {}
       }
 
       return new Response(JSON.stringify({ success: true }), {
@@ -406,8 +380,8 @@ INSTRUCTIONS:
         status: 200,
       });
     } catch (error) {
-      console.error("Webhook processing caught error:", error);
-      return new Response(JSON.stringify({ success: true, warning: "Processed with fallback" }), {
+      console.error("Webhook processing error:", error);
+      return new Response(JSON.stringify({ success: true, warning: "Processed with error handling" }), {
         headers: { ...corsHeaders, "Content-Type": "application/json" },
         status: 200,
       });
@@ -416,3 +390,4 @@ INSTRUCTIONS:
 
   return new Response("Method not allowed", { status: 405 });
 });
+

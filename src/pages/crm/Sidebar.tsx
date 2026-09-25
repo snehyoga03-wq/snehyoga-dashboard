@@ -38,7 +38,6 @@ const menuItems = [
     { id: 'chats', label: 'Chats', icon: MessageCircle },
     { id: 'whatsapp-flow', label: 'WhatsApp Flow', icon: Workflow },
     { id: 'reminders', label: 'Reminders', icon: Calendar },
-    { id: 'message-queue', label: 'Message Queue', icon: SendHorizonal },
     { id: 'session-links', label: 'Session Settings', icon: Link2 },
     { id: 'sap-portal', label: 'SAP Portal', icon: LayoutDashboard },
     { id: 'others', label: 'Others', icon: Settings },
