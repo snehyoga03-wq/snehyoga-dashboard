@@ -2,7 +2,7 @@ import { useState, useRef, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { 
   Search, Send, Paperclip, Smile, Phone, Video, MoreVertical, ArrowLeft, 
-  Check, CheckCheck, MessageCircle, Plus, Filter, Zap, X, Sparkles, RefreshCw, Loader2 
+  Check, CheckCheck, MessageCircle, Plus, Filter, Zap, X, Sparkles, RefreshCw, Loader2, MousePointerClick 
 } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/components/ui/use-toast";
@@ -45,6 +45,87 @@ const normalizePhone = (phoneStr: string) => {
   if (p.length === 12 && p.startsWith("91")) p = p.substring(2);
   return p;
 };
+
+const markContactAsRead = async (phoneStr: string) => {
+  const normP = normalizePhone(phoneStr);
+  if (!normP) return;
+
+  const phoneVariants = Array.from(new Set([
+    normP,
+    `91${normP}`,
+    `+91${normP}`,
+    `+${normP}`
+  ]));
+
+  try {
+    await supabase
+      .from("chat_messages")
+      .update({ is_read: true })
+      .in("user_phone", phoneVariants)
+      .eq("sender_type", "user");
+  } catch (err) {
+    console.warn("markContactAsRead error:", err);
+  }
+};
+const isKnownButtonClick = (text: string): boolean => {
+  if (!text) return false;
+  const t = text.trim();
+  if (/^\[Button Click(ed)?:/i.test(t) || t === "[Button Click]") return true;
+
+  const lower = t.toLowerCase();
+  const buttonKeywords = [
+    "join morning yoga",
+    "join evening yoga",
+    "morning yoga session",
+    "evening yoga session",
+    "join morning",
+    "join evening",
+    "join session",
+    "yes i will join",
+    "confirm attendance",
+    "reschedule slot"
+  ];
+
+  return buttonKeywords.some(k => lower.includes(k) || k.includes(lower));
+};
+
+const getFullTemplateContent = (text: string, templatesList: Template[]) => {
+  const tplMatch = text.match(/\[(?:Daily Reminder|Template):\s*([^\]]+)\]/i);
+  const tplName = tplMatch?.[1]?.trim() || "";
+  
+  // Extract batch if present
+  const batchMatch = text.match(/Batch:\s*([^\n]+)/i);
+  const batchStr = batchMatch?.[1]?.trim();
+
+  // Try to find matching Meta template from live API fetch
+  const matchedTpl = templatesList.find(t => t.name.toLowerCase() === tplName.toLowerCase());
+
+  let bodyText = matchedTpl?.body || "";
+
+  if (!bodyText && tplName) {
+    const dictionary: Record<string, string> = {
+      "snehyoga_class_reminder_02": "Namaste 🙏\nYour Yoga Session is starting soon! 🧘✨\n\nPlease join 5 minutes early with your yoga mat ready. Let's start the day with positive energy & mindfulness!\n\nSneha Yoga Studio 🌸",
+      "snehyoga_class_reminder_01": "Namaste 🙏\nYour Morning Yoga Session is about to begin. Tap the button below to join live class! 🧘✨",
+      "daily_reminder": "Namaste 🙏\nYour daily Yoga Class session link is ready. Join your session now!"
+    };
+    bodyText = dictionary[tplName] || "";
+  }
+
+  // If we still don't have a custom body, clean out raw brackets from text
+  if (!bodyText) {
+    bodyText = text.replace(/\[(?:Daily Reminder|Template):[^\]]+\]/i, "").trim();
+    if (!bodyText || bodyText.startsWith("Batch:")) {
+      bodyText = `Namaste 🙏\nYour Yoga Session is starting soon! 🧘✨\n\nPlease join 5 minutes early with your yoga mat ready. Let's start the day with positive energy!\n\nSneha Yoga Studio 🌸`;
+    }
+  }
+
+  return {
+    tplName: tplName || "WhatsApp Template",
+    bodyText,
+    batchStr
+  };
+};
+
 const Avatar = ({ name, isOnline }: { name: string; isOnline?: boolean }) => {
   const colors = ["#25D366", "#128C7E", "#075E54", "#34B7F1", "#00A884", "#667781"];
   const idx = (name || "U").charCodeAt(0) % colors.length;
@@ -100,6 +181,7 @@ export function WhatsAppChat() {
     }
 
     try {
+      // Fetch chat messages
       const { data: dbMsgs, error } = await supabase
         .from("chat_messages")
         .select("*")
@@ -113,55 +195,117 @@ export function WhatsAppChat() {
       const rawMsgs = dbMsgs || [];
       setAllMessages(rawMsgs);
 
-      // Group by user_phone
-      const groupedContacts: Record<string, { phone: string; name: string; lastMsg: string; lastTime: string; unread: number; rawTime: number } > = {};
+      // Fetch DB registration and leads for Database Name fallback
+      const dbNamesMap: Record<string, string> = {};
+      try {
+        const [{ data: regData }, { data: leadsData }] = await Promise.all([
+          supabase.from("main_data_registration").select("name, mobile_number"),
+          supabase.from("leads").select("name, phone, mobile").catch(() => ({ data: null }))
+        ]);
+
+        if (regData) {
+          for (const r of regData) {
+            if (r.mobile_number && r.name) {
+              const normP = normalizePhone(r.mobile_number);
+              const cleanN = r.name.trim();
+              if (normP && cleanN && cleanN !== "User" && cleanN !== "NA" && cleanN !== "Unknown") {
+                dbNamesMap[normP] = cleanN;
+              }
+            }
+          }
+        }
+        if (leadsData && Array.isArray(leadsData)) {
+          for (const l of (leadsData as any[])) {
+            const p = l.phone || l.mobile;
+            if (p && l.name) {
+              const normP = normalizePhone(p);
+              const cleanN = l.name.trim();
+              if (normP && cleanN && cleanN !== "User" && cleanN !== "NA" && cleanN !== "Unknown" && !dbNamesMap[normP]) {
+                dbNamesMap[normP] = cleanN;
+              }
+            }
+          }
+        }
+      } catch (e) {
+        console.warn("DB name lookup notice:", e);
+      }
+
+      const isValidMetaName = (str: string | null | undefined): boolean => {
+        if (!str) return false;
+        const s = str.trim();
+        if (!s) return false;
+        const lower = s.toLowerCase();
+        if (lower === "bot" || lower === "user" || lower === "na" || lower === "n/a" || lower === "null" || lower === "undefined") return false;
+        if (/^\+?\d+$/.test(s.replace(/\s+/g, ""))) return false;
+        return true;
+      };
+
+      // Group by user_phone (10-digit normalized)
+      const groupedContacts: Record<string, { phone: string; metaName: string; lastMsg: string; lastTime: string; unread: number; rawTime: number }> = {};
 
       for (const m of rawMsgs) {
         const rawP = m.user_phone || "unknown";
         const p = normalizePhone(rawP) || rawP;
-        const name = m.user_name && m.user_name !== "User" ? m.user_name : (rawP || p);
         const msgTime = new Date(m.created_at);
         const timeStr = msgTime.toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" });
+        const isMeta = isValidMetaName(m.user_name);
 
         if (!groupedContacts[p]) {
           groupedContacts[p] = {
             phone: p,
-            name: name,
+            metaName: isMeta ? m.user_name.trim() : "",
             lastMsg: m.message || "",
             lastTime: timeStr,
-            unread: m.sender_type === "user" && !m.is_read ? 1 : 0,
+            unread: (m.sender_type === "user" && !m.is_read) ? 1 : 0,
             rawTime: msgTime.getTime()
           };
         } else {
           groupedContacts[p].lastMsg = m.message || "";
           groupedContacts[p].lastTime = timeStr;
           groupedContacts[p].rawTime = msgTime.getTime();
-          if (m.user_name && m.user_name !== "User") groupedContacts[p].name = m.user_name;
-          if (m.sender_type === "user" && !m.is_read) groupedContacts[p].unread += 1;
+          if (isMeta) {
+            groupedContacts[p].metaName = m.user_name.trim();
+          }
+          if (m.sender_type === "user" && !m.is_read) {
+            groupedContacts[p].unread += 1;
+          }
         }
       }
 
-      // Convert to array sorted by latest activity
+      // Priority 1: Meta Profile Name
+      // Priority 2: Our Database Registration Name
+      // Priority 3: Formatted Phone Number
       const contactList: Contact[] = Object.values(groupedContacts)
         .sort((a, b) => b.rawTime - a.rawTime)
-        .map(c => ({
-          id: c.phone,
-          name: c.name,
-          phone: c.phone,
-          lastMessage: c.lastMsg,
-          lastTime: c.lastTime,
-          unreadCount: c.unread,
-          isOnline: true,
-          labels: ["Live Webhook"]
-        }));
+        .map(c => {
+          let resolvedName = c.metaName;
+          if (!resolvedName) {
+            resolvedName = dbNamesMap[c.phone] || (c.phone.length === 10 ? `+91 ${c.phone}` : c.phone);
+          }
+          return {
+            id: c.phone,
+            name: resolvedName,
+            phone: c.phone,
+            lastMessage: c.lastMsg,
+            lastTime: c.lastTime,
+            unreadCount: c.unread,
+            isOnline: true,
+            labels: ["Live Webhook"]
+          };
+        });
 
       setContacts(contactList);
 
       // Keep selected contact synced if open using the current ref
       const currentSelected = selectedContactRef.current;
       if (currentSelected) {
-        const updatedSel = contactList.find(c => c.id === currentSelected.id);
+        const normSel = normalizePhone(currentSelected.phone);
+        const updatedSel = contactList.find(c => normalizePhone(c.phone) === normSel);
         if (updatedSel) {
+          if (updatedSel.unreadCount > 0) {
+            markContactAsRead(currentSelected.phone);
+            updatedSel.unreadCount = 0;
+          }
           setSelectedContact(prev => prev ? { ...prev, ...updatedSel } : updatedSel);
         }
       }
@@ -320,14 +464,21 @@ export function WhatsAppChat() {
   // Mark conversation as read when clicked
   const handleSelectContact = async (contact: Contact) => {
     setSelectedContact(contact);
-    setContacts(prev => prev.map(c => c.id === contact.id ? { ...c, unreadCount: 0 } : c));
-    try {
-      await supabase
-        .from("chat_messages")
-        .update({ is_read: true })
-        .eq("user_phone", contact.phone)
-        .eq("sender_type", "user");
-    } catch (_) {}
+    const normP = normalizePhone(contact.phone);
+
+    // Optimistically set unreadCount to 0 for this contact
+    setContacts(prev => prev.map(c => normalizePhone(c.phone) === normP ? { ...c, unreadCount: 0 } : c));
+
+    // Optimistically update allMessages state
+    setAllMessages(prev => prev.map(m => {
+      if (normalizePhone(m.user_phone) === normP && m.sender_type === "user") {
+        return { ...m, is_read: true };
+      }
+      return m;
+    }));
+
+    // Update DB matching all phone variants
+    await markContactAsRead(contact.phone);
   };
 
   // 5. Send LIVE WhatsApp Text Message via Meta API
@@ -606,39 +757,87 @@ export function WhatsAppChat() {
 
           {/* Messages Area */}
           <div className="flex-1 overflow-y-auto px-4 md:px-12 py-4 space-y-2" style={{ backgroundImage: "url(\"data:image/svg+xml,%3Csvg width='60' height='60' viewBox='0 0 60 60' xmlns='http://www.w3.org/2000/svg'%3E%3Cg fill='none' fill-rule='evenodd'%3E%3Cg fill='%23d4cfc6' fill-opacity='0.15'%3E%3Cpath d='M36 34v-4h-2v4h-4v2h4v4h2v-4h4v-2h-4zm0-30V0h-2v4h-4v2h4v4h2V6h4V4h-4zM6 34v-4H4v4H0v2h4v4h2v-4h4v-2H6zM6 4V0H4v4H0v2h4v4h2V6h4V4H6z'/%3E%3C/g%3E%3C/g%3E%3C/svg%3E\")" }}>
-            {currentChatMessages.map((msg) => (
-              <motion.div
-                key={msg.id}
-                initial={{ opacity: 0, y: 8, scale: 0.95 }}
-                animate={{ opacity: 1, y: 0, scale: 1 }}
-                className={`flex ${msg.sender === "admin" || msg.sender === "bot" ? "justify-end" : "justify-start"}`}
-              >
-                <div className={`relative max-w-[75%] md:max-w-[65%] px-3 py-2 rounded-lg shadow-sm ${
-                  msg.sender === "admin"
-                    ? "bg-[#d9fdd3] rounded-tr-none border border-emerald-200"
-                    : msg.sender === "bot"
-                    ? "bg-emerald-50 rounded-tr-none border border-emerald-300 text-emerald-950"
-                    : "bg-white rounded-tl-none border border-gray-100"
-                }`}>
-                  {msg.sender === "bot" && (
-                    <div className="flex items-center gap-1 mb-1 pb-1 border-b border-emerald-200/60 text-[10px] font-bold text-emerald-700 uppercase">
-                      <Sparkles size={11} className="text-emerald-600" /> Bot Auto-Reply
+            {currentChatMessages.map((msg) => {
+              const isBtnClick = isKnownButtonClick(msg.text);
+              const cleanBtnLabel = isBtnClick
+                ? msg.text.replace(/^\[Button Click(ed)?:?\s*/i, "").replace(/\]$/, "").trim()
+                : msg.text;
+
+              const isTemplate = msg.type === "template" || msg.text.startsWith("[Daily Reminder:") || msg.text.startsWith("[Template:");
+              const tplDetails = isTemplate ? getFullTemplateContent(msg.text, templates) : null;
+
+              return (
+                <motion.div
+                  key={msg.id}
+                  initial={{ opacity: 0, y: 8, scale: 0.95 }}
+                  animate={{ opacity: 1, y: 0, scale: 1 }}
+                  className={`flex ${msg.sender === "admin" || msg.sender === "bot" ? "justify-end" : "justify-start"}`}
+                >
+                  <div className={`relative max-w-[85%] md:max-w-[72%] px-3.5 py-2.5 rounded-xl shadow-sm ${
+                    msg.sender === "admin"
+                      ? "bg-[#d9fdd3] rounded-tr-none border border-emerald-200"
+                      : msg.sender === "bot"
+                      ? "bg-emerald-50 rounded-tr-none border border-emerald-300 text-emerald-950"
+                      : isBtnClick
+                      ? "bg-gradient-to-r from-emerald-600 via-emerald-500 to-teal-600 text-white rounded-tl-none shadow-md border border-emerald-400/50"
+                      : "bg-white rounded-tl-none border border-gray-100"
+                  }`}>
+                    {msg.sender === "bot" && (
+                      <div className="flex items-center gap-1 mb-1 pb-1 border-b border-emerald-200/60 text-[10px] font-bold text-emerald-700 uppercase">
+                        <Sparkles size={11} className="text-emerald-600" /> Bot Auto-Reply
+                      </div>
+                    )}
+
+                    {isBtnClick ? (
+                      <div className="flex flex-col gap-1 my-0.5">
+                        <div className="flex items-center gap-1.5 text-[10px] font-bold tracking-wider uppercase text-emerald-100/90">
+                          <MousePointerClick size={13} className="animate-bounce text-emerald-200 shrink-0" />
+                          <span>Button Clicked (Quick Reply)</span>
+                        </div>
+                        <div className="text-sm font-bold tracking-wide flex items-center justify-between gap-2">
+                          <span>"{cleanBtnLabel}"</span>
+                          <span className="text-[10px] bg-white/20 text-white px-2 py-0.5 rounded-full font-medium shrink-0">
+                            Interactive ⚡
+                          </span>
+                        </div>
+                      </div>
+                    ) : isTemplate && tplDetails ? (
+                      <div className="space-y-2 py-0.5">
+                        {/* Header Tag */}
+                        <div className="flex items-center justify-between font-bold text-[11px] text-amber-900 border-b border-amber-200/70 pb-1.5 mb-1">
+                          <span className="flex items-center gap-1.5">
+                            <Zap size={14} className="text-amber-600 fill-amber-500" />
+                            Meta Broadcast Template
+                          </span>
+                          <span className="text-[10px] px-2 py-0.5 rounded-full bg-amber-200/90 text-amber-900 font-extrabold uppercase tracking-wider">
+                            {tplDetails.tplName}
+                          </span>
+                        </div>
+
+                        {/* Batch Timing Badge if present */}
+                        {tplDetails.batchStr && (
+                          <div className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-md bg-amber-100 text-amber-900 text-[11px] font-bold border border-amber-200">
+                            ⏰ Batch Timing: {tplDetails.batchStr}
+                          </div>
+                        )}
+
+                        {/* Full Body Text */}
+                        <p className="text-[14px] text-[#111b21] font-normal whitespace-pre-wrap leading-[20px]">
+                          {tplDetails.bodyText}
+                        </p>
+                      </div>
+                    ) : (
+                      <p className="text-[14.2px] text-[#111b21] whitespace-pre-wrap leading-[19px]">{msg.text}</p>
+                    )}
+
+                    <div className="flex items-center gap-1 justify-end mt-1">
+                      <span className={`text-[10px] ${isBtnClick ? "text-emerald-100" : "text-[#667781]"}`}>{msg.timestamp}</span>
+                      {(msg.sender === "admin" || msg.sender === "bot") && <StatusIcon status={msg.status} />}
                     </div>
-                  )}
-                  {msg.type === "template" && (
-                    <div className="flex items-center gap-1.5 mb-1 pb-1 border-b border-gray-200/60">
-                      <Zap size={12} className="text-amber-500" />
-                      <span className="text-[10px] font-medium text-amber-600 uppercase tracking-wider">Template Sent</span>
-                    </div>
-                  )}
-                  <p className="text-[14.2px] text-[#111b21] whitespace-pre-wrap leading-[19px]">{msg.text}</p>
-                  <div className="flex items-center gap-1 justify-end mt-1">
-                    <span className="text-[10px] text-[#667781]">{msg.timestamp}</span>
-                    {(msg.sender === "admin" || msg.sender === "bot") && <StatusIcon status={msg.status} />}
                   </div>
-                </div>
-              </motion.div>
-            ))}
+                </motion.div>
+              );
+            })}
             <div ref={chatEndRef} />
           </div>
 

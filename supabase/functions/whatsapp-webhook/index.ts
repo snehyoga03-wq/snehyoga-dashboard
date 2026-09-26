@@ -125,7 +125,8 @@ Deno.serve(async (req) => {
       if (message) {
         const rawFromPhone = message.from; // e.g. "919145414083"
         const fromPhone = formatWaPhone(rawFromPhone);
-        const userName = contact?.profile?.name || "User";
+        const metaUserName = contact?.profile?.name || "";
+        const isButtonClick = message.type === "button" || message.type === "interactive";
 
         let userMsgText = "";
         let buttonPayload = "";
@@ -148,19 +149,41 @@ Deno.serve(async (req) => {
         }
 
         const cleanInput = (userMsgText || buttonPayload).toLowerCase().trim();
-        console.log(`💬 Incoming message from ${userName} (${fromPhone}): "${userMsgText}" (payload: "${buttonPayload}", cleanInput: "${cleanInput}")`);
+        console.log(`💬 Incoming message from ${metaUserName || 'User'} (${fromPhone}): "${userMsgText}" (payload: "${buttonPayload}", cleanInput: "${cleanInput}")`);
 
         // Initialize Supabase Client
         const supabaseUrl = Deno.env.get("SUPABASE_URL") || DEFAULT_SUPABASE_URL;
         const supabaseServiceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") || Deno.env.get("SUPABASE_ANON_KEY") || DEFAULT_SUPABASE_KEY;
         const supabase = createClient(supabaseUrl, supabaseServiceKey);
 
+        // Resolve user name: prefer Meta profile name if present, else fallback to DB main_data_registration name
+        let userName = metaUserName;
+        if (!userName || userName === "User" || userName.toLowerCase() === "na") {
+          try {
+            const last10 = fromPhone.slice(-10);
+            const { data: dbUser } = await supabase
+              .from("main_data_registration")
+              .select("name")
+              .ilike("mobile_number", `%${last10}%`)
+              .maybeSingle();
+            if (dbUser?.name) {
+              userName = dbUser.name;
+            }
+          } catch (_) {}
+        }
+        if (!userName) userName = "User";
+
+        // Format message stored in DB
+        const dbMessageContent = isButtonClick
+          ? `[Button Clicked: ${userMsgText || buttonPayload || "Option"}]`
+          : (userMsgText || buttonPayload || "[Message]");
+
         // 1. Store incoming user message in chat_messages table for CRM Live Chat timeline
         try {
           await supabase.from("chat_messages").insert({
             user_phone: fromPhone,
             user_name: userName,
-            message: userMsgText || buttonPayload || "[Button Click]",
+            message: dbMessageContent,
             sender_type: "user",
             is_read: false,
             created_at: new Date().toISOString()
@@ -326,8 +349,13 @@ Deno.serve(async (req) => {
                   let replyText = targetNode.data?.text || "";
                   let replyButtons: any[] = targetNode.data?.buttons || [];
 
+                  const isInvalidGreeting = !userName || ["user", "na", "n/a", "null"].includes(userName.trim().toLowerCase()) || /^\+?\d+$/.test(userName.trim());
+                  const nameGreeting = isInvalidGreeting ? "" : userName.trim();
+                  const greetingPrefix = nameGreeting ? `Namaste ${nameGreeting} 🙏` : `Namaste 🙏`;
+
                   replyText = replyText
-                    .replace(/{{user_name}}/g, userName)
+                    .replace(/Namaste\s+{{user_name}}\s*🙏?/gi, greetingPrefix)
+                    .replace(/{{user_name}}/g, nameGreeting)
                     .replace(/{{session_link}}/g, userSessionLink);
 
                   console.log(`🚀 Sending Flow Response to ${fromPhone}:\n"${replyText}"`);
@@ -336,7 +364,7 @@ Deno.serve(async (req) => {
                   // Log outgoing bot reply to chat_messages table for CRM timeline
                   await supabase.from("chat_messages").insert({
                     user_phone: fromPhone,
-                    user_name: "Bot",
+                    user_name: userName,
                     message: replyText,
                     sender_type: "bot",
                     is_read: true,
@@ -353,14 +381,18 @@ Deno.serve(async (req) => {
 
           // Step D: General Fallback for Session Link requests
           if (!replySent && (cleanInput.includes("morning") || cleanInput.includes("evening") || cleanInput.includes("join") || cleanInput.includes("session") || cleanInput.includes("link"))) {
-            const fallbackText = `Namaste ${userName} 🙏\n\nYour Yoga Session link is ready! 🧘✨\n\nPersonal Joining Link: ${userSessionLink}\n\nPlease join 5 minutes early with your yoga mat ready. Let's start with positive energy!\n\nSneha Yoga Studio 🌸`;
+            const isInvalidGreeting = !userName || ["user", "na", "n/a", "null"].includes(userName.trim().toLowerCase()) || /^\+?\d+$/.test(userName.trim());
+            const nameGreeting = isInvalidGreeting ? "" : userName.trim();
+            const greetingHeader = nameGreeting ? `Namaste ${nameGreeting} 🙏` : `Namaste 🙏`;
+
+            const fallbackText = `${greetingHeader}\n\nYour Yoga Session link is ready! 🧘✨\n\nPersonal Joining Link: ${userSessionLink}\n\nPlease join 5 minutes early with your yoga mat ready. Let's start with positive energy!\n\nSneha Yoga Studio 🌸`;
             
             console.log(`🚀 Sending Direct Session Link Fallback to ${fromPhone}`);
             await sendWAMessage(phoneNumberId, waToken, fromPhone, fallbackText);
 
             await supabase.from("chat_messages").insert({
               user_phone: fromPhone,
-              user_name: "Bot",
+              user_name: userName,
               message: fallbackText,
               sender_type: "bot",
               is_read: true,
