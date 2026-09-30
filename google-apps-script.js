@@ -48,6 +48,16 @@ function scanAndSyncLeads() {
       }
     }
 
+    // Find "Plan" column dynamically
+    var planIdx = -1;
+    for (var c = 0; c < headerRow.length; c++) {
+      var h = headerRow[c];
+      if (h.indexOf("plan") !== -1 || h.indexOf("program") !== -1) {
+        planIdx = c;
+        break;
+      }
+    }
+
     // Find Column "lead CRM status"
     var crmStatusIdx = -1;
     for (var c = 0; c < headerRow.length; c++) {
@@ -95,7 +105,7 @@ function scanAndSyncLeads() {
         },
         muteHttpExceptions: true
       };
-      var fetchUrl = SUPABASE_URL + "/rest/v1/leads?select=id,contact,client_name,assigned_to&offset=" + offset + "&limit=" + pageSize;
+      var fetchUrl = SUPABASE_URL + "/rest/v1/leads?select=id,contact,client_name,assigned_to,admission_date,lead_existing_plan&offset=" + offset + "&limit=" + pageSize;
       var response = UrlFetchApp.fetch(fetchUrl, getOptions);
       if (response.getResponseCode() !== 200) {
         Logger.log("[Sync Error] Failed to fetch leads from Supabase at offset " + offset + ". Response: " + response.getContentText());
@@ -117,36 +127,59 @@ function scanAndSyncLeads() {
 
     Logger.log("[Sync] Loaded " + existingLeads.length + " existing leads from Supabase CRM.");
     
-    // Build lookup maps of existing leads
-    var existingMap = {};
-    for (var i = 0; i < existingLeads.length; i++) {
-      var item = existingLeads[i];
-      if (item.contact) {
-        var rawC = String(item.contact).trim();
-        var cleanC = rawC.replace(/\D/g, "");
-        if (cleanC) {
-          existingMap[cleanC] = item;
-          if (cleanC.length >= 10) {
-            var last10 = cleanC.slice(-10);
-            existingMap[last10] = item;
-          }
-        }
-        existingMap[rawC.toLowerCase()] = item;
+    // Clean phone number helper
+    function cleanPhoneLast10(val) {
+      if (!val) return "";
+      var digits = String(val).replace(/\D/g, "");
+      return digits.length >= 10 ? digits.slice(-10) : digits;
+    }
+
+    function normalizeDateStr(d) {
+      if (!d) return "";
+      if (d instanceof Date && !isNaN(d.getTime())) {
+        return Utilities.formatDate(d, Session.getScriptTimeZone(), "yyyy-MM-dd");
       }
-      if (item.client_name && item.contact) {
-        var combo = (String(item.client_name).trim() + "_" + String(item.contact).trim()).toLowerCase();
-        existingMap[combo] = item;
+      return String(d).split("T")[0].trim();
+    }
+
+    function normalizePlanStr(p) {
+      return String(p || "").trim().toLowerCase().replace(/\s+/g, " ");
+    }
+
+    // Build lookup maps of existing leads by contact phone number
+    var existingByPhone = {};
+    function addToLookup(leadObj) {
+      if (leadObj.contact) {
+        var phoneKey = cleanPhoneLast10(leadObj.contact);
+        if (phoneKey) {
+          if (!existingByPhone[phoneKey]) existingByPhone[phoneKey] = [];
+          existingByPhone[phoneKey].push(leadObj);
+        }
+      }
+      if (leadObj.client_name && leadObj.contact) {
+        var combo = (String(leadObj.client_name).trim() + "_" + String(leadObj.contact).trim()).toLowerCase();
+        if (!existingByPhone[combo]) existingByPhone[combo] = [];
+        existingByPhone[combo].push(leadObj);
       }
     }
 
-    // Standardize staff names case-insensitively (e.g. "Ragini k" -> "Ragini K")
-    var KNOWN_STAFF = ["Mayuri K", "Ragini K", "Shreya K", "Janhavi V", "Janhavi Vaidya"];
+    for (var i = 0; i < existingLeads.length; i++) {
+      addToLookup(existingLeads[i]);
+    }
+
+    // Standardize staff names (including Janhavi -> Tejasswi K)
+    var KNOWN_STAFF = ["Mayuri K", "Ragini K", "Shreya K", "Tejasswi K", "Janhavi V", "Janhavi Vaidya"];
     function formatAssignedTo(val) {
       if (!val) return null;
       var str = String(val).trim();
       if (!str) return null;
+      var lower = str.toLowerCase();
+      // Rename Janhavi V to Tejasswi K
+      if (lower.indexOf("janhavi") !== -1 || lower.indexOf("tejasswi") !== -1 || lower.indexOf("tejaswi") !== -1) {
+        return "Tejasswi K";
+      }
       for (var s = 0; s < KNOWN_STAFF.length; s++) {
-        if (KNOWN_STAFF[s].toLowerCase() === str.toLowerCase()) {
+        if (KNOWN_STAFF[s].toLowerCase() === lower) {
           return KNOWN_STAFF[s];
         }
       }
@@ -163,75 +196,104 @@ function scanAndSyncLeads() {
       var rawContact = row[contactIdx];
       var rawAdmissionDate = admissionDateIdx !== -1 ? row[admissionDateIdx] : null;
       var rawAssignedTo = assignedToIdx !== -1 ? row[assignedToIdx] : null;
+      var rawPlan = planIdx !== -1 ? row[planIdx] : null;
       var crmStatus = crmStatusIdx !== -1 ? String(row[crmStatusIdx] || "").trim().toLowerCase() : "";
 
       var clientName = String(rawName || "").trim();
       var contact = String(rawContact || "").trim();
       var assignedTo = formatAssignedTo(rawAssignedTo);
+      var cleanPlan = rawPlan ? String(rawPlan).trim() : null;
 
       // Skip empty rows
       if (!clientName || !contact) continue;
 
-      var cleanDigits = contact.replace(/\D/g, "");
-      var last10 = cleanDigits.length >= 10 ? cleanDigits.slice(-10) : cleanDigits;
-      var contactLower = contact.toLowerCase();
+      var phoneKey = cleanPhoneLast10(contact);
       var comboKey = (clientName + "_" + contact).toLowerCase();
+      var candidates = (phoneKey && existingByPhone[phoneKey]) || existingByPhone[comboKey] || [];
 
-      var existingItem = (last10 && existingMap[last10]) || 
-                         (cleanDigits && existingMap[cleanDigits]) || 
-                         existingMap[contactLower] || 
-                         existingMap[comboKey];
-
+      var formattedAdmissionDate = parseSheetDate(rawAdmissionDate);
+      var inDateNorm = normalizeDateStr(formattedAdmissionDate);
+      var inPlanNorm = normalizePlanStr(cleanPlan);
       var isDoneInSheet = (crmStatus === "done");
 
-      // Case A: Lead exists in database
-      if (existingItem) {
+      // Check if this row is an EXACT DUPLICATE of an existing record
+      // Option 2 (Recall logic):
+      // If admission_date or plan is NEW or DIFFERENT, it is treated as a RECALL (a new entry gets created!)
+      var exactMatch = null;
+      for (var m = 0; m < candidates.length; m++) {
+        var cand = candidates[m];
+        var candDateNorm = normalizeDateStr(cand.admission_date);
+        var candPlanNorm = normalizePlanStr(cand.lead_existing_plan);
+
+        if (inDateNorm && candDateNorm) {
+          if (inDateNorm === candDateNorm) {
+            if (inPlanNorm && candPlanNorm) {
+              if (inPlanNorm === candPlanNorm) {
+                exactMatch = cand;
+                break;
+              }
+            } else {
+              exactMatch = cand;
+              break;
+            }
+          }
+        } else if (!inDateNorm && !candDateNorm) {
+          if (inPlanNorm || candPlanNorm) {
+            if (inPlanNorm === candPlanNorm) {
+              exactMatch = cand;
+              break;
+            }
+          } else {
+            exactMatch = cand;
+            break;
+          }
+        }
+      }
+
+      // Case A: Exact duplicate found (same phone AND same admission date AND same plan)
+      if (exactMatch) {
         // Ensure sheet cell shows Done
         if (!isDoneInSheet) {
           sheet.getRange(r + 1, crmStatusIdx + 1).setValue("Done");
         }
 
         // If sheet has assigned_to and database assigned_to is different or null, update DB
-        if (assignedTo && (existingItem.assigned_to || "").toLowerCase() !== assignedTo.toLowerCase()) {
+        if (assignedTo && (exactMatch.assigned_to || "").toLowerCase() !== assignedTo.toLowerCase()) {
           existingLeadsToUpdate.push({
-            id: existingItem.id,
-            client_name: existingItem.client_name || clientName,
-            contact: existingItem.contact || contact,
+            id: exactMatch.id,
+            client_name: exactMatch.client_name || clientName,
+            contact: exactMatch.contact || contact,
             assigned_to: assignedTo
           });
-          existingItem.assigned_to = assignedTo; // update in-memory map
+          exactMatch.assigned_to = assignedTo; // update in-memory map
         }
         continue;
       }
 
-      // Case B: Lead does NOT exist in DB, BUT sheet ALREADY marks it "Done"
-      // NEVER insert a lead into CRM if the sheet row is already marked Done!
+      // Case B: Sheet ALREADY marks this row "Done" (already processed previously)
       if (isDoneInSheet) {
         continue;
       }
 
-      // Case C: Lead does NOT exist in DB and is NOT marked Done in sheet -> Prepare for insert
-      var formattedAdmissionDate = parseSheetDate(rawAdmissionDate);
-
-      newLeadsToInsert.push({
+      // Case C: Brand new lead OR new recall entry (different date/plan) -> Prepare for insert
+      var newLeadItem = {
         client_name: clientName,
         contact: contact,
         admission_date: formattedAdmissionDate,
+        lead_existing_plan: cleanPlan,
         assigned_to: assignedTo,
         lead_status: "Select Option",
         created_at: new Date().toISOString(),
         rowIndex: r + 1
-      });
+      };
 
-      // Mark in local lookup map immediately so duplicate rows in the SAME sheet scan are blocked
-      var newItem = { client_name: clientName, contact: contact, assigned_to: assignedTo };
-      if (last10) existingMap[last10] = newItem;
-      if (cleanDigits) existingMap[cleanDigits] = newItem;
-      existingMap[contactLower] = newItem;
-      existingMap[comboKey] = newItem;
+      newLeadsToInsert.push(newLeadItem);
+
+      // Block duplicate rows for the SAME recall in the SAME sheet scan
+      addToLookup(newLeadItem);
     }
 
-    // 4. Batch update existing lead assignments in CHUNKS of 50 (1 request per batch instead of 1 per row!)
+    // 4. Batch update existing lead assignments in CHUNKS of 50
     if (existingLeadsToUpdate.length > 0) {
       Logger.log("[Sync] Batch updating assigned_to for " + existingLeadsToUpdate.length + " existing lead(s)...");
       var batchSize = 50;
@@ -263,9 +325,9 @@ function scanAndSyncLeads() {
       }
     }
 
-    // 5. Send new leads to Supabase in CHUNKS of 50 and update sheet status immediately for each successful batch
+    // 5. Send new leads / recall leads to Supabase in CHUNKS of 50
     if (newLeadsToInsert.length > 0) {
-      Logger.log("[Sync] Found " + newLeadsToInsert.length + " new lead(s). Posting to CRM in batches...");
+      Logger.log("[Sync] Found " + newLeadsToInsert.length + " new/recall lead(s). Posting to CRM in batches...");
 
       var chunkSize = 50;
       for (var c = 0; c < newLeadsToInsert.length; c += chunkSize) {
@@ -275,6 +337,7 @@ function scanAndSyncLeads() {
             client_name: item.client_name,
             contact: item.contact,
             admission_date: item.admission_date,
+            lead_existing_plan: item.lead_existing_plan,
             assigned_to: item.assigned_to,
             lead_status: item.lead_status,
             created_at: item.created_at

@@ -19,7 +19,7 @@ import * as XLSX from "xlsx";
 import { LeadAIBot } from "@/components/crm/LeadAIBot";
 import { LeadAiAction } from "@/services/leadAiService";
 
-export const ASSIGNED_USERS = ["Ragini K", "Shreya K", "Janhavi V"];
+export const ASSIGNED_USERS = ["Ragini K", "Shreya K", "Tejasswi K"];
 
 
 
@@ -491,14 +491,32 @@ export function LeadsManagement() {
   const fetchLeads = async () => {
     setLoading(true);
     try {
-      const { data, error } = await supabase
-        .from("leads")
-        .select("*")
-        .order("created_at", { ascending: false })
-        .limit(1000);
+      let allData: Lead[] = [];
+      let offset = 0;
+      const pageSize = 1000;
+      let hasMore = true;
 
-      if (error) throw error;
-      const uniqueData = Array.from(new Map((data || []).map((item: Lead) => [item.id, item])).values());
+      while (hasMore) {
+        const { data, error } = await supabase
+          .from("leads")
+          .select("*")
+          .order("created_at", { ascending: false })
+          .range(offset, offset + pageSize - 1);
+
+        if (error) throw error;
+        if (!data || data.length === 0) {
+          hasMore = false;
+        } else {
+          allData = allData.concat(data as Lead[]);
+          if (data.length < pageSize) {
+            hasMore = false;
+          } else {
+            offset += pageSize;
+          }
+        }
+      }
+
+      const uniqueData = Array.from(new Map((allData || []).map((item: Lead) => [item.id, item])).values());
       setLeads(uniqueData);
     } catch (err: any) {
       console.error("Error fetching leads:", err);
@@ -1200,6 +1218,17 @@ export function LeadsManagement() {
           const assignedToRaw = normalizedRow["assigned to"] || normalizedRow["assignedto"] || normalizedRow["assigned"] || normalizedRow["assigned_to"];
           const callConnectedRaw = normalizedRow["call connected"] || normalizedRow["callconnected"] || normalizedRow["call status"] || normalizedRow["call_connected"];
 
+          let finalAssignedTo: string | null = assignedToRaw ? String(assignedToRaw).trim() : null;
+          if (finalAssignedTo) {
+            const lower = finalAssignedTo.toLowerCase();
+            if (lower.includes("janhavi") || lower.includes("tejasswi") || lower.includes("tejaswi")) {
+              finalAssignedTo = "Tejasswi K";
+            } else {
+              const match = ASSIGNED_USERS.find(u => u.toLowerCase() === lower);
+              if (match) finalAssignedTo = match;
+            }
+          }
+
           validLeads.push({
             admission_date: parseDate(admissionDateRaw),
             calling_date: parseDate(callingDateRaw),
@@ -1213,7 +1242,7 @@ export function LeadsManagement() {
             call_connected: callConnectedRaw
               ? (String(callConnectedRaw).trim().toLowerCase().includes("not") ? "not_connected" : "connected")
               : autoDetectCallConnected(remark ? String(remark).trim() : null),
-            assigned_to: assignedToRaw ? String(assignedToRaw).trim() : null
+            assigned_to: finalAssignedTo
           });
         }
 
@@ -1227,29 +1256,57 @@ export function LeadsManagement() {
           return;
         }
 
-        // Deduplicate against existing contacts & plans in state
-        const existingComboSet = new Set(
-          leads
-            .map(l => {
-              const clean = (l.contact || "").replace(/\D/g, "");
-              const last10 = clean.length >= 10 ? clean.slice(-10) : clean;
-              const plan = (l.lead_existing_plan || "").trim().toLowerCase();
-              return last10 ? `${last10}|${plan}` : null;
-            })
-            .filter(Boolean) as string[]
-        );
+        // Deduplicate against existing contacts & plans/dates in state
+        // Option 2 (Recall logic):
+        // If the same lead has a NEW or DIFFERENT admission date or plan,
+        // it is treated as a RECALL and allowed to create a brand new entry in CRM!
+        const existingLeadsByPhone: Record<string, Lead[]> = {};
+        leads.forEach(l => {
+          const clean = (l.contact || "").replace(/\D/g, "");
+          const last10 = clean.length >= 10 ? clean.slice(-10) : clean;
+          if (last10) {
+            if (!existingLeadsByPhone[last10]) existingLeadsByPhone[last10] = [];
+            existingLeadsByPhone[last10].push(l);
+          }
+        });
 
-        const seenImportCombos = new Set<string>();
+        const seenImportKeys = new Set<string>();
 
         const nonDuplicateLeads = validLeads.filter(l => {
           const clean = (l.contact || "").replace(/\D/g, "");
           const last10 = clean.length >= 10 ? clean.slice(-10) : clean;
-          const plan = (l.lead_existing_plan || "").trim().toLowerCase();
-          const combo = last10 ? `${last10}|${plan}` : null;
-          if (combo) {
-            if (existingComboSet.has(combo) || seenImportCombos.has(combo)) return false;
-            seenImportCombos.add(combo);
-          }
+          if (!last10) return true; // keep entries without phone number
+
+          const inDate = (l.admission_date || "").split("T")[0].trim();
+          const inPlan = (l.lead_existing_plan || "").trim().toLowerCase();
+
+          // Deduplicate identical rows within the uploaded file itself
+          const fileKey = `${last10}|${inDate}|${inPlan}`;
+          if (seenImportKeys.has(fileKey)) return false;
+
+          // Check if this row is an EXACT DUPLICATE of an existing record in CRM
+          const existingMatches = existingLeadsByPhone[last10] || [];
+          const isExactDuplicate = existingMatches.some(ex => {
+            const exDate = (ex.admission_date || "").split("T")[0].trim();
+            const exPlan = (ex.lead_existing_plan || "").trim().toLowerCase();
+
+            if (inDate && exDate) {
+              if (inPlan && exPlan) {
+                return inDate === exDate && inPlan === exPlan;
+              }
+              return inDate === exDate;
+            } else if (!inDate && !exDate) {
+              if (inPlan || exPlan) {
+                return inPlan === exPlan;
+              }
+              return true; // both have no date and no plan -> exact duplicate
+            }
+            return false; // different dates -> recall!
+          });
+
+          if (isExactDuplicate) return false;
+
+          seenImportKeys.add(fileKey);
           return true;
         });
 
@@ -1301,6 +1358,40 @@ export function LeadsManagement() {
     }
   };
 
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [searchQuery, statusFilter, typeFilter, assignedToFilter, autoDateFilter, addedDateFilter]);
+
+  const formatLocalDateYMD = (dateVal: string | null | undefined): string => {
+    if (!dateVal) return "";
+    const d = new Date(dateVal);
+    if (isNaN(d.getTime())) return "";
+    const y = d.getFullYear();
+    const m = String(d.getMonth() + 1).padStart(2, "0");
+    const day = String(d.getDate()).padStart(2, "0");
+    return `${y}-${m}-${day}`;
+  };
+
+  const matchesDateFilter = (dateVal: string | null | undefined, filterDate: string): boolean => {
+    if (!dateVal || !filterDate) return false;
+    if (typeof dateVal === "string" && dateVal.startsWith(filterDate)) return true;
+    
+    const d = new Date(dateVal);
+    if (isNaN(d.getTime())) return false;
+    
+    const localYMD = formatLocalDateYMD(dateVal);
+    if (localYMD === filterDate) return true;
+
+    try {
+      const utcYMD = d.toISOString().split("T")[0];
+      if (utcYMD === filterDate) return true;
+    } catch (e) {
+      // ignore invalid date
+    }
+
+    return false;
+  };
+
   const filteredLeads = leads.filter(lead => {
     const matchesSearch = !searchQuery ||
       (lead.client_name || "").toLowerCase().includes(searchQuery.toLowerCase()) ||
@@ -1314,21 +1405,16 @@ export function LeadsManagement() {
       (assignedToFilter === "unassigned" ? (!lead.assigned_to || lead.assigned_to === "") : (!!lead.assigned_to && lead.assigned_to.trim().toLowerCase() === assignedToFilter.toLowerCase()));
     
     let matchesAutoDate = true;
-    if (autoDateFilter) {
+    // Auto Date only filters when user has NOT selected a specific Added Date filter
+    if (autoDateFilter && !addedDateFilter) {
       const isMasterClassFollow = lead.lead_status === "Master Class Follow";
       if (!lead.created_at) {
-        matchesAutoDate = lead.follow_up_date === autoDateFilter || isMasterClassFollow;
+        matchesAutoDate = matchesDateFilter(lead.follow_up_date, autoDateFilter) || isMasterClassFollow;
       } else {
-        const leadDate = new Date(lead.created_at).toISOString().split('T')[0];
-        
-        // 1. Created on the selected date
-        const isCreatedToday = leadDate === autoDateFilter;
-        
-        // 2. Scheduled for follow-up on the selected date
-        const isFollowUpToday = lead.follow_up_date === autoDateFilter;
-        
-        // 3. Carry-forward: Created BEFORE selected date AND untouched (status is "Select Option" AND no follow_up_date)
-        const isUntouchedCarryForward = leadDate < autoDateFilter && 
+        const isCreatedToday = matchesDateFilter(lead.created_at, autoDateFilter);
+        const isFollowUpToday = matchesDateFilter(lead.follow_up_date, autoDateFilter);
+        const localLeadDate = formatLocalDateYMD(lead.created_at);
+        const isUntouchedCarryForward = localLeadDate < autoDateFilter && 
                                         lead.lead_status === "Select Option" && 
                                         !lead.follow_up_date;
                                         
@@ -1338,12 +1424,10 @@ export function LeadsManagement() {
 
     let matchesAddedDate = true;
     if (addedDateFilter) {
-      if (lead.created_at) {
-        const leadDate = new Date(lead.created_at).toISOString().split('T')[0];
-        matchesAddedDate = leadDate === addedDateFilter;
-      } else {
-        matchesAddedDate = false;
-      }
+      // Matches either when the lead was added to CRM (created_at) OR admission_date from the sheet
+      const matchesCreated = matchesDateFilter(lead.created_at, addedDateFilter);
+      const matchesAdmission = matchesDateFilter(lead.admission_date, addedDateFilter);
+      matchesAddedDate = matchesCreated || matchesAdmission;
     }
 
     return matchesSearch && matchesStatus && matchesType && matchesAssignedTo && matchesAutoDate && matchesAddedDate;
@@ -1351,6 +1435,11 @@ export function LeadsManagement() {
 
   const targetSortDate = autoDateFilter || addedDateFilter || new Date().toISOString().split("T")[0];
   const sortedFilteredLeads = [...filteredLeads].sort((a, b) => {
+    if (addedDateFilter) {
+      const dateA = a.created_at ? new Date(a.created_at).getTime() : 0;
+      const dateB = b.created_at ? new Date(b.created_at).getTime() : 0;
+      return dateB - dateA;
+    }
     const aIsTargetDate = a.follow_up_date === targetSortDate;
     const bIsTargetDate = b.follow_up_date === targetSortDate;
     if (aIsTargetDate && !bIsTargetDate) return -1;
@@ -1480,8 +1569,9 @@ export function LeadsManagement() {
               </div>
               <Input
                 type="date"
-                className="pl-10 bg-white text-gray-700 h-10"
+                className="pl-10 bg-white text-gray-700 h-10 cursor-pointer"
                 value={autoDateFilter}
+                onClick={e => e.currentTarget.showPicker?.()}
                 onChange={e => {
                   setAutoDateFilter(e.target.value);
                   if (e.target.value) setAddedDateFilter("");
@@ -1498,14 +1588,15 @@ export function LeadsManagement() {
               <span className="absolute -top-2.5 left-2 bg-white px-1 text-[10px] text-gray-500">Auto Date</span>
             </div>
 
-            <div className="relative" title="Added Date Filter">
+            <div className="relative" title="Filter by Added Date or Admission Date">
               <div className="absolute inset-y-0 left-3 flex items-center pointer-events-none">
                 <Calendar className="w-4 h-4 text-gray-400" />
               </div>
               <Input
                 type="date"
-                className="pl-10 bg-white text-gray-700 h-10"
+                className="pl-10 bg-white text-gray-700 h-10 cursor-pointer"
                 value={addedDateFilter}
+                onClick={e => e.currentTarget.showPicker?.()}
                 onChange={e => {
                   setAddedDateFilter(e.target.value);
                   if (e.target.value) setAutoDateFilter("");
@@ -2048,6 +2139,15 @@ function scanAndSyncLeads() {
       }
     }
 
+    var planIdx = -1;
+    for (var c = 0; c < headerRow.length; c++) {
+      var h = headerRow[c];
+      if (h.indexOf("plan") !== -1 || h.indexOf("program") !== -1) {
+        planIdx = c;
+        break;
+      }
+    }
+
     var crmStatusIdx = -1;
     for (var c = 0; c < headerRow.length; c++) {
       var h = headerRow[c];
@@ -2068,18 +2168,40 @@ function scanAndSyncLeads() {
       sheet.getRange(1, 10).setValue("lead CRM status").setFontWeight("bold");
     }
 
-    var KNOWN_STAFF = ["Mayuri K", "Ragini K", "Shreya K", "Janhavi V", "Janhavi Vaidya"];
+    var KNOWN_STAFF = ["Mayuri K", "Ragini K", "Shreya K", "Tejasswi K", "Janhavi V", "Janhavi Vaidya"];
     function formatAssignedTo(val) {
       if (!val) return null;
       var str = String(val).trim();
       if (!str) return null;
+      var lower = str.toLowerCase();
+      if (lower.indexOf("janhavi") !== -1 || lower.indexOf("tejasswi") !== -1 || lower.indexOf("tejaswi") !== -1) {
+        return "Tejasswi K";
+      }
       for (var s = 0; s < KNOWN_STAFF.length; s++) {
-        if (KNOWN_STAFF[s].toLowerCase() === str.toLowerCase()) return KNOWN_STAFF[s];
+        if (KNOWN_STAFF[s].toLowerCase() === lower) return KNOWN_STAFF[s];
       }
       return str;
     }
 
-    // 2. Fetch ALL existing leads from Supabase using PAGINATION (bypasses 1,000 row default limit)
+    function cleanPhoneLast10(val) {
+      if (!val) return "";
+      var digits = String(val).replace(/\\D/g, "");
+      return digits.length >= 10 ? digits.slice(-10) : digits;
+    }
+
+    function normalizeDateStr(d) {
+      if (!d) return "";
+      if (d instanceof Date && !isNaN(d.getTime())) {
+        return Utilities.formatDate(d, Session.getScriptTimeZone(), "yyyy-MM-dd");
+      }
+      return String(d).split("T")[0].trim();
+    }
+
+    function normalizePlanStr(p) {
+      return String(p || "").trim().toLowerCase().replace(/\\s+/g, " ");
+    }
+
+    // 2. Fetch ALL existing leads from Supabase using PAGINATION
     var existingLeads = [];
     var offset = 0;
     var pageSize = 1000;
@@ -2091,7 +2213,7 @@ function scanAndSyncLeads() {
         headers: { "apikey": SUPABASE_KEY, "Authorization": "Bearer " + SUPABASE_KEY },
         muteHttpExceptions: true
       };
-      var fetchUrl = SUPABASE_URL + "/rest/v1/leads?select=id,contact,client_name,assigned_to&offset=" + offset + "&limit=" + pageSize;
+      var fetchUrl = SUPABASE_URL + "/rest/v1/leads?select=id,contact,client_name,assigned_to,admission_date,lead_existing_plan&offset=" + offset + "&limit=" + pageSize;
       var response = UrlFetchApp.fetch(fetchUrl, getOptions);
       if (response.getResponseCode() !== 200) break;
 
@@ -2108,25 +2230,24 @@ function scanAndSyncLeads() {
       }
     }
 
-    var existingMap = {};
-    for (var i = 0; i < existingLeads.length; i++) {
-      var item = existingLeads[i];
-      if (item.contact) {
-        var rawC = String(item.contact).trim();
-        var cleanC = rawC.replace(/\\D/g, "");
-        if (cleanC) {
-          existingMap[cleanC] = item;
-          if (cleanC.length >= 10) {
-            var last10 = cleanC.slice(-10);
-            existingMap[last10] = item;
-          }
+    var existingByPhone = {};
+    function addToLookup(leadObj) {
+      if (leadObj.contact) {
+        var phoneKey = cleanPhoneLast10(leadObj.contact);
+        if (phoneKey) {
+          if (!existingByPhone[phoneKey]) existingByPhone[phoneKey] = [];
+          existingByPhone[phoneKey].push(leadObj);
         }
-        existingMap[rawC.toLowerCase()] = item;
       }
-      if (item.client_name && item.contact) {
-        var combo = (String(item.client_name).trim() + "_" + String(item.contact).trim()).toLowerCase();
-        existingMap[combo] = item;
+      if (leadObj.client_name && leadObj.contact) {
+        var combo = (String(leadObj.client_name).trim() + "_" + String(leadObj.contact).trim()).toLowerCase();
+        if (!existingByPhone[combo]) existingByPhone[combo] = [];
+        existingByPhone[combo].push(leadObj);
       }
+    }
+
+    for (var i = 0; i < existingLeads.length; i++) {
+      addToLookup(existingLeads[i]);
     }
 
     var newLeadsToInsert = [];
@@ -2138,57 +2259,72 @@ function scanAndSyncLeads() {
       var contact = String(row[contactIdx] || "").trim();
       var rawAdmissionDate = admissionDateIdx !== -1 ? row[admissionDateIdx] : null;
       var rawAssignedTo = assignedToIdx !== -1 ? row[assignedToIdx] : null;
+      var rawPlan = planIdx !== -1 ? row[planIdx] : null;
       var crmStatus = crmStatusIdx !== -1 ? String(row[crmStatusIdx] || "").trim().toLowerCase() : "";
 
       if (!clientName || !contact) continue;
 
-      var cleanDigits = contact.replace(/\\D/g, "");
-      var last10 = cleanDigits.length >= 10 ? cleanDigits.slice(-10) : cleanDigits;
-      var contactLower = contact.toLowerCase();
+      var phoneKey = cleanPhoneLast10(contact);
       var comboKey = (clientName + "_" + contact).toLowerCase();
+      var candidates = (phoneKey && existingByPhone[phoneKey]) || existingByPhone[comboKey] || [];
       var assignedTo = formatAssignedTo(rawAssignedTo);
+      var cleanPlan = rawPlan ? String(rawPlan).trim() : null;
 
-      var existingItem = (last10 && existingMap[last10]) || 
-                         (cleanDigits && existingMap[cleanDigits]) || 
-                         existingMap[contactLower] || 
-                         existingMap[comboKey];
-
+      var formattedAdmissionDate = parseSheetDate(rawAdmissionDate);
+      var inDateNorm = normalizeDateStr(formattedAdmissionDate);
+      var inPlanNorm = normalizePlanStr(cleanPlan);
       var isDoneInSheet = (crmStatus === "done");
 
-      // Case A: Lead exists in database
-      if (existingItem) {
+      // Check for exact duplicate (Option 2: if admission date or plan is new/different, treat as recall!)
+      var exactMatch = null;
+      for (var m = 0; m < candidates.length; m++) {
+        var cand = candidates[m];
+        var candDateNorm = normalizeDateStr(cand.admission_date);
+        var candPlanNorm = normalizePlanStr(cand.lead_existing_plan);
+
+        if (inDateNorm && candDateNorm) {
+          if (inDateNorm === candDateNorm) {
+            if (inPlanNorm && candPlanNorm) {
+              if (inPlanNorm === candPlanNorm) { exactMatch = cand; break; }
+            } else { exactMatch = cand; break; }
+          }
+        } else if (!inDateNorm && !candDateNorm) {
+          if (inPlanNorm || candPlanNorm) {
+            if (inPlanNorm === candPlanNorm) { exactMatch = cand; break; }
+          } else { exactMatch = cand; break; }
+        }
+      }
+
+      // Case A: Exact duplicate found
+      if (exactMatch) {
         if (!isDoneInSheet) {
           sheet.getRange(r + 1, crmStatusIdx + 1).setValue("Done");
         }
-        if (assignedTo && (existingItem.assigned_to || "").toLowerCase() !== assignedTo.toLowerCase()) {
-          existingLeadsToUpdate.push({ id: existingItem.id, assigned_to: assignedTo });
-          existingItem.assigned_to = assignedTo;
+        if (assignedTo && (exactMatch.assigned_to || "").toLowerCase() !== assignedTo.toLowerCase()) {
+          existingLeadsToUpdate.push({ id: exactMatch.id, assigned_to: assignedTo });
+          exactMatch.assigned_to = assignedTo;
         }
         continue;
       }
 
-      // Case B: Lead does NOT exist in DB, BUT sheet ALREADY marks it "Done"
+      // Case B: Sheet already marked Done
       if (isDoneInSheet) {
         continue;
       }
 
-      // Case C: Lead does NOT exist in DB and is NOT marked Done in sheet -> Prepare for insert
-      var formattedAdmissionDate = parseSheetDate(rawAdmissionDate);
-      newLeadsToInsert.push({
+      // Case C: Brand new lead OR new recall entry -> prepare for insert
+      var newLeadItem = {
         client_name: clientName,
         contact: contact,
         admission_date: formattedAdmissionDate,
+        lead_existing_plan: cleanPlan,
         assigned_to: assignedTo,
         lead_status: "Select Option",
         created_at: new Date().toISOString(),
         rowIndex: r + 1
-      });
-
-      var newItem = { client_name: clientName, contact: contact, assigned_to: assignedTo };
-      if (last10) existingMap[last10] = newItem;
-      if (cleanDigits) existingMap[cleanDigits] = newItem;
-      existingMap[contactLower] = newItem;
-      existingMap[comboKey] = newItem;
+      };
+      newLeadsToInsert.push(newLeadItem);
+      addToLookup(newLeadItem);
     }
 
     if (existingLeadsToUpdate.length > 0) {
@@ -2212,6 +2348,7 @@ function scanAndSyncLeads() {
             client_name: item.client_name,
             contact: item.contact,
             admission_date: item.admission_date,
+            lead_existing_plan: item.lead_existing_plan,
             assigned_to: item.assigned_to,
             lead_status: item.lead_status,
             created_at: item.created_at

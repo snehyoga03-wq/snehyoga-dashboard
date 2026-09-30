@@ -12,7 +12,7 @@ import { calculateCallTargetLedgers, UserTargetLedger } from '@/utils/callTarget
 import { getLeadCallStatus } from '@/utils/callStatusUtils';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 
-const ASSIGNED_USERS = ["Ragini K", "Shreya K", "Janhavi V"];
+const ASSIGNED_USERS = ["Ragini K", "Shreya K", "Tejasswi K"];
 const LEAD_STATUSES = ["Select Option", "Follow Up", "Master Class Follow", "Deal Done", "Dead"];
 
 const isUserMatch = (assignedTo: string | null | undefined, createdBy: string | null | undefined, targetUser: string): boolean => {
@@ -22,6 +22,11 @@ const isUserMatch = (assignedTo: string | null | undefined, createdBy: string | 
 
   const normAssigned = (assignedTo || "").trim().toLowerCase();
   const normCreatedBy = (createdBy || "").trim().toLowerCase();
+
+  // If viewing Tejasswi K, also match historical leads created/assigned to Janhavi
+  if (normTarget.includes("tejasswi") && (normAssigned.includes("janhavi") || normCreatedBy.includes("janhavi"))) {
+    return true;
+  }
 
   return (
     normAssigned.includes(normTarget) ||

@@ -482,7 +482,7 @@ const CRM = () => {
       fetchChatConversations();
       fetchSessionLink();
       toast({ title: "Login Successful", description: "Welcome to CRM Dashboard" });
-    } else if (["Ragini K", "Shreya K", "Janhavi V", "Janhavi Vaidya"].includes(username) && password === "ABC@yoga123") {
+    } else if (["Ragini K", "Shreya K", "Tejasswi K", "Janhavi V", "Janhavi Vaidya"].includes(username) && password === "ABC@yoga123") {
       sessionStorage.setItem("crm_admin_auth", "true");
       sessionStorage.setItem("crm_user_role", "staff");
       sessionStorage.setItem("crm_username", username);
