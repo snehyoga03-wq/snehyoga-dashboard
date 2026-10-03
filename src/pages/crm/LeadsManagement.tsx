@@ -19,7 +19,7 @@ import * as XLSX from "xlsx";
 import { LeadAIBot } from "@/components/crm/LeadAIBot";
 import { LeadAiAction } from "@/services/leadAiService";
 
-export const ASSIGNED_USERS = ["Ragini K", "Shreya K", "Tejasswi K"];
+export const ASSIGNED_USERS = ["Ragini K", "Shreya K", "Tejasswini K"];
 
 
 
@@ -240,7 +240,16 @@ const LeadRow = React.memo(({ lead, index, isSelected, handlers }: any) => {
       </TableCell>
       <TableCell className="p-1">
         {(() => {
-          const matchedUser = ASSIGNED_USERS.find(u => u.toLowerCase() === (lead.assigned_to || "").trim().toLowerCase()) || lead.assigned_to || "";
+          const rawAssigned = (lead.assigned_to || "").trim().toLowerCase();
+          const matchedUser = ASSIGNED_USERS.find(u => {
+            const lowerU = u.toLowerCase();
+            if (lowerU === rawAssigned) return true;
+            if ((lowerU.includes("tejasswin") || lowerU.includes("tejassw")) && 
+                (rawAssigned.includes("tejasswin") || rawAssigned.includes("tejassw") || rawAssigned.includes("tejasw") || rawAssigned.includes("janhavi"))) {
+              return true;
+            }
+            return false;
+          }) || lead.assigned_to || "";
           return (
             <Select value={matchedUser} onValueChange={(val) => handleUpdateAssignedTo(lead.id, val)}>
               <SelectTrigger className="h-8 border-none bg-transparent hover:bg-gray-200 text-xs rounded-md px-3 py-1 font-semibold text-gray-700 w-full focus:ring-1 focus:ring-[#2e5a44] focus:bg-white shadow-none">
@@ -286,7 +295,8 @@ export function LeadsManagement() {
 
     const matched = ASSIGNED_USERS.find(u => 
       u.toLowerCase() === loggedInUser.toLowerCase() ||
-      (u.split(" ")[0].length >= 3 && loggedInUser.toLowerCase().includes(u.split(" ")[0].toLowerCase()))
+      (u.split(" ")[0].length >= 3 && loggedInUser.toLowerCase().includes(u.split(" ")[0].toLowerCase())) ||
+      (u.includes("Tejasswin") && (loggedInUser.toLowerCase().includes("tejassw") || loggedInUser.toLowerCase().includes("tejasw") || loggedInUser.toLowerCase().includes("janhavi")))
     );
 
     return matched || "all";
@@ -1221,8 +1231,8 @@ export function LeadsManagement() {
           let finalAssignedTo: string | null = assignedToRaw ? String(assignedToRaw).trim() : null;
           if (finalAssignedTo) {
             const lower = finalAssignedTo.toLowerCase();
-            if (lower.includes("janhavi") || lower.includes("tejasswi") || lower.includes("tejaswi")) {
-              finalAssignedTo = "Tejasswi K";
+            if (lower.includes("janhavi") || lower.includes("tejasswi") || lower.includes("tejasswini") || lower.includes("tejaswi")) {
+              finalAssignedTo = "Tejasswini K";
             } else {
               const match = ASSIGNED_USERS.find(u => u.toLowerCase() === lower);
               if (match) finalAssignedTo = match;
@@ -1277,34 +1287,27 @@ export function LeadsManagement() {
           const last10 = clean.length >= 10 ? clean.slice(-10) : clean;
           if (!last10) return true; // keep entries without phone number
 
-          const inDate = (l.admission_date || "").split("T")[0].trim();
-          const inPlan = (l.lead_existing_plan || "").trim().toLowerCase();
+          const inAdmissionDate = (l.admission_date || "").split("T")[0].trim();
+          const todayYMD = new Date().toISOString().split("T")[0];
+          const inCreatedDate = (l.created_at || todayYMD).split("T")[0].trim();
 
-          // Deduplicate identical rows within the uploaded file itself
-          const fileKey = `${last10}|${inDate}|${inPlan}`;
+          // 1. Deduplicate identical rows within the uploaded file itself on the same date
+          const fileKey = `${last10}|${inCreatedDate}|${inAdmissionDate}`;
           if (seenImportKeys.has(fileKey)) return false;
 
-          // Check if this row is an EXACT DUPLICATE of an existing record in CRM
+          // 2. Check if a lead with same phone ALREADY exists on the SAME Added Date or Admission Date in CRM
           const existingMatches = existingLeadsByPhone[last10] || [];
-          const isExactDuplicate = existingMatches.some(ex => {
-            const exDate = (ex.admission_date || "").split("T")[0].trim();
-            const exPlan = (ex.lead_existing_plan || "").trim().toLowerCase();
+          const isSameDateDuplicate = existingMatches.some(ex => {
+            const exCreatedDate = (ex.created_at || "").split("T")[0].trim();
+            const exAdmissionDate = (ex.admission_date || "").split("T")[0].trim();
 
-            if (inDate && exDate) {
-              if (inPlan && exPlan) {
-                return inDate === exDate && inPlan === exPlan;
-              }
-              return inDate === exDate;
-            } else if (!inDate && !exDate) {
-              if (inPlan || exPlan) {
-                return inPlan === exPlan;
-              }
-              return true; // both have no date and no plan -> exact duplicate
-            }
-            return false; // different dates -> recall!
+            const isSameAddedDate = inCreatedDate && exCreatedDate && inCreatedDate === exCreatedDate;
+            const isSameAdmissionDate = inAdmissionDate && exAdmissionDate && inAdmissionDate === exAdmissionDate;
+
+            return isSameAddedDate || isSameAdmissionDate;
           });
 
-          if (isExactDuplicate) return false;
+          if (isSameDateDuplicate) return false;
 
           seenImportKeys.add(fileKey);
           return true;
@@ -1402,7 +1405,20 @@ export function LeadsManagement() {
     const matchesStatus = statusFilter === "all" || lead.lead_status === statusFilter;
     const matchesType = typeFilter === "all" || lead.lead_type === typeFilter;
     const matchesAssignedTo = assignedToFilter === "all" || 
-      (assignedToFilter === "unassigned" ? (!lead.assigned_to || lead.assigned_to === "") : (!!lead.assigned_to && lead.assigned_to.trim().toLowerCase() === assignedToFilter.toLowerCase()));
+      (assignedToFilter === "unassigned" 
+        ? (!lead.assigned_to || lead.assigned_to === "") 
+        : (!!lead.assigned_to && (() => {
+            const normAssigned = lead.assigned_to.trim().toLowerCase();
+            const normFilter = assignedToFilter.trim().toLowerCase();
+            if (normAssigned === normFilter) return true;
+            if ((normFilter.includes("tejasswin") || normFilter.includes("tejassw") || normFilter.includes("tejasw") || normFilter.includes("janhavi")) &&
+                (normAssigned.includes("tejasswin") || normAssigned.includes("tejassw") || normAssigned.includes("tejasw") || normAssigned.includes("janhavi"))) {
+              return true;
+            }
+            const filterFirstName = normFilter.split(" ")[0];
+            return normAssigned.includes(filterFirstName);
+          })())
+      );
     
     let matchesAutoDate = true;
     // Auto Date only filters when user has NOT selected a specific Added Date filter
@@ -2168,14 +2184,14 @@ function scanAndSyncLeads() {
       sheet.getRange(1, 10).setValue("lead CRM status").setFontWeight("bold");
     }
 
-    var KNOWN_STAFF = ["Mayuri K", "Ragini K", "Shreya K", "Tejasswi K", "Janhavi V", "Janhavi Vaidya"];
+    var KNOWN_STAFF = ["Mayuri K", "Ragini K", "Shreya K", "Tejasswini K", "Tejasswi K", "Janhavi V", "Janhavi Vaidya"];
     function formatAssignedTo(val) {
       if (!val) return null;
       var str = String(val).trim();
       if (!str) return null;
       var lower = str.toLowerCase();
-      if (lower.indexOf("janhavi") !== -1 || lower.indexOf("tejasswi") !== -1 || lower.indexOf("tejaswi") !== -1) {
-        return "Tejasswi K";
+      if (lower.indexOf("janhavi") !== -1 || lower.indexOf("tejasswi") !== -1 || lower.indexOf("tejasswini") !== -1 || lower.indexOf("tejaswi") !== -1) {
+        return "Tejasswini K";
       }
       for (var s = 0; s < KNOWN_STAFF.length; s++) {
         if (KNOWN_STAFF[s].toLowerCase() === lower) return KNOWN_STAFF[s];

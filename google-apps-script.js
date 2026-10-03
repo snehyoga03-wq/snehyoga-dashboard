@@ -167,16 +167,16 @@ function scanAndSyncLeads() {
       addToLookup(existingLeads[i]);
     }
 
-    // Standardize staff names (including Janhavi -> Tejasswi K)
-    var KNOWN_STAFF = ["Mayuri K", "Ragini K", "Shreya K", "Tejasswi K", "Janhavi V", "Janhavi Vaidya"];
+    // Standardize staff names (including Janhavi -> Tejasswini K)
+    var KNOWN_STAFF = ["Mayuri K", "Ragini K", "Shreya K", "Tejasswini K", "Tejasswi K", "Janhavi V", "Janhavi Vaidya"];
     function formatAssignedTo(val) {
       if (!val) return null;
       var str = String(val).trim();
       if (!str) return null;
       var lower = str.toLowerCase();
-      // Rename Janhavi V to Tejasswi K
-      if (lower.indexOf("janhavi") !== -1 || lower.indexOf("tejasswi") !== -1 || lower.indexOf("tejaswi") !== -1) {
-        return "Tejasswi K";
+      // Rename Janhavi V to Tejasswini K
+      if (lower.indexOf("janhavi") !== -1 || lower.indexOf("tejasswi") !== -1 || lower.indexOf("tejasswini") !== -1 || lower.indexOf("tejaswi") !== -1) {
+        return "Tejasswini K";
       }
       for (var s = 0; s < KNOWN_STAFF.length; s++) {
         if (KNOWN_STAFF[s].toLowerCase() === lower) {
@@ -215,63 +215,32 @@ function scanAndSyncLeads() {
       var inDateNorm = normalizeDateStr(formattedAdmissionDate);
       var inPlanNorm = normalizePlanStr(cleanPlan);
       var isDoneInSheet = (crmStatus === "done");
-
-      // Check if this row is an EXACT DUPLICATE of an existing record
-      // Option 2 (Recall logic):
-      // If admission_date or plan is NEW or DIFFERENT, it is treated as a RECALL (a new entry gets created!)
-      var exactMatch = null;
-      for (var m = 0; m < candidates.length; m++) {
-        var cand = candidates[m];
-        var candDateNorm = normalizeDateStr(cand.admission_date);
-        var candPlanNorm = normalizePlanStr(cand.lead_existing_plan);
-
-        if (inDateNorm && candDateNorm) {
-          if (inDateNorm === candDateNorm) {
-            if (inPlanNorm && candPlanNorm) {
-              if (inPlanNorm === candPlanNorm) {
-                exactMatch = cand;
-                break;
-              }
-            } else {
-              exactMatch = cand;
-              break;
-            }
-          }
-        } else if (!inDateNorm && !candDateNorm) {
-          if (inPlanNorm || candPlanNorm) {
-            if (inPlanNorm === candPlanNorm) {
-              exactMatch = cand;
-              break;
-            }
-          } else {
-            exactMatch = cand;
-            break;
-          }
-        }
-      }
-
-      // Case A: Exact duplicate found (same phone AND same admission date AND same plan)
-      if (exactMatch) {
-        // Ensure sheet cell shows Done
-        if (!isDoneInSheet) {
-          sheet.getRange(r + 1, crmStatusIdx + 1).setValue("Done");
-        }
-
-        // If sheet has assigned_to and database assigned_to is different or null, update DB
-        if (assignedTo && (exactMatch.assigned_to || "").toLowerCase() !== assignedTo.toLowerCase()) {
-          existingLeadsToUpdate.push({
-            id: exactMatch.id,
-            client_name: exactMatch.client_name || clientName,
-            contact: exactMatch.contact || contact,
-            assigned_to: assignedTo
-          });
-          exactMatch.assigned_to = assignedTo; // update in-memory map
-        }
+      if (isDoneInSheet) {
         continue;
       }
 
-      // Case B: Sheet ALREADY marks this row "Done" (already processed previously)
-      if (isDoneInSheet) {
+      var todayYMD = Utilities.formatDate(new Date(), Session.getScriptTimeZone(), "yyyy-MM-dd");
+
+      // Check if this row is a SAME-DATE DUPLICATE of an existing record
+      // (If added date or admission date are identical, skip inserting to prevent duplicate spam)
+      var sameDateDuplicate = false;
+      for (var m = 0; m < candidates.length; m++) {
+        var cand = candidates[m];
+        var candAdmissionNorm = normalizeDateStr(cand.admission_date);
+        var candCreatedNorm = normalizeDateStr(cand.created_at);
+
+        var isSameAdmission = inDateNorm && candAdmissionNorm && (inDateNorm === candAdmissionNorm);
+        var isSameAddedDate = candCreatedNorm && (candCreatedNorm === todayYMD);
+
+        if (isSameAdmission || isSameAddedDate) {
+          sameDateDuplicate = true;
+          break;
+        }
+      }
+
+      if (sameDateDuplicate) {
+        // Mark row as Done in Google Sheet so it is not re-processed, but do NOT insert a duplicate in Supabase
+        sheet.getRange(r + 1, crmStatusIdx + 1).setValue("Done");
         continue;
       }
 

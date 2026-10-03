@@ -472,7 +472,12 @@ const CRM = () => {
 
   const handleLogin = (e: React.FormEvent) => {
     e.preventDefault();
-    if (username === "YOG" && password === "ABC@yog123") {
+    const cleanUser = username.trim();
+    const cleanPass = password.trim();
+    const lowerUser = cleanUser.toLowerCase();
+
+    // Check Admin login
+    if ((lowerUser === "yog" || lowerUser === "admin") && (cleanPass === "ABC@yog123" || cleanPass === "ABC@yoga123")) {
       sessionStorage.setItem("crm_admin_auth", "true");
       sessionStorage.setItem("crm_user_role", "admin");
       sessionStorage.setItem("crm_username", "admin");
@@ -482,19 +487,36 @@ const CRM = () => {
       fetchChatConversations();
       fetchSessionLink();
       toast({ title: "Login Successful", description: "Welcome to CRM Dashboard" });
-    } else if (["Ragini K", "Shreya K", "Tejasswi K", "Janhavi V", "Janhavi Vaidya"].includes(username) && password === "ABC@yoga123") {
+      return;
+    }
+
+    // Flexible Staff Login matching (Tejasswini K, Tejasswi K, Tejaswi, Janhavi, Ragini, Shreya)
+    let canonicalStaffName: string | null = null;
+    if (lowerUser.includes("tejasswin") || lowerUser.includes("tejassw") || lowerUser.includes("tejasw") || lowerUser.includes("janhavi")) {
+      canonicalStaffName = "Tejasswini K";
+    } else if (lowerUser.includes("ragini")) {
+      canonicalStaffName = "Ragini K";
+    } else if (lowerUser.includes("shreya")) {
+      canonicalStaffName = "Shreya K";
+    } else if (lowerUser.includes("mayuri")) {
+      canonicalStaffName = "Mayuri K";
+    }
+
+    const isValidPass = cleanPass === "ABC@yoga123" || cleanPass === "ABC@yog123";
+
+    if (canonicalStaffName && isValidPass) {
       sessionStorage.setItem("crm_admin_auth", "true");
       sessionStorage.setItem("crm_user_role", "staff");
-      sessionStorage.setItem("crm_username", username);
+      sessionStorage.setItem("crm_username", canonicalStaffName);
       setIsAuthenticated(true);
       setCurrentSection('followup');
       fetchUsers();
       fetchFollowupReports();
       fetchChatConversations();
       fetchSessionLink();
-      toast({ title: "Login Successful", description: `Welcome ${username}` });
+      toast({ title: "Login Successful", description: `Welcome ${canonicalStaffName}` });
     } else {
-      toast({ title: "Invalid Credentials", description: "Please try again", variant: "destructive" });
+      toast({ title: "Invalid Credentials", description: "Please check your username and password", variant: "destructive" });
     }
   };
 

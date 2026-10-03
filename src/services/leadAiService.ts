@@ -77,7 +77,7 @@ export async function fetchLiveDatabaseStats(forceFresh = false): Promise<LiveDb
       unassignedRes,
       raginiRes,
       shreyaRes,
-      tejasswiRes,
+      tejasswiniRes,
       connectedRes,
       notConnectedRes,
       todayFollowUpRes
@@ -90,7 +90,7 @@ export async function fetchLiveDatabaseStats(forceFresh = false): Promise<LiveDb
       supabase.from("leads").select("*", { count: "exact", head: true }).is("assigned_to", null),
       supabase.from("leads").select("*", { count: "exact", head: true }).ilike("assigned_to", "%Ragini%"),
       supabase.from("leads").select("*", { count: "exact", head: true }).ilike("assigned_to", "%Shreya%"),
-      supabase.from("leads").select("*", { count: "exact", head: true }).or("assigned_to.ilike.%Tejasswi%,assigned_to.ilike.%Janhavi%"),
+      supabase.from("leads").select("*", { count: "exact", head: true }).or("assigned_to.ilike.%Tejasswini%,assigned_to.ilike.%Tejasswi%,assigned_to.ilike.%Janhavi%"),
       supabase.from("leads").select("*", { count: "exact", head: true }).eq("call_connected", "connected"),
       supabase.from("leads").select("*", { count: "exact", head: true }).eq("call_connected", "not_connected"),
       supabase.from("leads").select("*", { count: "exact", head: true }).eq("follow_up_date", todayStr)
@@ -118,7 +118,7 @@ export async function fetchLiveDatabaseStats(forceFresh = false): Promise<LiveDb
         "Unassigned": unassignedRes.count || 0,
         "Ragini K": raginiRes.count || 0,
         "Shreya K": shreyaRes.count || 0,
-        "Tejasswi K": tejasswiRes.count || 0
+        "Tejasswini K": tejasswiniRes.count || 0
       },
       connectedCount: connected,
       notConnectedCount: notConnected,
@@ -187,7 +187,7 @@ export async function queryLeadsLocally(userQuery: string, leads: Lead[]): Promi
 
   if (isGreeting) {
     return {
-      reply: `👋 **Hello! How can I help you today?**\n\nI can answer questions about your leads or filter the table directly:\n- 🏆 *"How many deals were closed?"*\n- 🔍 *"Filter unassigned leads"*\n- 📅 *"What follow-ups are due today?"*\n- 👤 *"Show leads for Shreya / Ragini / Tejasswi"*\n- 🧘 *"How many Faceyoga leads do we have?"*\n\nJust tell me what you'd like to find or click any quick chip above!`,
+      reply: `👋 **Hello! How can I help you today?**\n\nI can answer questions about your leads or filter the table directly:\n- 🏆 *"How many deals were closed?"*\n- 🔍 *"Filter unassigned leads"*\n- 📅 *"What follow-ups are due today?"*\n- 👤 *"Show leads for Shreya / Ragini / Tejasswini"*\n- 🧘 *"How many Faceyoga leads do we have?"*\n\nJust tell me what you'd like to find or click any quick chip above!`,
       source: "local"
     };
   }
@@ -234,10 +234,10 @@ export async function queryLeadsLocally(userQuery: string, leads: Lead[]): Promi
         isDirectDbQuery: true
       };
     }
-    if (q.includes("tejasswi") || q.includes("tejaswi") || q.includes("janhavi")) {
+    if (q.includes("tejasswi") || q.includes("tejasswini") || q.includes("tejaswi") || q.includes("janhavi")) {
       return {
-        reply: `✅ **Filtering Leads for Tejasswi K**\n\nTable filter applied for **Tejasswi K**.`,
-        action: { assignedToFilter: "Tejasswi K" },
+        reply: `✅ **Filtering Leads for Tejasswini K**\n\nTable filter applied for **Tejasswini K**.`,
+        action: { assignedToFilter: "Tejasswini K" },
         source: "local",
         isDirectDbQuery: true
       };
@@ -260,7 +260,7 @@ export async function queryLeadsLocally(userQuery: string, leads: Lead[]): Promi
 
     // General filter inquiry (e.g. "are you able to add 5the filter", "can you filter")
     return {
-      reply: `⚡ **Yes! I can filter the table directly for you.**\n\nTell me what you'd like to filter, or click any option:\n- 🎯 *"Filter Deal Done leads"*\n- 🔍 *"Filter Unassigned leads"*\n- 👤 *"Filter leads for Shreya / Ragini / Tejasswi"*\n- 📅 *"Filter today's follow-ups"*\n- 🧘 *"Filter Faceyoga leads"*\n- 🔄 *"Reset all filters"*\n\nWhich leads would you like me to show in the table?`,
+      reply: `⚡ **Yes! I can filter the table directly for you.**\n\nTell me what you'd like to filter, or click any option:\n- 🎯 *"Filter Deal Done leads"*\n- 🔍 *"Filter Unassigned leads"*\n- 👤 *"Filter leads for Shreya / Ragini / Tejasswini"*\n- 📅 *"Filter today's follow-ups"*\n- 🧘 *"Filter Faceyoga leads"*\n- 🔄 *"Reset all filters"*\n\nWhich leads would you like me to show in the table?`,
       source: "local"
     };
   }
@@ -337,9 +337,10 @@ export async function queryLeadsLocally(userQuery: string, leads: Lead[]): Promi
   const agents = [
     { key: "ragini", name: "Ragini K" },
     { key: "shreya", name: "Shreya K" },
-    { key: "tejasswi", name: "Tejasswi K" },
-    { key: "tejaswi", name: "Tejasswi K" },
-    { key: "janhavi", name: "Tejasswi K" }
+    { key: "tejasswini", name: "Tejasswini K" },
+    { key: "tejasswi", name: "Tejasswini K" },
+    { key: "tejaswi", name: "Tejasswini K" },
+    { key: "janhavi", name: "Tejasswini K" }
   ];
 
   for (const agent of agents) {
@@ -412,7 +413,7 @@ Full Database Statistics (Queried Directly From Supabase):
 Available UI Filter Options:
 - Statuses: "all", "Deal Done", "Follow Up", "Master Class Follow", "Dead", "Select Option"
 - Lead Types: "all", "SNEHYOGA 365", "FACEYOGA", "MSP - 9 Days", "AMP - 30 Days", "YMC", "NIDRA MASTERY", "CALM YOUR MIND", "1:1 CONSULTATION", "OFFLINE"
-- Assigned Users: "all", "unassigned", "Ragini K", "Shreya K", "Tejasswi K"
+- Assigned Users: "all", "unassigned", "Ragini K", "Shreya K", "Tejasswini K"
 
 IMPORTANT BEHAVIOR INSTRUCTIONS:
 1. GREETINGS & CASUAL TALK: Be warm and helpful. Do NOT dump raw database reports on a simple hello or general question!
