@@ -105,7 +105,7 @@ function scanAndSyncLeads() {
         },
         muteHttpExceptions: true
       };
-      var fetchUrl = SUPABASE_URL + "/rest/v1/leads?select=id,contact,client_name,assigned_to,admission_date,lead_existing_plan&offset=" + offset + "&limit=" + pageSize;
+      var fetchUrl = SUPABASE_URL + "/rest/v1/leads?select=id,contact,client_name,assigned_to,admission_date,lead_existing_plan,created_at&offset=" + offset + "&limit=" + pageSize;
       var response = UrlFetchApp.fetch(fetchUrl, getOptions);
       if (response.getResponseCode() !== 200) {
         Logger.log("[Sync Error] Failed to fetch leads from Supabase at offset " + offset + ". Response: " + response.getContentText());
@@ -221,30 +221,31 @@ function scanAndSyncLeads() {
 
       var todayYMD = Utilities.formatDate(new Date(), Session.getScriptTimeZone(), "yyyy-MM-dd");
 
-      // Check if this row is a SAME-DATE DUPLICATE of an existing record
-      // (If added date or admission date are identical, skip inserting to prevent duplicate spam)
-      var sameDateDuplicate = false;
+      // Check if this row is a SAME-DAY DUPLICATE of an existing record
+      // (If added date is TODAY, skip inserting to prevent same-day duplicate spam)
+      var sameDayDuplicate = false;
+      var isRecallLead = false;
+
       for (var m = 0; m < candidates.length; m++) {
         var cand = candidates[m];
-        var candAdmissionNorm = normalizeDateStr(cand.admission_date);
         var candCreatedNorm = normalizeDateStr(cand.created_at);
 
-        var isSameAdmission = inDateNorm && candAdmissionNorm && (inDateNorm === candAdmissionNorm);
-        var isSameAddedDate = candCreatedNorm && (candCreatedNorm === todayYMD);
-
-        if (isSameAdmission || isSameAddedDate) {
-          sameDateDuplicate = true;
+        if (candCreatedNorm && candCreatedNorm === todayYMD) {
+          sameDayDuplicate = true;
           break;
+        } else if (candCreatedNorm && candCreatedNorm < todayYMD) {
+          isRecallLead = true;
         }
       }
 
-      if (sameDateDuplicate) {
-        // Mark row as Done in Google Sheet so it is not re-processed, but do NOT insert a duplicate in Supabase
-        sheet.getRange(r + 1, crmStatusIdx + 1).setValue("Done");
+      if (sameDayDuplicate) {
+        // Mark row as Skipped (Duplicate Today) in Google Sheet so it is not re-processed
+        sheet.getRange(r + 1, crmStatusIdx + 1).setValue("Skipped (Duplicate Today)");
         continue;
       }
 
-      // Case C: Brand new lead OR new recall entry (different date/plan) -> Prepare for insert
+      // Case C: Brand new lead OR recall entry on a different date -> Prepare for insert
+      var statusLabel = isRecallLead ? "Done (Recall)" : "Done";
       var newLeadItem = {
         client_name: clientName,
         contact: contact,
@@ -253,7 +254,8 @@ function scanAndSyncLeads() {
         assigned_to: assignedTo,
         lead_status: "Select Option",
         created_at: new Date().toISOString(),
-        rowIndex: r + 1
+        rowIndex: r + 1,
+        statusLabel: statusLabel
       };
 
       newLeadsToInsert.push(newLeadItem);
@@ -332,7 +334,8 @@ function scanAndSyncLeads() {
           Logger.log("[Sync Success] Batch (" + (c+1) + "-" + (c+chunk.length) + ") added to CRM.");
           // Mark newly added batch as "Done" in lead CRM status column immediately
           for (var k = 0; k < chunk.length; k++) {
-            sheet.getRange(chunk[k].rowIndex, crmStatusIdx + 1).setValue("Done");
+            var label = chunk[k].statusLabel || "Done";
+            sheet.getRange(chunk[k].rowIndex, crmStatusIdx + 1).setValue(label);
           }
         } else {
           Logger.log("[Sync Error] Failed batch (" + (c+1) + "-" + (c+chunk.length) + "). Code: " + statusCode + ", Body: " + postResponse.getContentText());
