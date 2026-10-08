@@ -23,8 +23,12 @@ const isUserMatch = (assignedTo: string | null | undefined, createdBy: string | 
   const normAssigned = (assignedTo || "").trim().toLowerCase();
   const normCreatedBy = (createdBy || "").trim().toLowerCase();
 
-  // If viewing Tejasswini K / Tejasswi K, also match historical leads created/assigned to Janhavi
-  if ((normTarget.includes("tejasswi") || normTarget.includes("tejasswini")) && (normAssigned.includes("janhavi") || normCreatedBy.includes("janhavi"))) {
+  // If viewing Tejasswini K / Tejasswi K, match any variant of Tejasswini, Tejasswi, Tejaswi, or Janhavi
+  const isTargetTejas = normTarget.includes("tejasswin") || normTarget.includes("tejassw") || normTarget.includes("tejasw") || normTarget.includes("janhavi");
+  const isAssignedTejas = normAssigned.includes("tejasswin") || normAssigned.includes("tejassw") || normAssigned.includes("tejasw") || normAssigned.includes("janhavi");
+  const isCreatedTejas = normCreatedBy.includes("tejasswin") || normCreatedBy.includes("tejassw") || normCreatedBy.includes("tejasw") || normCreatedBy.includes("janhavi");
+
+  if (isTargetTejas && (isAssignedTejas || isCreatedTejas)) {
     return true;
   }
 
@@ -65,24 +69,52 @@ export default function WeeklyReportDashboard() {
     const currentFetchId = ++fetchIdRef.current;
     setLoading(true);
     try {
-      // 1. Fetch all leads from database
-      let leadsQuery = supabase.from('leads').select('*');
-      if (selectedStatus !== 'all') {
-        leadsQuery = leadsQuery.eq('lead_status', selectedStatus);
-      }
-      
-      const { data: leadsData, error: leadsError } = await leadsQuery;
-      if (leadsError) throw leadsError;
+      // 1. Fetch all leads from database using pagination
+      let allLeads: Lead[] = [];
+      let offset = 0;
+      const pageSize = 1000;
+      let hasMore = true;
 
-      // 2. Fetch history from database
+      while (hasMore) {
+        let leadsQuery = supabase
+          .from('leads')
+          .select('*')
+          .order('created_at', { ascending: false })
+          .range(offset, offset + pageSize - 1);
+
+        if (selectedStatus !== 'all') {
+          leadsQuery = leadsQuery.eq('lead_status', selectedStatus);
+        }
+
+        const { data: chunk, error: leadsError } = await leadsQuery;
+        if (leadsError) throw leadsError;
+
+        if (!chunk || chunk.length === 0) {
+          hasMore = false;
+        } else {
+          allLeads = allLeads.concat(chunk as Lead[]);
+          if (chunk.length < pageSize) {
+            hasMore = false;
+          } else {
+            offset += pageSize;
+          }
+        }
+      }
+
+      // Deduplicate leads by ID
+      const uniqueLeads = Array.from(new Map(allLeads.map(l => [l.id, l])).values());
+
+      // 2. Fetch history from database (latest 5000 entries)
       const { data: historyData, error: historyError } = await supabase
         .from('lead_history')
-        .select('*');
+        .select('*')
+        .order('created_at', { ascending: false })
+        .limit(5000);
         
       if (historyError) throw historyError;
 
       if (currentFetchId === fetchIdRef.current) {
-        setLeads(leadsData || []);
+        setLeads(uniqueLeads);
         setHistory(historyData || []);
       }
     } catch (err) {
@@ -104,24 +136,53 @@ export default function WeeklyReportDashboard() {
   const isDateRange = Boolean(startDate && endDate);
   const targetDate = dailyDate || startDate || endDate || new Date().toISOString().split('T')[0];
 
-  const matchesAutoDate = (lead: Lead): boolean => {
-    const leadDate = lead.created_at ? lead.created_at.split('T')[0] : '';
+  const formatLocalDateYMD = (dateVal: string | null | undefined): string => {
+    if (!dateVal) return "";
+    const d = new Date(dateVal);
+    if (isNaN(d.getTime())) return "";
+    const y = d.getFullYear();
+    const m = String(d.getMonth() + 1).padStart(2, "0");
+    const day = String(d.getDate()).padStart(2, "0");
+    return `${y}-${m}-${day}`;
+  };
 
+  const matchesDateFilter = (dateVal: string | null | undefined, filterDate: string): boolean => {
+    if (!dateVal || !filterDate) return false;
+    if (typeof dateVal === "string" && dateVal.startsWith(filterDate)) return true;
+    
+    const d = new Date(dateVal);
+    if (isNaN(d.getTime())) return false;
+    
+    const localYMD = formatLocalDateYMD(dateVal);
+    if (localYMD === filterDate) return true;
+
+    try {
+      const utcYMD = d.toISOString().split("T")[0];
+      if (utcYMD === filterDate) return true;
+    } catch (e) {
+      // ignore invalid date
+    }
+
+    return false;
+  };
+
+  const matchesAutoDate = (lead: Lead): boolean => {
     if (isDateRange) {
-      if (!leadDate) return true;
+      if (!lead.created_at) return true;
       const isFollowUpInRange = Boolean(lead.follow_up_date && lead.follow_up_date >= startDate && lead.follow_up_date <= endDate);
-      const isCreatedInRange = Boolean(leadDate >= startDate && leadDate <= endDate);
+      const isCreatedInRange = Boolean(lead.created_at && lead.created_at >= startDate && lead.created_at <= (endDate + "T23:59:59"));
       return isCreatedInRange || isFollowUpInRange || lead.lead_status === "Master Class Follow";
     }
 
     if (!targetDate) return true;
     const isMasterClassFollow = lead.lead_status === "Master Class Follow";
-    if (!leadDate) {
-      return lead.follow_up_date === targetDate || isMasterClassFollow;
+    if (!lead.created_at) {
+      return matchesDateFilter(lead.follow_up_date, targetDate) || isMasterClassFollow;
     }
-    const isCreatedToday = leadDate === targetDate;
-    const isFollowUpToday = lead.follow_up_date === targetDate;
-    const isUntouchedCarryForward = leadDate < targetDate && lead.lead_status === "Select Option" && !lead.follow_up_date;
+    const isCreatedToday = matchesDateFilter(lead.created_at, targetDate);
+    const isFollowUpToday = matchesDateFilter(lead.follow_up_date, targetDate);
+    const localLeadDate = formatLocalDateYMD(lead.created_at);
+    const isUntouchedCarryForward = localLeadDate < targetDate && lead.lead_status === "Select Option" && !lead.follow_up_date;
     return isCreatedToday || isFollowUpToday || isUntouchedCarryForward || isMasterClassFollow;
   };
 

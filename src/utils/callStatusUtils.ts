@@ -81,9 +81,10 @@ export function getLeadCallStatus(lead: Partial<Lead>, historyEntries: any[] = [
     }
   }
 
-  // 4. Fallback if lead has updated status ("Follow Up", "Master Class Follow", "Deal Done", "Dead") -> contact occurred!
-  if (lead.lead_status && lead.lead_status !== "Select Option") {
-    if (lead.lead_status === "Dead") return "not_connected";
+  // 4. Fallback if lead has updated status ("Deal Done") -> connection occurred!
+  // Note: We do NOT blindly treat "Dead" as "not_connected" because leads can be marked dead
+  // without calling. Only count calls that were explicitly set or recorded with remarks/history.
+  if (lead.lead_status === "Deal Done") {
     return "connected";
   }
 

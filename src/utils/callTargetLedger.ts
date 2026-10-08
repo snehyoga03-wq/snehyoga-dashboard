@@ -45,6 +45,14 @@ const isUserMatch = (assignedTo: string | null | undefined, createdBy: string | 
   const normAssigned = (assignedTo || "").trim().toLowerCase();
   const normCreatedBy = (createdBy || "").trim().toLowerCase();
 
+  const isTargetTejas = normTarget.includes("tejasswin") || normTarget.includes("tejassw") || normTarget.includes("tejasw") || normTarget.includes("janhavi");
+  const isAssignedTejas = normAssigned.includes("tejasswin") || normAssigned.includes("tejassw") || normAssigned.includes("tejasw") || normAssigned.includes("janhavi");
+  const isCreatedTejas = normCreatedBy.includes("tejasswin") || normCreatedBy.includes("tejassw") || normCreatedBy.includes("tejasw") || normCreatedBy.includes("janhavi");
+
+  if (isTargetTejas && (isAssignedTejas || isCreatedTejas)) {
+    return true;
+  }
+
   return (
     normAssigned.includes(normTarget) ||
     normAssigned.includes(targetFirstName) ||
@@ -53,16 +61,40 @@ const isUserMatch = (assignedTo: string | null | undefined, createdBy: string | 
   );
 };
 
+const formatLocalDateYMD = (dateVal: string | null | undefined): string => {
+  if (!dateVal) return "";
+  const d = new Date(dateVal);
+  if (isNaN(d.getTime())) return "";
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
+};
+
+const matchesDateFilter = (dateVal: string | null | undefined, filterDate: string): boolean => {
+  if (!dateVal || !filterDate) return false;
+  if (typeof dateVal === "string" && dateVal.startsWith(filterDate)) return true;
+  const d = new Date(dateVal);
+  if (isNaN(d.getTime())) return false;
+  const localYMD = formatLocalDateYMD(dateVal);
+  if (localYMD === filterDate) return true;
+  try {
+    const utcYMD = d.toISOString().split("T")[0];
+    if (utcYMD === filterDate) return true;
+  } catch (e) {}
+  return false;
+};
+
 const matchesAutoDate = (lead: any, tDate: string): boolean => {
   if (!tDate) return true;
   const isMasterClassFollow = lead.lead_status === "Master Class Follow";
   if (!lead.created_at) {
-    return lead.follow_up_date === tDate || isMasterClassFollow;
+    return matchesDateFilter(lead.follow_up_date, tDate) || isMasterClassFollow;
   }
-  const leadDate = new Date(lead.created_at).toISOString().split('T')[0];
-  const isCreatedToday = leadDate === tDate;
-  const isFollowUpToday = lead.follow_up_date === tDate;
-  const isUntouchedCarryForward = leadDate < tDate && lead.lead_status === "Select Option" && !lead.follow_up_date;
+  const isCreatedToday = matchesDateFilter(lead.created_at, tDate);
+  const isFollowUpToday = matchesDateFilter(lead.follow_up_date, tDate);
+  const localLeadDate = formatLocalDateYMD(lead.created_at);
+  const isUntouchedCarryForward = localLeadDate < tDate && lead.lead_status === "Select Option" && !lead.follow_up_date;
   return isCreatedToday || isFollowUpToday || isUntouchedCarryForward || isMasterClassFollow;
 };
 
