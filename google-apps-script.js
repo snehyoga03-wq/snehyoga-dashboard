@@ -219,33 +219,24 @@ function scanAndSyncLeads() {
         continue;
       }
 
-      var todayYMD = Utilities.formatDate(new Date(), Session.getScriptTimeZone(), "yyyy-MM-dd");
-
-      // Check if this row is a SAME-DAY DUPLICATE of an existing record
-      // (If added date is TODAY, skip inserting to prevent same-day duplicate spam)
-      var sameDayDuplicate = false;
-      var isRecallLead = false;
-
-      for (var m = 0; m < candidates.length; m++) {
-        var cand = candidates[m];
-        var candCreatedNorm = normalizeDateStr(cand.created_at);
-
-        if (candCreatedNorm && candCreatedNorm === todayYMD) {
-          sameDayDuplicate = true;
-          break;
-        } else if (candCreatedNorm && candCreatedNorm < todayYMD) {
-          isRecallLead = true;
+      // Case A: Contact already exists in database -> Never insert duplicate! Update assignment if needed and mark Done
+      if (candidates.length > 0) {
+        var latestCand = candidates[0];
+        if (assignedTo && (latestCand.assigned_to || "").toLowerCase() !== assignedTo.toLowerCase()) {
+          existingLeadsToUpdate.push({
+            id: latestCand.id,
+            client_name: latestCand.client_name || clientName,
+            contact: latestCand.contact || contact,
+            assigned_to: assignedTo
+          });
+          latestCand.assigned_to = assignedTo;
         }
-      }
 
-      if (sameDayDuplicate) {
-        // Mark row as Skipped (Duplicate Today) in Google Sheet so it is not re-processed
-        sheet.getRange(r + 1, crmStatusIdx + 1).setValue("Skipped (Duplicate Today)");
+        sheet.getRange(r + 1, crmStatusIdx + 1).setValue("Done");
         continue;
       }
 
-      // Case C: Brand new lead OR recall entry on a different date -> Prepare for insert
-      var statusLabel = isRecallLead ? "Done (Recall)" : "Done";
+      // Case B: Brand new contact -> Prepare for insert
       var newLeadItem = {
         client_name: clientName,
         contact: contact,
@@ -255,12 +246,10 @@ function scanAndSyncLeads() {
         lead_status: "Select Option",
         created_at: new Date().toISOString(),
         rowIndex: r + 1,
-        statusLabel: statusLabel
+        statusLabel: "Done"
       };
 
       newLeadsToInsert.push(newLeadItem);
-
-      // Block duplicate rows for the SAME recall in the SAME sheet scan
       addToLookup(newLeadItem);
     }
 

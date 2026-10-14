@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from "react";
+import React, { useState, useEffect, useRef, useMemo } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -9,7 +9,7 @@ import { motion } from "framer-motion";
 import {
   ClipboardList, Search, RefreshCw, Plus, Download, Upload,
   Trash2, Edit, Save, X, Calendar, User, Phone, CheckCircle, History,
-  Users, CheckSquare, FileSpreadsheet, FileCode, Copy, Check, Sparkles
+  Users, CheckSquare, FileSpreadsheet, FileCode, Copy, Check, Sparkles, MessageCircle
 } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -130,6 +130,16 @@ interface Lead {
   created_at: string | null;
 }
 
+export interface GroupedLead {
+  primaryId: string;
+  contact: string;
+  normPhone: string;
+  client_name: string;
+  lead: Lead;
+  entries: Lead[];
+  entriesCount: number;
+}
+
 const EditableCell = ({ value, onUpdate, type = "text", placeholder = "", className = "" }: { value: string | null, onUpdate: (val: string) => void, type?: string, placeholder?: string, className?: string }) => {
   const [val, setVal] = useState(value || "");
   useEffect(() => { setVal(value || ""); }, [value]);
@@ -146,9 +156,22 @@ const EditableCell = ({ value, onUpdate, type = "text", placeholder = "", classN
   );
 };
 
-const LeadRow = React.memo(({ lead, index, isSelected, handlers }: any) => {
+const LeadRow = React.memo(({ groupedLead, index, isSelected, handlers }: any) => {
+  const lead = groupedLead.lead;
+  const entriesCount = groupedLead.entriesCount;
   const curStatus = LEAD_STATUSES.find(s => s.id === lead.lead_status) || LEAD_STATUSES[0];
-  const { handleSelectRow, handleUpdateField, handleUpdateLeadType, handleUpdateExistingPlan, handleUpdateStatus, handleUpdateAssignedTo, handleOpenHistory, handleOpenEditDialog } = handlers;
+  const {
+    handleSelectRow,
+    handleUpdateField,
+    handleUpdateLeadType,
+    handleUpdateExistingPlan,
+    handleUpdateStatus,
+    handleUpdateAssignedTo,
+    handleUpdateCallConnected,
+    handleOpenHistory,
+    handleOpenEditDialog,
+    handleOpenLeadTimeline
+  } = handlers;
   
   return (
     <TableRow className="hover:bg-gray-50 border-b border-gray-100">
@@ -159,8 +182,25 @@ const LeadRow = React.memo(({ lead, index, isSelected, handlers }: any) => {
           className="border-gray-300 data-[state=checked]:bg-[#2e5a44] data-[state=checked]:border-[#2e5a44]"
         />
       </TableCell>
-      <TableCell className="p-2 text-center text-sm font-medium text-gray-500 sticky left-[40px] z-10 bg-white">
-        {index + 1}
+      <TableCell className="p-2 text-center text-sm font-medium sticky left-[40px] z-10 bg-white">
+        <button
+          type="button"
+          onClick={() => handleOpenLeadTimeline(groupedLead)}
+          className="inline-flex items-center justify-center gap-1.5 px-2 py-1 rounded-md hover:bg-emerald-50 border border-transparent hover:border-emerald-200 transition-all cursor-pointer group"
+          title="Click SR NO to view complete entry & calling history for this contact"
+        >
+          <span className="font-bold text-[#2e5a44] group-hover:underline">
+            {index + 1}
+          </span>
+          {entriesCount > 1 && (
+            <span
+              className="inline-flex items-center justify-center px-1.5 py-0.2 rounded-full text-[10px] font-extrabold bg-blue-100 text-blue-700 border border-blue-300 shadow-xs"
+              title={`${entriesCount} records for this mobile number`}
+            >
+              {entriesCount}
+            </span>
+          )}
+        </button>
       </TableCell>
       <TableCell className="p-1 sticky left-[96px] z-10 bg-white border-r border-gray-200">
         <EditableCell value={lead.client_name} onUpdate={(val) => handleUpdateField(lead.id, 'client_name', val)} className="font-semibold text-gray-800" />
@@ -189,14 +229,27 @@ const LeadRow = React.memo(({ lead, index, isSelected, handlers }: any) => {
         </Select>
       </TableCell>
       <TableCell className="p-1">
-        <Select value={lead.lead_status} onValueChange={(val) => handleUpdateStatus(lead.id, val)}>
-          <SelectTrigger className={`h-8 border-none text-xs rounded-full px-3 py-1 font-bold text-center w-full focus:ring-1 focus:ring-offset-1 focus:ring-[#2e5a44] shadow-none ${curStatus.bg} ${curStatus.text}`}>
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            {LEAD_STATUSES.map(s => (<SelectItem key={s.id} value={s.id} className="text-xs font-bold">{s.label}</SelectItem>))}
-          </SelectContent>
-        </Select>
+        <div className="flex flex-col gap-1 items-center">
+          <Select value={lead.lead_status} onValueChange={(val) => handleUpdateStatus(lead.id, val)}>
+            <SelectTrigger className={`h-8 border-none text-xs rounded-full px-3 py-1 font-bold text-center w-full focus:ring-1 focus:ring-offset-1 focus:ring-[#2e5a44] shadow-none ${curStatus.bg} ${curStatus.text}`}>
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {LEAD_STATUSES.map(s => (<SelectItem key={s.id} value={s.id} className="text-xs font-bold">{s.label}</SelectItem>))}
+            </SelectContent>
+          </Select>
+          {entriesCount > 1 && (
+            <button
+              type="button"
+              onClick={() => handleOpenLeadTimeline(groupedLead)}
+              className="text-[10px] text-blue-600 hover:text-blue-800 font-semibold text-center hover:underline cursor-pointer flex items-center justify-center gap-1"
+              title="View status and call timeline"
+            >
+              <History className="w-3 h-3 text-blue-500" />
+              <span>{entriesCount} entries</span>
+            </button>
+          )}
+        </div>
       </TableCell>
       <TableCell className="p-1">
         <EditableCell type="date" value={lead.follow_up_date} onUpdate={(val) => handleUpdateField(lead.id, 'follow_up_date', val)} />
@@ -264,10 +317,22 @@ const LeadRow = React.memo(({ lead, index, isSelected, handlers }: any) => {
       </TableCell>
       <TableCell className="text-center p-2">
         <div className="flex justify-center items-center gap-1">
-          <Button variant="ghost" size="icon" className="h-8 w-8 text-indigo-600 hover:text-indigo-800 hover:bg-indigo-50" onClick={() => handleOpenHistory(lead)}>
+          <Button
+            variant="ghost"
+            size="icon"
+            className="h-8 w-8 text-indigo-600 hover:text-indigo-800 hover:bg-indigo-50"
+            onClick={() => handleOpenLeadTimeline(groupedLead)}
+            title="View Entry Timeline"
+          >
             <History className="w-4 h-4" />
           </Button>
-          <Button variant="ghost" size="icon" className="h-8 w-8 text-blue-600 hover:text-blue-800 hover:bg-blue-50" onClick={() => handleOpenEditDialog(lead)}>
+          <Button
+            variant="ghost"
+            size="icon"
+            className="h-8 w-8 text-blue-600 hover:text-blue-800 hover:bg-blue-50"
+            onClick={() => handleOpenEditDialog(lead)}
+            title="Edit Lead"
+          >
             <Edit className="w-4 h-4" />
           </Button>
         </div>
@@ -275,7 +340,10 @@ const LeadRow = React.memo(({ lead, index, isSelected, handlers }: any) => {
     </TableRow>
   );
 }, (prevProps, nextProps) => {
-  return prevProps.lead === nextProps.lead && prevProps.isSelected === nextProps.isSelected && prevProps.index === nextProps.index;
+  return prevProps.groupedLead.lead === nextProps.groupedLead.lead &&
+         prevProps.groupedLead.entriesCount === nextProps.groupedLead.entriesCount &&
+         prevProps.isSelected === nextProps.isSelected &&
+         prevProps.index === nextProps.index;
 });
 
 export function LeadsManagement() {
@@ -380,6 +448,62 @@ export function LeadsManagement() {
   const [showHistoryDialog, setShowHistoryDialog] = useState(false);
   const [selectedLeadHistory, setSelectedLeadHistory] = useState<any[]>([]);
   const [selectedLeadForHistory, setSelectedLeadForHistory] = useState<Lead | null>(null);
+
+  // Grouped Lead Timeline Modal State
+  const [isTimelineOpen, setIsTimelineOpen] = useState(false);
+  const [selectedGroupedLead, setSelectedGroupedLead] = useState<GroupedLead | null>(null);
+
+  const handleOpenLeadTimeline = (groupedLead: GroupedLead) => {
+    setSelectedGroupedLead(groupedLead);
+    setIsTimelineOpen(true);
+  };
+
+  const handleAddNewTimelineEntry = () => {
+    if (!selectedGroupedLead) return;
+    const primary = selectedGroupedLead.lead;
+    setEditingLead(null);
+    setLeadForm({
+      admission_date: primary.admission_date || "",
+      calling_date: new Date().toISOString().split("T")[0],
+      sr_no: primary.sr_no || "",
+      client_name: primary.client_name,
+      contact: primary.contact,
+      lead_type: primary.lead_type || LEAD_TYPES[0],
+      lead_existing_plan: primary.lead_existing_plan || "",
+      lead_status: "Follow Up",
+      remark: "",
+      call_connected: null,
+      assigned_to: primary.assigned_to,
+      follow_up_date: new Date(Date.now() + 86400000).toISOString().split("T")[0]
+    });
+    setIsOpenAddEditDialog(true);
+  };
+
+  const handleDeleteTimelineEntry = async (entryId: string) => {
+    if (!confirm("Are you sure you want to delete this specific entry?")) return;
+    try {
+      const { error } = await supabase.from("leads").delete().eq("id", entryId);
+      if (error) throw error;
+      setLeads(prev => prev.filter(l => l.id !== entryId));
+      if (selectedGroupedLead) {
+        const remaining = selectedGroupedLead.entries.filter(e => e.id !== entryId);
+        if (remaining.length === 0) {
+          setIsTimelineOpen(false);
+          setSelectedGroupedLead(null);
+        } else {
+          setSelectedGroupedLead({
+            ...selectedGroupedLead,
+            entries: remaining,
+            entriesCount: remaining.length,
+            lead: remaining[0]
+          });
+        }
+      }
+      toast({ title: "Entry Deleted", description: "The timeline entry was removed successfully." });
+    } catch (err: any) {
+      toast({ title: "Delete Failed", description: err.message, variant: "destructive" });
+    }
+  };
 
   const [isCleanDuplicatesOpen, setIsCleanDuplicatesOpen] = useState(false);
   const [duplicateSummary, setDuplicateSummary] = useState<{
@@ -1395,85 +1519,178 @@ export function LeadsManagement() {
     return false;
   };
 
-  const filteredLeads = leads.filter(lead => {
-    const matchesSearch = !searchQuery ||
-      (lead.client_name || "").toLowerCase().includes(searchQuery.toLowerCase()) ||
-      (lead.contact || "").includes(searchQuery) ||
-      (lead.remark || "").toLowerCase().includes(searchQuery.toLowerCase()) ||
-      (lead.sr_no || "").toLowerCase().includes(searchQuery.toLowerCase());
+  // Group all leads by Unique Mobile Number (Contact)
+  // Each unique contact gets 1 primary row, and all duplicate/previous records are stored in entries[]
+  const groupedLeads: GroupedLead[] = useMemo(() => {
+    const phoneMap = new Map<string, Lead[]>();
+    const unkeyedLeads: Lead[] = [];
 
-    const matchesStatus = statusFilter === "all" || lead.lead_status === statusFilter;
-    const matchesType = typeFilter === "all" || lead.lead_type === typeFilter;
-    const matchesAssignedTo = assignedToFilter === "all" || 
-      (assignedToFilter === "unassigned" 
-        ? (!lead.assigned_to || lead.assigned_to === "") 
-        : (!!lead.assigned_to && (() => {
-            const normAssigned = lead.assigned_to.trim().toLowerCase();
-            const normFilter = assignedToFilter.trim().toLowerCase();
-            if (normAssigned === normFilter) return true;
-            if ((normFilter.includes("tejasswin") || normFilter.includes("tejassw") || normFilter.includes("tejasw") || normFilter.includes("janhavi")) &&
-                (normAssigned.includes("tejasswin") || normAssigned.includes("tejassw") || normAssigned.includes("tejasw") || normAssigned.includes("janhavi"))) {
-              return true;
-            }
-            const filterFirstName = normFilter.split(" ")[0];
-            return normAssigned.includes(filterFirstName);
-          })())
-      );
-    
-    let matchesAutoDate = true;
-    // Auto Date only filters when user has NOT selected a specific Added Date filter
-    if (autoDateFilter && !addedDateFilter) {
-      const isMasterClassFollow = lead.lead_status === "Master Class Follow";
-      if (!lead.created_at) {
-        matchesAutoDate = matchesDateFilter(lead.follow_up_date, autoDateFilter) || isMasterClassFollow;
-      } else {
-        const isCreatedToday = matchesDateFilter(lead.created_at, autoDateFilter);
-        const isFollowUpToday = matchesDateFilter(lead.follow_up_date, autoDateFilter);
-        const localLeadDate = formatLocalDateYMD(lead.created_at);
-        const isUntouchedCarryForward = localLeadDate < autoDateFilter && 
-                                        lead.lead_status === "Select Option" && 
-                                        !lead.follow_up_date;
-                                        
-        matchesAutoDate = isCreatedToday || isFollowUpToday || isUntouchedCarryForward || isMasterClassFollow;
+    leads.forEach(lead => {
+      const rawContact = lead.contact || "";
+      const cleanDigits = rawContact.replace(/\D/g, "");
+      const phoneKey = cleanDigits.length >= 10 ? cleanDigits.slice(-10) : (cleanDigits || (lead.client_name || "").trim().toLowerCase());
+
+      if (!phoneKey) {
+        unkeyedLeads.push(lead);
+        return;
       }
-    }
 
-    let matchesAddedDate = true;
-    if (addedDateFilter) {
-      // Matches either when the lead was added to CRM (created_at) OR admission_date from the sheet
-      const matchesCreated = matchesDateFilter(lead.created_at, addedDateFilter);
-      const matchesAdmission = matchesDateFilter(lead.admission_date, addedDateFilter);
-      matchesAddedDate = matchesCreated || matchesAdmission;
-    }
+      if (!phoneMap.has(phoneKey)) {
+        phoneMap.set(phoneKey, []);
+      }
+      phoneMap.get(phoneKey)!.push(lead);
+    });
 
-    return matchesSearch && matchesStatus && matchesType && matchesAssignedTo && matchesAutoDate && matchesAddedDate;
-  });
+    const statusPriority: Record<string, number> = {
+      "Deal Done": 5,
+      "Follow Up": 4,
+      "Master Class Follow": 3,
+      "Dead": 2,
+      "Select Option": 1
+    };
+
+    const result: GroupedLead[] = [];
+
+    phoneMap.forEach((entries, key) => {
+      // Sort entries so that the most active / actionable record is primary (index 0)
+      entries.sort((a, b) => {
+        // 1. Status priority
+        const pA = statusPriority[a.lead_status] || 0;
+        const pB = statusPriority[b.lead_status] || 0;
+        if (pA !== pB) return pB - pA;
+
+        // 2. Has follow-up date
+        const fA = a.follow_up_date ? 1 : 0;
+        const fB = b.follow_up_date ? 1 : 0;
+        if (fA !== fB) return fB - fA;
+
+        // 3. Has remark
+        const rA = a.remark && a.remark.trim().length > 0 ? 1 : 0;
+        const rB = b.remark && b.remark.trim().length > 0 ? 1 : 0;
+        if (rA !== rB) return rB - rA;
+
+        // 4. Most recent created_at / calling_date / admission_date
+        const tA = new Date(a.created_at || a.admission_date || 0).getTime();
+        const tB = new Date(b.created_at || b.admission_date || 0).getTime();
+        return tB - tA;
+      });
+
+      const primaryLead = entries[0];
+      result.push({
+        primaryId: primaryLead.id,
+        contact: primaryLead.contact,
+        normPhone: key,
+        client_name: primaryLead.client_name,
+        lead: primaryLead,
+        entries: entries,
+        entriesCount: entries.length
+      });
+    });
+
+    unkeyedLeads.forEach(lead => {
+      result.push({
+        primaryId: lead.id,
+        contact: lead.contact,
+        normPhone: "",
+        client_name: lead.client_name,
+        lead: lead,
+        entries: [lead],
+        entriesCount: 1
+      });
+    });
+
+    return result;
+  }, [leads]);
+
+  const filteredGroupedLeads = useMemo(() => {
+    return groupedLeads.filter(groupedLead => {
+      const lead = groupedLead.lead;
+
+      // Search matches any entry in this contact's history or primary lead
+      const matchesSearch = !searchQuery ||
+        groupedLead.entries.some(e =>
+          (e.client_name || "").toLowerCase().includes(searchQuery.toLowerCase()) ||
+          (e.contact || "").includes(searchQuery) ||
+          (e.remark || "").toLowerCase().includes(searchQuery.toLowerCase()) ||
+          (e.sr_no || "").toLowerCase().includes(searchQuery.toLowerCase())
+        );
+
+      const matchesStatus = statusFilter === "all" || lead.lead_status === statusFilter;
+      const matchesType = typeFilter === "all" || lead.lead_type === typeFilter;
+      const matchesAssignedTo = assignedToFilter === "all" || 
+        (assignedToFilter === "unassigned" 
+          ? (!lead.assigned_to || lead.assigned_to === "") 
+          : (!!lead.assigned_to && (() => {
+              const normAssigned = lead.assigned_to.trim().toLowerCase();
+              const normFilter = assignedToFilter.trim().toLowerCase();
+              if (normAssigned === normFilter) return true;
+              if ((normFilter.includes("tejasswin") || normFilter.includes("tejassw") || normFilter.includes("tejasw") || normFilter.includes("janhavi")) &&
+                  (normAssigned.includes("tejasswin") || normAssigned.includes("tejassw") || normAssigned.includes("tejasw") || normAssigned.includes("janhavi"))) {
+                return true;
+              }
+              const filterFirstName = normFilter.split(" ")[0];
+              return normAssigned.includes(filterFirstName);
+            })())
+        );
+      
+      let matchesAutoDate = true;
+      if (autoDateFilter && !addedDateFilter) {
+        const isMasterClassFollow = lead.lead_status === "Master Class Follow";
+        if (!lead.created_at) {
+          matchesAutoDate = matchesDateFilter(lead.follow_up_date, autoDateFilter) || isMasterClassFollow;
+        } else {
+          const isCreatedToday = matchesDateFilter(lead.created_at, autoDateFilter);
+          const isFollowUpToday = matchesDateFilter(lead.follow_up_date, autoDateFilter);
+          const localLeadDate = formatLocalDateYMD(lead.created_at);
+          const isUntouchedCarryForward = localLeadDate < autoDateFilter && 
+                                          lead.lead_status === "Select Option" && 
+                                          !lead.follow_up_date;
+                                          
+          matchesAutoDate = isCreatedToday || isFollowUpToday || isUntouchedCarryForward || isMasterClassFollow;
+        }
+      }
+
+      let matchesAddedDate = true;
+      if (addedDateFilter) {
+        const matchesCreated = matchesDateFilter(lead.created_at, addedDateFilter);
+        const matchesAdmission = matchesDateFilter(lead.admission_date, addedDateFilter);
+        matchesAddedDate = matchesCreated || matchesAdmission;
+      }
+
+      return matchesSearch && matchesStatus && matchesType && matchesAssignedTo && matchesAutoDate && matchesAddedDate;
+    });
+  }, [groupedLeads, searchQuery, statusFilter, typeFilter, assignedToFilter, autoDateFilter, addedDateFilter]);
 
   const targetSortDate = autoDateFilter || addedDateFilter || new Date().toISOString().split("T")[0];
-  const sortedFilteredLeads = [...filteredLeads].sort((a, b) => {
-    if (addedDateFilter) {
-      const dateA = a.created_at ? new Date(a.created_at).getTime() : 0;
-      const dateB = b.created_at ? new Date(b.created_at).getTime() : 0;
-      return dateB - dateA;
-    }
-    const aIsTargetDate = a.follow_up_date === targetSortDate;
-    const bIsTargetDate = b.follow_up_date === targetSortDate;
-    if (aIsTargetDate && !bIsTargetDate) return -1;
-    if (!aIsTargetDate && bIsTargetDate) return 1;
-    return 0;
-  });
+  const sortedFilteredGroupedLeads = useMemo(() => {
+    return [...filteredGroupedLeads].sort((a, b) => {
+      if (addedDateFilter) {
+        const dateA = a.lead.created_at ? new Date(a.lead.created_at).getTime() : 0;
+        const dateB = b.lead.created_at ? new Date(b.lead.created_at).getTime() : 0;
+        return dateB - dateA;
+      }
+      const aIsTargetDate = a.lead.follow_up_date === targetSortDate;
+      const bIsTargetDate = b.lead.follow_up_date === targetSortDate;
+      if (aIsTargetDate && !bIsTargetDate) return -1;
+      if (!aIsTargetDate && bIsTargetDate) return 1;
+      return 0;
+    });
+  }, [filteredGroupedLeads, addedDateFilter, targetSortDate]);
 
-  const totalPages = Math.ceil(sortedFilteredLeads.length / itemsPerPage);
-  const paginatedLeads = sortedFilteredLeads.slice(0, currentPage * itemsPerPage);
+  // Backward-compatible flat array for components/exports
+  const filteredLeads = useMemo(() => sortedFilteredGroupedLeads.map(gl => gl.lead), [sortedFilteredGroupedLeads]);
 
-  const isAllSelected = sortedFilteredLeads.length > 0 && sortedFilteredLeads.every(l => selectedLeadIds.includes(l.id));
+  const totalPages = Math.ceil(sortedFilteredGroupedLeads.length / itemsPerPage);
+  const paginatedGroupedLeads = sortedFilteredGroupedLeads.slice(0, currentPage * itemsPerPage);
+
+  const isAllSelected = sortedFilteredGroupedLeads.length > 0 && sortedFilteredGroupedLeads.every(gl => selectedLeadIds.includes(gl.primaryId));
 
   const handleSelectAll = (checked: boolean) => {
     if (checked) {
-      const currentIds = sortedFilteredLeads.map(l => l.id);
+      const currentIds = sortedFilteredGroupedLeads.map(gl => gl.primaryId);
       setSelectedLeadIds(Array.from(new Set([...selectedLeadIds, ...currentIds])));
     } else {
-      const currentIds = new Set(sortedFilteredLeads.map(l => l.id));
+      const currentIds = new Set(sortedFilteredGroupedLeads.map(gl => gl.primaryId));
       setSelectedLeadIds(selectedLeadIds.filter(id => !currentIds.has(id)));
     }
   };
@@ -1715,12 +1932,12 @@ export function LeadsManagement() {
               </TableRow>
             </TableHeader>
             <TableBody>
-              {paginatedLeads.map((lead, index) => (
+              {paginatedGroupedLeads.map((groupedLead, index) => (
                 <LeadRow
-                  key={lead.id}
-                  lead={lead}
+                  key={groupedLead.primaryId}
+                  groupedLead={groupedLead}
                   index={index}
-                  isSelected={selectedLeadIds.includes(lead.id)}
+                  isSelected={selectedLeadIds.includes(groupedLead.primaryId)}
                   handlers={{
                     handleSelectRow,
                     handleUpdateField,
@@ -1730,12 +1947,13 @@ export function LeadsManagement() {
                     handleUpdateAssignedTo,
                     handleUpdateCallConnected,
                     handleOpenHistory,
-                    handleOpenEditDialog
+                    handleOpenEditDialog,
+                    handleOpenLeadTimeline
                   }}
                 />
               ))}
 
-              {filteredLeads.length === 0 && (
+              {filteredGroupedLeads.length === 0 && (
                 <TableRow>
                   <TableCell colSpan={14} className="text-center py-12 text-gray-400">
                     {loading ? (
@@ -1753,12 +1971,12 @@ export function LeadsManagement() {
         </div>
 
         {/* Infinite Scroll Indicator */}
-        {sortedFilteredLeads.length > 0 && (
+        {sortedFilteredGroupedLeads.length > 0 && (
           <div className="flex justify-center items-center px-4 py-3 bg-gray-50 border-t border-gray-200 rounded-b-lg">
             <div className="text-sm text-gray-500 font-medium">
               {currentPage < totalPages 
                 ? "Scroll down to load more..." 
-                : `Showing all ${sortedFilteredLeads.length} leads`}
+                : `Showing all ${sortedFilteredGroupedLeads.length} unique contacts (${leads.length} total entries)`}
             </div>
           </div>
         )}
@@ -2291,35 +2509,14 @@ function scanAndSyncLeads() {
       var inPlanNorm = normalizePlanStr(cleanPlan);
       var isDoneInSheet = (crmStatus === "done");
 
-      // Check for exact duplicate (Option 2: if admission date or plan is new/different, treat as recall!)
-      var exactMatch = null;
-      for (var m = 0; m < candidates.length; m++) {
-        var cand = candidates[m];
-        var candDateNorm = normalizeDateStr(cand.admission_date);
-        var candPlanNorm = normalizePlanStr(cand.lead_existing_plan);
-
-        if (inDateNorm && candDateNorm) {
-          if (inDateNorm === candDateNorm) {
-            if (inPlanNorm && candPlanNorm) {
-              if (inPlanNorm === candPlanNorm) { exactMatch = cand; break; }
-            } else { exactMatch = cand; break; }
-          }
-        } else if (!inDateNorm && !candDateNorm) {
-          if (inPlanNorm || candPlanNorm) {
-            if (inPlanNorm === candPlanNorm) { exactMatch = cand; break; }
-          } else { exactMatch = cand; break; }
+      // Case A: Contact already exists in database -> Never duplicate! Update assignment if needed and mark Done
+      if (candidates.length > 0) {
+        var latestCand = candidates[0];
+        if (assignedTo && (latestCand.assigned_to || "").toLowerCase() !== assignedTo.toLowerCase()) {
+          existingLeadsToUpdate.push({ id: latestCand.id, assigned_to: assignedTo });
+          latestCand.assigned_to = assignedTo;
         }
-      }
-
-      // Case A: Exact duplicate found
-      if (exactMatch) {
-        if (!isDoneInSheet) {
-          sheet.getRange(r + 1, crmStatusIdx + 1).setValue("Done");
-        }
-        if (assignedTo && (exactMatch.assigned_to || "").toLowerCase() !== assignedTo.toLowerCase()) {
-          existingLeadsToUpdate.push({ id: exactMatch.id, assigned_to: assignedTo });
-          exactMatch.assigned_to = assignedTo;
-        }
+        sheet.getRange(r + 1, crmStatusIdx + 1).setValue("Done");
         continue;
       }
 
@@ -2328,7 +2525,7 @@ function scanAndSyncLeads() {
         continue;
       }
 
-      // Case C: Brand new lead OR new recall entry -> prepare for insert
+      // Case C: Brand new contact -> prepare for insert
       var newLeadItem = {
         client_name: clientName,
         contact: contact,
@@ -2521,6 +2718,188 @@ function scanAndSyncLeads() {
                 {isCleaningDuplicates ? "Cleaning Duplicates..." : `Delete ${duplicateSummary.totalRedundantRows} Duplicate Rows`}
               </Button>
             )}
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+      {/* Lead Timeline Modal (Complete History by Unique Contact Number) */}
+      <Dialog open={isTimelineOpen} onOpenChange={setIsTimelineOpen}>
+        <DialogContent className="max-w-6xl max-h-[92vh] overflow-hidden flex flex-col bg-white p-6 shadow-2xl rounded-2xl border border-gray-100">
+          <DialogHeader className="border-b pb-4">
+            <div className="flex flex-col md:flex-row md:items-center justify-between gap-3">
+              <div>
+                <div className="flex items-center gap-2">
+                  <span className="w-9 h-9 rounded-full bg-[#2e5a44] text-white flex items-center justify-center font-bold text-sm shadow-xs">
+                    <User className="w-5 h-5" />
+                  </span>
+                  <div>
+                    <DialogTitle className="text-xl font-bold text-gray-900 flex items-center gap-2">
+                      <span>{selectedGroupedLead?.client_name || "Lead Record History"}</span>
+                      <span className="text-sm font-semibold text-gray-500 font-mono">
+                        ({selectedGroupedLead?.contact || "No Contact"})
+                      </span>
+                    </DialogTitle>
+                    <div className="flex items-center gap-2 mt-1">
+                      <span className="inline-flex items-center gap-1 text-xs px-2.5 py-0.5 rounded-full font-bold bg-blue-100 text-blue-800 border border-blue-200">
+                        <History className="w-3.5 h-3.5" />
+                        {selectedGroupedLead?.entriesCount || 1} Total {selectedGroupedLead?.entriesCount === 1 ? "Record" : "Records"} for this Contact
+                      </span>
+                      <span className="text-xs text-gray-400">• Master Unique Identifier: Mobile Number</span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              {/* Action Buttons: WhatsApp, Call, Add Follow-up Entry */}
+              <div className="flex items-center gap-2 flex-wrap">
+                {selectedGroupedLead?.contact && (
+                  <>
+                    <a
+                      href={`https://wa.me/91${(selectedGroupedLead.contact || "").replace(/\D/g, "").slice(-10)}`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold bg-emerald-600 hover:bg-emerald-700 text-white shadow-xs transition-colors"
+                    >
+                      <MessageCircle className="w-3.5 h-3.5" /> WhatsApp
+                    </a>
+                    <a
+                      href={`tel:${selectedGroupedLead.contact}`}
+                      className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold bg-blue-600 hover:bg-blue-700 text-white shadow-xs transition-colors"
+                    >
+                      <Phone className="w-3.5 h-3.5" /> Call
+                    </a>
+                  </>
+                )}
+                <Button
+                  size="sm"
+                  onClick={handleAddNewTimelineEntry}
+                  className="bg-[#2e5a44] hover:bg-[#203f2f] text-white text-xs font-bold shadow-xs"
+                >
+                  <Plus className="w-3.5 h-3.5 mr-1" /> Add Follow-up Entry
+                </Button>
+              </div>
+            </div>
+          </DialogHeader>
+
+          {/* Table Container displaying all 12 requested columns */}
+          <div className="flex-1 overflow-auto rounded-lg border border-gray-200 mt-2">
+            <table className="w-full text-xs text-left border-collapse">
+              <thead className="bg-[#2e5a44] text-white sticky top-0 z-10 font-semibold uppercase text-[11px] tracking-wider">
+                <tr>
+                  <th className="p-2.5 text-center w-12">SR NO</th>
+                  <th className="p-2.5 min-w-[140px]">CLIENT NAME</th>
+                  <th className="p-2.5 min-w-[120px]">CONTACT</th>
+                  <th className="p-2.5 min-w-[130px]">LEAD TYPE</th>
+                  <th className="p-2.5 min-w-[140px]">LEAD EXISTING PLAN</th>
+                  <th className="p-2.5 min-w-[130px] text-center">LEAD STATUS</th>
+                  <th className="p-2.5 min-w-[120px]">FOLLOW-UP DATE</th>
+                  <th className="p-2.5 min-w-[220px]">REMARK & CALL STATUS</th>
+                  <th className="p-2.5 min-w-[110px]">Added Date</th>
+                  <th className="p-2.5 min-w-[110px]">Admission Date</th>
+                  <th className="p-2.5 min-w-[100px]">Calling Date</th>
+                  <th className="p-2.5 min-w-[130px]">ASSIGNED TO</th>
+                  <th className="p-2.5 text-center w-16">ACTIONS</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-gray-100 bg-white">
+                {selectedGroupedLead?.entries.map((entry, idx) => {
+                  const curStatus = LEAD_STATUSES.find(s => s.id === entry.lead_status) || LEAD_STATUSES[0];
+                  const isPrimary = idx === 0;
+                  return (
+                    <tr
+                      key={entry.id}
+                      className={`hover:bg-gray-50 transition-colors ${isPrimary ? "bg-emerald-50/40" : ""}`}
+                    >
+                      <td className="p-2.5 text-center font-bold text-gray-700">
+                        <div className="flex items-center justify-center gap-1">
+                          <span>{idx + 1}</span>
+                          {isPrimary && (
+                            <span className="px-1.5 py-0.2 rounded text-[9px] font-extrabold bg-emerald-100 text-emerald-800 border border-emerald-300">
+                              Active
+                            </span>
+                          )}
+                        </div>
+                      </td>
+                      <td className="p-2 font-semibold text-gray-900">{entry.client_name}</td>
+                      <td className="p-2 text-gray-600 font-mono">{entry.contact}</td>
+                      <td className="p-2 text-gray-700 font-medium">{entry.lead_type || "—"}</td>
+                      <td className="p-2 text-gray-700">{entry.lead_existing_plan || "—"}</td>
+                      <td className="p-2 text-center">
+                        <span className={`inline-block px-2.5 py-1 rounded-full text-[11px] font-bold ${curStatus.bg} ${curStatus.text}`}>
+                          {curStatus.label}
+                        </span>
+                      </td>
+                      <td className="p-2 text-gray-600 font-mono">{entry.follow_up_date || "—"}</td>
+                      <td className="p-2 text-gray-700">
+                        <div className="space-y-1">
+                          {entry.call_connected && (
+                            <span className={`inline-block text-[10px] font-bold px-2 py-0.5 rounded-full ${
+                              entry.call_connected === "connected"
+                                ? "bg-emerald-100 text-emerald-800"
+                                : "bg-red-100 text-red-700"
+                            }`}>
+                              {entry.call_connected === "connected" ? "✅ Connected" : "❌ Not Connected"}
+                            </span>
+                          )}
+                          <div className="text-gray-800 break-words">{entry.remark || <span className="text-gray-400 italic">No remark</span>}</div>
+                        </div>
+                      </td>
+                      <td className="p-2 text-gray-500 font-mono text-[11px]">
+                        {entry.created_at ? formatLocalDateYMD(entry.created_at) : "—"}
+                      </td>
+                      <td className="p-2 text-gray-600 font-mono">{entry.admission_date || "—"}</td>
+                      <td className="p-2 text-gray-600 font-mono">{entry.calling_date || "—"}</td>
+                      <td className="p-2 text-gray-700 font-medium">
+                        {entry.assigned_to ? (
+                          <span className="px-2 py-0.5 bg-gray-100 rounded text-gray-800 font-semibold">
+                            {entry.assigned_to}
+                          </span>
+                        ) : (
+                          <span className="text-gray-400 italic">Unassigned</span>
+                        )}
+                      </td>
+                      <td className="p-2 text-center">
+                        <div className="flex items-center justify-center gap-1">
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="h-7 w-7 text-blue-600 hover:text-blue-800 hover:bg-blue-50"
+                            onClick={() => {
+                              handleOpenEditDialog(entry);
+                            }}
+                            title="Edit this entry"
+                          >
+                            <Edit className="w-3.5 h-3.5" />
+                          </Button>
+                          {selectedGroupedLead.entries.length > 1 && (
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              className="h-7 w-7 text-red-500 hover:text-red-700 hover:bg-red-50"
+                              onClick={() => handleDeleteTimelineEntry(entry.id)}
+                              title="Delete this specific duplicate record"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </Button>
+                          )}
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+
+          <DialogFooter className="border-t pt-3 flex justify-between items-center sm:justify-between">
+            <div className="text-xs text-gray-500">
+              💡 Tip: The primary entry on the main table is determined by status priority and most recent activity.
+            </div>
+            <Button
+              className="bg-[#2e5a44] hover:bg-[#203f2f] text-white"
+              onClick={() => setIsTimelineOpen(false)}
+            >
+              Close
+            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
