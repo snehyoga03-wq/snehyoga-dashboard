@@ -9,7 +9,7 @@ import { motion } from "framer-motion";
 import {
   ClipboardList, Search, RefreshCw, Plus, Download, Upload,
   Trash2, Edit, Save, X, Calendar, User, Phone, CheckCircle, History,
-  Users, CheckSquare, FileSpreadsheet, FileCode, Copy, Check, Sparkles, MessageCircle
+  Users, CheckSquare, FileSpreadsheet, FileCode, Copy, Check, Sparkles, MessageCircle, WifiOff
 } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -18,6 +18,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 import * as XLSX from "xlsx";
 import { LeadAIBot } from "@/components/crm/LeadAIBot";
 import { LeadAiAction } from "@/services/leadAiService";
+import { leadSyncService, SyncStatusInfo } from "@/services/leadSyncService";
 
 export const ASSIGNED_USERS = ["Ragini K", "Shreya K", "Tejasswini K"];
 
@@ -168,11 +169,12 @@ const LeadRow = React.memo(({ groupedLead, index, isSelected, handlers }: any) =
     handleUpdateStatus,
     handleUpdateAssignedTo,
     handleUpdateCallConnected,
+    handleUpdateRemark,
     handleOpenHistory,
     handleOpenEditDialog,
     handleOpenLeadTimeline
   } = handlers;
-  
+
   return (
     <TableRow className="hover:bg-gray-50 border-b border-gray-100">
       <TableCell className="p-2 text-center sticky left-0 z-10 bg-white">
@@ -258,19 +260,16 @@ const LeadRow = React.memo(({ groupedLead, index, isSelected, handlers }: any) =
         <div className="flex items-center gap-1.5">
           <div className="flex-1 min-w-0">
             <EditableCell value={lead.remark} onUpdate={(val) => {
-              handleUpdateField(lead.id, 'remark', val);
-              const detected = autoDetectCallConnected(val);
-              handlers.handleUpdateCallConnected(lead.id, detected);
+              handlers.handleUpdateRemark(lead.id, val);
             }} placeholder="No remark" />
           </div>
           <Select value={lead.call_connected || "none"} onValueChange={(val) => handlers.handleUpdateCallConnected(lead.id, val === "none" ? null : val)}>
-            <SelectTrigger className={`h-7 w-[110px] shrink-0 border-none text-[10px] rounded-full px-2.5 py-0.5 font-bold text-center focus:ring-1 focus:ring-offset-1 shadow-none ${
-              lead.call_connected === "connected"
+            <SelectTrigger className={`h-7 w-[110px] shrink-0 border-none text-[10px] rounded-full px-2.5 py-0.5 font-bold text-center focus:ring-1 focus:ring-offset-1 shadow-none ${lead.call_connected === "connected"
                 ? "bg-emerald-100 text-emerald-800 hover:bg-emerald-200"
                 : lead.call_connected === "not_connected"
-                ? "bg-red-100 text-red-700 hover:bg-red-200"
-                : "bg-gray-100 text-gray-500 hover:bg-gray-200"
-            }`}>
+                  ? "bg-red-100 text-red-700 hover:bg-red-200"
+                  : "bg-gray-100 text-gray-500 hover:bg-gray-200"
+              }`}>
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
@@ -297,8 +296,8 @@ const LeadRow = React.memo(({ groupedLead, index, isSelected, handlers }: any) =
           const matchedUser = ASSIGNED_USERS.find(u => {
             const lowerU = u.toLowerCase();
             if (lowerU === rawAssigned) return true;
-            if ((lowerU.includes("tejasswin") || lowerU.includes("tejassw")) && 
-                (rawAssigned.includes("tejasswin") || rawAssigned.includes("tejassw") || rawAssigned.includes("tejasw") || rawAssigned.includes("janhavi"))) {
+            if ((lowerU.includes("tejasswin") || lowerU.includes("tejassw")) &&
+              (rawAssigned.includes("tejasswin") || rawAssigned.includes("tejassw") || rawAssigned.includes("tejasw") || rawAssigned.includes("janhavi"))) {
               return true;
             }
             return false;
@@ -341,17 +340,28 @@ const LeadRow = React.memo(({ groupedLead, index, isSelected, handlers }: any) =
   );
 }, (prevProps, nextProps) => {
   return prevProps.groupedLead.lead === nextProps.groupedLead.lead &&
-         prevProps.groupedLead.entriesCount === nextProps.groupedLead.entriesCount &&
-         prevProps.isSelected === nextProps.isSelected &&
-         prevProps.index === nextProps.index;
+    prevProps.groupedLead.entriesCount === nextProps.groupedLead.entriesCount &&
+    prevProps.isSelected === nextProps.isSelected &&
+    prevProps.index === nextProps.index;
 });
 
 export function LeadsManagement() {
   const { toast } = useToast();
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  const [leads, setLeads] = useState<Lead[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [leads, setLeads] = useState<Lead[]>(() => {
+    const cached = leadSyncService.loadCachedLeads<Lead>();
+    return cached && cached.length > 0 ? cached : [];
+  });
+  const [loading, setLoading] = useState(() => {
+    const cached = leadSyncService.loadCachedLeads<Lead>();
+    return !cached || cached.length === 0;
+  });
+  const [syncInfo, setSyncInfo] = useState<SyncStatusInfo>(() => leadSyncService.getStatus());
+
+  useEffect(() => {
+    return leadSyncService.subscribe(setSyncInfo);
+  }, []);
   const [searchQuery, setSearchQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState("all");
   const [typeFilter, setTypeFilter] = useState("all");
@@ -361,7 +371,7 @@ export function LeadsManagement() {
     const loggedInUser = sessionStorage.getItem("crm_username") || localStorage.getItem("crm_username");
     if (!loggedInUser || loggedInUser.toLowerCase() === "admin" || loggedInUser === "YOG" || loggedInUser.toLowerCase().includes("shreya")) return "all";
 
-    const matched = ASSIGNED_USERS.find(u => 
+    const matched = ASSIGNED_USERS.find(u =>
       u.toLowerCase() === loggedInUser.toLowerCase() ||
       (u.split(" ")[0].length >= 3 && loggedInUser.toLowerCase().includes(u.split(" ")[0].toLowerCase())) ||
       (u.includes("Tejasswin") && (loggedInUser.toLowerCase().includes("tejassw") || loggedInUser.toLowerCase().includes("tejasw") || loggedInUser.toLowerCase().includes("janhavi")))
@@ -436,7 +446,7 @@ export function LeadsManagement() {
       }
       setTimeout(() => { isScrollingBottom.current = false; }, 50);
     }
-    
+
     // Infinite Scroll (vertical)
     const { scrollTop, scrollHeight, clientHeight } = e.currentTarget;
     if (scrollHeight - scrollTop - clientHeight < 100) {
@@ -623,7 +633,9 @@ export function LeadsManagement() {
   }, []);
 
   const fetchLeads = async () => {
-    setLoading(true);
+    if (leads.length === 0) {
+      setLoading(true);
+    }
     try {
       let allData: Lead[] = [];
       let offset = 0;
@@ -651,14 +663,19 @@ export function LeadsManagement() {
       }
 
       const uniqueData = Array.from(new Map((allData || []).map((item: Lead) => [item.id, item])).values());
-      setLeads(uniqueData);
+      // Apply pending offline edits so fresh server fetch does not overwrite user's edits!
+      const mergedData = leadSyncService.applyPendingUpdates(uniqueData);
+      setLeads(mergedData);
+      leadSyncService.saveCachedLeads(mergedData);
     } catch (err: any) {
       console.error("Error fetching leads:", err);
-      toast({
-        title: "Error fetching leads",
-        description: err.message,
-        variant: "destructive"
-      });
+      if (leads.length === 0) {
+        toast({
+          title: "Network error fetching leads",
+          description: "Displaying cached offline data.",
+          variant: "destructive"
+        });
+      }
     } finally {
       setLoading(false);
     }
@@ -746,58 +763,108 @@ export function LeadsManagement() {
         const tomorrow = new Date();
         tomorrow.setDate(tomorrow.getDate() + 1);
         finalFollowUpDate = tomorrow.toISOString().split("T")[0];
+      } else if (leadForm.lead_status === "Dead") {
+        finalFollowUpDate = null;
       }
 
       if (editingLead) {
-        // Update
-        const { error } = await supabase
-          .from("leads")
-          .update({
-            admission_date: leadForm.admission_date || null,
-            calling_date: leadForm.calling_date || null,
-            sr_no: leadForm.sr_no || null,
-            client_name: leadForm.client_name,
-            contact: leadForm.contact,
-            lead_type: leadForm.lead_type || null,
-            lead_existing_plan: leadForm.lead_existing_plan || null,
-            lead_status: leadForm.lead_status || "Select Option",
-            remark: leadForm.remark || null,
-            call_connected: leadForm.call_connected || autoDetectCallConnected(leadForm.remark || null),
-            assigned_to: leadForm.assigned_to || null,
-            follow_up_date: finalFollowUpDate
-          })
-          .eq("id", editingLead.id);
+        // Optimistic instant update
+        const updates = {
+          admission_date: leadForm.admission_date || null,
+          calling_date: leadForm.calling_date || null,
+          sr_no: leadForm.sr_no || null,
+          client_name: leadForm.client_name,
+          contact: leadForm.contact,
+          lead_type: leadForm.lead_type || null,
+          lead_existing_plan: leadForm.lead_existing_plan || null,
+          lead_status: leadForm.lead_status || "Select Option",
+          remark: leadForm.remark || null,
+          call_connected: leadForm.call_connected || autoDetectCallConnected(leadForm.remark || null),
+          assigned_to: leadForm.assigned_to || null,
+          follow_up_date: finalFollowUpDate
+        };
 
-        if (error) throw error;
-        await logHistory(editingLead.id, "Updated", "Lead details were updated manually.");
-        toast({ title: "Success", description: "Lead updated successfully" });
+        setLeads(prev => {
+          const updated = prev.map(l => l.id === editingLead.id ? { ...l, ...updates } : l);
+          leadSyncService.saveCachedLeads(updated);
+          return updated;
+        });
+
+        if (selectedGroupedLead) {
+          setSelectedGroupedLead(prev => {
+            if (!prev) return null;
+            const updatedEntries = prev.entries.map(e => e.id === editingLead.id ? { ...e, ...updates } : e);
+            return {
+              ...prev,
+              entries: updatedEntries,
+              lead: updatedEntries[0]
+            };
+          });
+        }
+
+        leadSyncService.enqueueUpdate(editingLead.id, updates, {
+          action_type: "Updated",
+          description: "Lead details were updated manually."
+        });
+
+        setIsOpenAddEditDialog(false);
+        toast({ title: "Saved ✅", description: "Lead updated instantly and saved to local cache" });
       } else {
         // Create
-        const { data, error } = await supabase
+        const tempId = crypto.randomUUID();
+        const newLead: Lead = {
+          id: tempId,
+          admission_date: leadForm.admission_date || null,
+          calling_date: leadForm.calling_date || null,
+          sr_no: leadForm.sr_no || null,
+          client_name: leadForm.client_name,
+          contact: leadForm.contact,
+          lead_type: leadForm.lead_type || null,
+          lead_existing_plan: leadForm.lead_existing_plan || null,
+          lead_status: leadForm.lead_status || "Select Option",
+          remark: leadForm.remark || null,
+          call_connected: leadForm.call_connected || autoDetectCallConnected(leadForm.remark || null),
+          assigned_to: leadForm.assigned_to || null,
+          follow_up_date: finalFollowUpDate,
+          created_at: new Date().toISOString()
+        };
+
+        setLeads(prev => {
+          const updated = [newLead, ...prev];
+          leadSyncService.saveCachedLeads(updated);
+          return updated;
+        });
+
+        setIsOpenAddEditDialog(false);
+        toast({ title: "Success", description: "Lead added successfully" });
+
+        supabase
           .from("leads")
           .insert([{
-            admission_date: leadForm.admission_date || null,
-            calling_date: leadForm.calling_date || null,
-            sr_no: leadForm.sr_no || null,
-            client_name: leadForm.client_name,
-            contact: leadForm.contact,
-            lead_type: leadForm.lead_type || null,
-            lead_existing_plan: leadForm.lead_existing_plan || null,
-            lead_status: leadForm.lead_status || "Select Option",
-            remark: leadForm.remark || null,
-            call_connected: leadForm.call_connected || autoDetectCallConnected(leadForm.remark || null),
-            assigned_to: leadForm.assigned_to || null,
-            follow_up_date: finalFollowUpDate
-          }]).select();
-
-        if (error) throw error;
-        if (data && data.length > 0) {
-          await logHistory(data[0].id, "Created", `Lead created manually.`);
-        }
-        toast({ title: "Success", description: "Lead added successfully" });
+            admission_date: newLead.admission_date,
+            calling_date: newLead.calling_date,
+            sr_no: newLead.sr_no,
+            client_name: newLead.client_name,
+            contact: newLead.contact,
+            lead_type: newLead.lead_type,
+            lead_existing_plan: newLead.lead_existing_plan,
+            lead_status: newLead.lead_status,
+            remark: newLead.remark,
+            call_connected: newLead.call_connected,
+            assigned_to: newLead.assigned_to,
+            follow_up_date: newLead.follow_up_date
+          }])
+          .select()
+          .then(({ data, error }) => {
+            if (error) {
+              console.error("Error creating lead in Supabase:", error);
+            } else if (data && data[0]) {
+              const realId = data[0].id;
+              setLeads(prev => prev.map(l => l.id === tempId ? { ...l, id: realId } : l));
+              logHistory(realId, "Created", "Lead created manually.");
+            }
+          });
       }
-      setIsOpenAddEditDialog(false);
-      fetchLeads();
     } catch (err: any) {
       console.error("Error saving lead:", err);
       toast({
@@ -808,161 +875,174 @@ export function LeadsManagement() {
     }
   };
 
-  const handleUpdateStatus = async (leadId: string, status: string) => {
+  const handleUpdateStatus = (leadId: string, status: string) => {
     const targetLead = leads.find(l => l.id === leadId);
-    const previousStatus = targetLead ? targetLead.lead_status : "";
     const previousFollowUpDate = targetLead ? targetLead.follow_up_date : null;
-    
+
     let updatedFollowUpDate = previousFollowUpDate;
     if (status === "Follow Up" && !updatedFollowUpDate) {
       const tomorrow = new Date();
       tomorrow.setDate(tomorrow.getDate() + 1);
       updatedFollowUpDate = tomorrow.toISOString().split("T")[0];
+    } else if (status === "Dead") {
+      updatedFollowUpDate = null;
     }
 
-    setLeads(prev => prev.map(lead => lead.id === leadId ? { ...lead, lead_status: status, follow_up_date: updatedFollowUpDate } : lead));
+    const updates = { lead_status: status, follow_up_date: updatedFollowUpDate };
 
-    try {
-      const { error } = await supabase
-        .from("leads")
-        .update({ lead_status: status, follow_up_date: updatedFollowUpDate })
-        .eq("id", leadId);
+    // Instant local UI update (0ms lag)
+    setLeads(prev => {
+      const updated = prev.map(lead => lead.id === leadId ? { ...lead, ...updates } : lead);
+      leadSyncService.saveCachedLeads(updated);
+      return updated;
+    });
 
-      if (error) throw error;
-      logHistory(leadId, "Status Changed", `Lead status changed to ${status}`);
-      toast({ title: "Status Updated", description: `Lead status changed to ${status}` });
-    } catch (err: any) {
-      setLeads(prev => prev.map(lead => lead.id === leadId ? { ...lead, lead_status: previousStatus, follow_up_date: previousFollowUpDate } : lead));
-      console.error("Error updating status:", err);
-      toast({
-        title: "Error updating status",
-        description: err.message,
-        variant: "destructive"
+    if (selectedGroupedLead) {
+      setSelectedGroupedLead(prev => {
+        if (!prev) return null;
+        const updatedEntries = prev.entries.map(e => e.id === leadId ? { ...e, ...updates } : e);
+        return { ...prev, entries: updatedEntries, lead: updatedEntries[0] };
       });
     }
+
+    // Persist in background queue
+    leadSyncService.enqueueUpdate(leadId, updates, {
+      action_type: "Status Changed",
+      description: `Lead status changed to ${status}`
+    });
   };
 
-  const handleUpdateLeadType = async (leadId: string, type: string) => {
-    const targetLead = leads.find(l => l.id === leadId);
-    const previousType = targetLead ? targetLead.lead_type : "";
-    setLeads(prev => prev.map(lead => lead.id === leadId ? { ...lead, lead_type: type } : lead));
+  const handleUpdateLeadType = (leadId: string, type: string) => {
+    const updates = { lead_type: type };
+    setLeads(prev => {
+      const updated = prev.map(lead => lead.id === leadId ? { ...lead, ...updates } : lead);
+      leadSyncService.saveCachedLeads(updated);
+      return updated;
+    });
 
-    try {
-      const { error } = await supabase
-        .from("leads")
-        .update({ lead_type: type })
-        .eq("id", leadId);
-
-      if (error) throw error;
-      logHistory(leadId, "Type Changed", `Lead type changed to ${type}`);
-      toast({ title: "Lead Type Updated", description: `Lead type changed to ${type}` });
-    } catch (err: any) {
-      setLeads(prev => prev.map(lead => lead.id === leadId ? { ...lead, lead_type: previousType } : lead));
-      console.error("Error updating lead type:", err);
-      toast({
-        title: "Error updating lead type",
-        description: err.message,
-        variant: "destructive"
+    if (selectedGroupedLead) {
+      setSelectedGroupedLead(prev => {
+        if (!prev) return null;
+        const updatedEntries = prev.entries.map(e => e.id === leadId ? { ...e, ...updates } : e);
+        return { ...prev, entries: updatedEntries, lead: updatedEntries[0] };
       });
     }
+
+    leadSyncService.enqueueUpdate(leadId, updates, {
+      action_type: "Type Changed",
+      description: `Lead type changed to ${type}`
+    });
   };
 
-  const handleUpdateExistingPlan = async (leadId: string, plan: string) => {
-    const targetLead = leads.find(l => l.id === leadId);
-    const previousPlan = targetLead ? targetLead.lead_existing_plan : "";
-    setLeads(prev => prev.map(lead => lead.id === leadId ? { ...lead, lead_existing_plan: plan } : lead));
+  const handleUpdateExistingPlan = (leadId: string, plan: string) => {
+    const updates = { lead_existing_plan: plan };
+    setLeads(prev => {
+      const updated = prev.map(lead => lead.id === leadId ? { ...lead, ...updates } : lead);
+      leadSyncService.saveCachedLeads(updated);
+      return updated;
+    });
 
-    try {
-      const { error } = await supabase
-        .from("leads")
-        .update({ lead_existing_plan: plan })
-        .eq("id", leadId);
-
-      if (error) throw error;
-      logHistory(leadId, "Plan Changed", `Plan changed to ${plan}`);
-      toast({ title: "Plan Updated", description: `Plan changed to ${plan}` });
-    } catch (err: any) {
-      setLeads(prev => prev.map(lead => lead.id === leadId ? { ...lead, lead_existing_plan: previousPlan } : lead));
-      console.error("Error updating plan:", err);
-      toast({
-        title: "Error updating plan",
-        description: err.message,
-        variant: "destructive"
+    if (selectedGroupedLead) {
+      setSelectedGroupedLead(prev => {
+        if (!prev) return null;
+        const updatedEntries = prev.entries.map(e => e.id === leadId ? { ...e, ...updates } : e);
+        return { ...prev, entries: updatedEntries, lead: updatedEntries[0] };
       });
     }
+
+    leadSyncService.enqueueUpdate(leadId, updates, {
+      action_type: "Plan Changed",
+      description: `Plan changed to ${plan}`
+    });
   };
 
-  const handleUpdateAssignedTo = async (leadId: string, assignedTo: string) => {
-    const targetLead = leads.find(l => l.id === leadId);
-    const previousAssignedTo = targetLead ? targetLead.assigned_to : null;
-    setLeads(prev => prev.map(lead => lead.id === leadId ? { ...lead, assigned_to: assignedTo } : lead));
+  const handleUpdateAssignedTo = (leadId: string, assignedTo: string) => {
+    const updates = { assigned_to: assignedTo };
+    setLeads(prev => {
+      const updated = prev.map(lead => lead.id === leadId ? { ...lead, ...updates } : lead);
+      leadSyncService.saveCachedLeads(updated);
+      return updated;
+    });
 
-    try {
-      const { error } = await supabase
-        .from("leads")
-        .update({ assigned_to: assignedTo })
-        .eq("id", leadId);
-
-      if (error) throw error;
-      logHistory(leadId, "Reassigned", `Lead reassigned to ${assignedTo}`);
-      toast({ title: "Assigned To Updated", description: `Lead assigned to ${assignedTo}` });
-    } catch (err: any) {
-      setLeads(prev => prev.map(lead => lead.id === leadId ? { ...lead, assigned_to: previousAssignedTo } : lead));
-      console.error("Error updating assigned to:", err);
-      toast({
-        title: "Error updating assignment",
-        description: err.message,
-        variant: "destructive"
+    if (selectedGroupedLead) {
+      setSelectedGroupedLead(prev => {
+        if (!prev) return null;
+        const updatedEntries = prev.entries.map(e => e.id === leadId ? { ...e, ...updates } : e);
+        return { ...prev, entries: updatedEntries, lead: updatedEntries[0] };
       });
     }
+
+    leadSyncService.enqueueUpdate(leadId, updates, {
+      action_type: "Reassigned",
+      description: `Lead reassigned to ${assignedTo}`
+    });
   };
 
-  const handleUpdateField = async (leadId: string, field: string, value: any) => {
-    const targetLead = leads.find(l => l.id === leadId);
-    const previousValue = targetLead ? (targetLead as any)[field] : null;
-    setLeads(prev => prev.map(lead => lead.id === leadId ? { ...lead, [field]: value } : lead));
+  const handleUpdateField = (leadId: string, field: string, value: any) => {
+    const updates = { [field]: value };
+    setLeads(prev => {
+      const updated = prev.map(lead => lead.id === leadId ? { ...lead, ...updates } : lead);
+      leadSyncService.saveCachedLeads(updated);
+      return updated;
+    });
 
-    try {
-      const { error } = await supabase
-        .from("leads")
-        .update({ [field]: value })
-        .eq("id", leadId);
-
-      if (error) throw error;
-      logHistory(leadId, "Updated", `${field} updated manually.`);
-    } catch (err: any) {
-      setLeads(prev => prev.map(lead => lead.id === leadId ? { ...lead, [field]: previousValue } : lead));
-      console.error(`Error updating ${field}:`, err);
-      toast({
-        title: `Error updating ${field}`,
-        description: err.message,
-        variant: "destructive"
+    if (selectedGroupedLead) {
+      setSelectedGroupedLead(prev => {
+        if (!prev) return null;
+        const updatedEntries = prev.entries.map(e => e.id === leadId ? { ...e, ...updates } : e);
+        return { ...prev, entries: updatedEntries, lead: updatedEntries[0] };
       });
     }
+
+    leadSyncService.enqueueUpdate(leadId, updates, {
+      action_type: "Updated",
+      description: `${field} updated manually.`
+    });
   };
 
-  const handleUpdateCallConnected = async (leadId: string, callConnected: string | null) => {
-    const targetLead = leads.find(l => l.id === leadId);
-    const previousValue = targetLead ? targetLead.call_connected : null;
-    setLeads(prev => prev.map(lead => lead.id === leadId ? { ...lead, call_connected: callConnected } : lead));
+  const handleUpdateCallConnected = (leadId: string, callConnected: string | null) => {
+    const updates = { call_connected: callConnected };
+    setLeads(prev => {
+      const updated = prev.map(lead => lead.id === leadId ? { ...lead, ...updates } : lead);
+      leadSyncService.saveCachedLeads(updated);
+      return updated;
+    });
 
-    try {
-      const { error } = await supabase
-        .from("leads")
-        .update({ call_connected: callConnected })
-        .eq("id", leadId);
-
-      if (error) throw error;
-      logHistory(leadId, "Call Status", `Call status set to ${callConnected === "connected" ? "Connected" : callConnected === "not_connected" ? "Not Connected" : "None"}`);
-    } catch (err: any) {
-      setLeads(prev => prev.map(lead => lead.id === leadId ? { ...lead, call_connected: previousValue } : lead));
-      console.error("Error updating call connected:", err);
-      toast({
-        title: "Error updating call status",
-        description: err.message,
-        variant: "destructive"
+    if (selectedGroupedLead) {
+      setSelectedGroupedLead(prev => {
+        if (!prev) return null;
+        const updatedEntries = prev.entries.map(e => e.id === leadId ? { ...e, ...updates } : e);
+        return { ...prev, entries: updatedEntries, lead: updatedEntries[0] };
       });
     }
+
+    leadSyncService.enqueueUpdate(leadId, updates, {
+      action_type: "Call Status",
+      description: `Call status set to ${callConnected === "connected" ? "Connected" : callConnected === "not_connected" ? "Not Connected" : "None"}`
+    });
+  };
+
+  const handleUpdateRemark = (leadId: string, remark: string) => {
+    const detected = autoDetectCallConnected(remark);
+    const updates = { remark, call_connected: detected };
+    setLeads(prev => {
+      const updated = prev.map(lead => lead.id === leadId ? { ...lead, ...updates } : lead);
+      leadSyncService.saveCachedLeads(updated);
+      return updated;
+    });
+
+    if (selectedGroupedLead) {
+      setSelectedGroupedLead(prev => {
+        if (!prev) return null;
+        const updatedEntries = prev.entries.map(e => e.id === leadId ? { ...e, ...updates } : e);
+        return { ...prev, entries: updatedEntries, lead: updatedEntries[0] };
+      });
+    }
+
+    leadSyncService.enqueueUpdate(leadId, updates, {
+      action_type: "Remark Updated",
+      description: `Remark updated: ${remark || "Cleared"} (${detected === "connected" ? "Connected" : detected === "not_connected" ? "Not Connected" : "None"})`
+    });
   };
 
   const handleDeleteLead = async (leadId: string) => {
@@ -1034,7 +1114,11 @@ export function LeadsManagement() {
         }));
         await supabase.from("lead_history").insert(historyLogs);
 
-        setLeads(prev => prev.map(lead => selectedLeadIds.includes(lead.id) ? { ...lead, assigned_to: bulkSingleUser } : lead));
+        setLeads(prev => {
+          const updated = prev.map(lead => selectedLeadIds.includes(lead.id) ? { ...lead, assigned_to: bulkSingleUser } : lead);
+          leadSyncService.saveCachedLeads(updated);
+          return updated;
+        });
         toast({ title: "Success", description: `${selectedLeadIds.length} leads assigned to ${bulkSingleUser}` });
       } else {
         if (bulkSplitUsers.length === 0) {
@@ -1074,13 +1158,17 @@ export function LeadsManagement() {
           await supabase.from("lead_history").insert(historyLogs);
         }
 
-        setLeads(prev => prev.map(lead => {
-          const idx = selectedLeadIds.indexOf(lead.id);
-          if (idx !== -1) {
-            return { ...lead, assigned_to: bulkSplitUsers[idx % bulkSplitUsers.length] };
-          }
-          return lead;
-        }));
+        setLeads(prev => {
+          const updated = prev.map(lead => {
+            const idx = selectedLeadIds.indexOf(lead.id);
+            if (idx !== -1) {
+              return { ...lead, assigned_to: bulkSplitUsers[idx % bulkSplitUsers.length] };
+            }
+            return lead;
+          });
+          leadSyncService.saveCachedLeads(updated);
+          return updated;
+        });
         toast({ title: "Success", description: `${selectedLeadIds.length} leads distributed among ${bulkSplitUsers.length} user(s)` });
       }
 
@@ -1258,7 +1346,7 @@ export function LeadsManagement() {
         const sheetName = workbook.SheetNames[0];
         const sheet = workbook.Sheets[sheetName];
         const rawData = XLSX.utils.sheet_to_json(sheet, { header: 1 }) as any[][];
-        
+
         let headerRowIndex = -1;
         for (let i = 0; i < rawData.length; i++) {
           const rowStr = rawData[i].map(c => String(c || '').toLowerCase()).join(' ');
@@ -1502,10 +1590,10 @@ export function LeadsManagement() {
   const matchesDateFilter = (dateVal: string | null | undefined, filterDate: string): boolean => {
     if (!dateVal || !filterDate) return false;
     if (typeof dateVal === "string" && dateVal.startsWith(filterDate)) return true;
-    
+
     const d = new Date(dateVal);
     if (isNaN(d.getTime())) return false;
-    
+
     const localYMD = formatLocalDateYMD(dateVal);
     if (localYMD === filterDate) return true;
 
@@ -1617,22 +1705,22 @@ export function LeadsManagement() {
 
       const matchesStatus = statusFilter === "all" || lead.lead_status === statusFilter;
       const matchesType = typeFilter === "all" || lead.lead_type === typeFilter;
-      const matchesAssignedTo = assignedToFilter === "all" || 
-        (assignedToFilter === "unassigned" 
-          ? (!lead.assigned_to || lead.assigned_to === "") 
+      const matchesAssignedTo = assignedToFilter === "all" ||
+        (assignedToFilter === "unassigned"
+          ? (!lead.assigned_to || lead.assigned_to === "")
           : (!!lead.assigned_to && (() => {
-              const normAssigned = lead.assigned_to.trim().toLowerCase();
-              const normFilter = assignedToFilter.trim().toLowerCase();
-              if (normAssigned === normFilter) return true;
-              if ((normFilter.includes("tejasswin") || normFilter.includes("tejassw") || normFilter.includes("tejasw") || normFilter.includes("janhavi")) &&
-                  (normAssigned.includes("tejasswin") || normAssigned.includes("tejassw") || normAssigned.includes("tejasw") || normAssigned.includes("janhavi"))) {
-                return true;
-              }
-              const filterFirstName = normFilter.split(" ")[0];
-              return normAssigned.includes(filterFirstName);
-            })())
+            const normAssigned = lead.assigned_to.trim().toLowerCase();
+            const normFilter = assignedToFilter.trim().toLowerCase();
+            if (normAssigned === normFilter) return true;
+            if ((normFilter.includes("tejasswin") || normFilter.includes("tejassw") || normFilter.includes("tejasw") || normFilter.includes("janhavi")) &&
+              (normAssigned.includes("tejasswin") || normAssigned.includes("tejassw") || normAssigned.includes("tejasw") || normAssigned.includes("janhavi"))) {
+              return true;
+            }
+            const filterFirstName = normFilter.split(" ")[0];
+            return normAssigned.includes(filterFirstName);
+          })())
         );
-      
+
       let matchesAutoDate = true;
       if (autoDateFilter && !addedDateFilter) {
         const isMasterClassFollow = lead.lead_status === "Master Class Follow";
@@ -1642,10 +1730,10 @@ export function LeadsManagement() {
           const isCreatedToday = matchesDateFilter(lead.created_at, autoDateFilter);
           const isFollowUpToday = matchesDateFilter(lead.follow_up_date, autoDateFilter);
           const localLeadDate = formatLocalDateYMD(lead.created_at);
-          const isUntouchedCarryForward = localLeadDate < autoDateFilter && 
-                                          lead.lead_status === "Select Option" && 
-                                          !lead.follow_up_date;
-                                          
+          const isUntouchedCarryForward = localLeadDate < autoDateFilter &&
+            lead.lead_status === "Select Option" &&
+            !lead.follow_up_date;
+
           matchesAutoDate = isCreatedToday || isFollowUpToday || isUntouchedCarryForward || isMasterClassFollow;
         }
       }
@@ -1708,9 +1796,45 @@ export function LeadsManagement() {
       {/* Header Panel */}
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div>
-          <h1 className="text-2xl font-bold text-gray-900 flex items-center gap-2">
-            <ClipboardList className="text-[#2e5a44]" /> Leads Management
-          </h1>
+          <div className="flex items-center gap-3 flex-wrap">
+            <h1 className="text-2xl font-bold text-gray-900 flex items-center gap-2">
+              <ClipboardList className="text-[#2e5a44]" /> Leads Management
+            </h1>
+            {syncInfo.state === "idle" && (
+              <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 text-xs font-semibold rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200">
+                <CheckCircle className="w-3.5 h-3.5 text-emerald-600" />
+                All changes saved
+              </span>
+            )}
+            {syncInfo.state === "syncing" && (
+              <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 text-xs font-semibold rounded-full bg-blue-50 text-blue-700 border border-blue-200 animate-pulse">
+                <RefreshCw className="w-3.5 h-3.5 animate-spin text-blue-600" />
+                Saving {syncInfo.pendingCount} update{syncInfo.pendingCount > 1 ? "s" : ""}...
+              </span>
+            )}
+            {syncInfo.state === "offline" && (
+              <button
+                type="button"
+                onClick={() => leadSyncService.syncNow()}
+                className="inline-flex items-center gap-1.5 px-2.5 py-0.5 text-xs font-semibold rounded-full bg-amber-50 text-amber-800 border border-amber-300 hover:bg-amber-100 transition-colors cursor-pointer"
+                title="Internet is offline. Updates are safely stored in browser cache. Click to retry sync."
+              >
+                <WifiOff className="w-3.5 h-3.5 text-amber-600" />
+                Offline ({syncInfo.pendingCount} saved locally - Retry)
+              </button>
+            )}
+            {syncInfo.state === "pending" && (
+              <button
+                type="button"
+                onClick={() => leadSyncService.syncNow()}
+                className="inline-flex items-center gap-1.5 px-2.5 py-0.5 text-xs font-semibold rounded-full bg-blue-50 text-blue-800 border border-blue-200 hover:bg-blue-100 transition-colors cursor-pointer"
+                title="Updates saved locally. Syncing in background. Click to sync immediately."
+              >
+                <RefreshCw className="w-3.5 h-3.5 text-blue-600 animate-spin" />
+                {syncInfo.pendingCount} pending • Syncing
+              </button>
+            )}
+          </div>
           <p className="text-sm text-gray-500 mt-1">Manage leads, update plans, change statuses, and import/export data sheets.</p>
         </div>
         <div className="flex gap-2 flex-wrap">
@@ -1811,7 +1935,7 @@ export function LeadsManagement() {
                 }}
               />
               {autoDateFilter && (
-                <button 
+                <button
                   onClick={() => setAutoDateFilter("")}
                   className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
                 >
@@ -1836,7 +1960,7 @@ export function LeadsManagement() {
                 }}
               />
               {addedDateFilter && (
-                <button 
+                <button
                   onClick={() => setAddedDateFilter("")}
                   className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
                 >
@@ -1890,9 +2014,9 @@ export function LeadsManagement() {
 
       {/* Leads Table Card */}
       <Card className="border-none shadow-md overflow-hidden bg-white w-full max-w-full min-w-0">
-        
+
         {/* Top Horizontal Scrollbar Container */}
-        <div 
+        <div
           ref={topScrollRef}
           onScroll={handleTopScroll}
           className="w-full overflow-x-auto overflow-y-hidden table-container border-b border-gray-100"
@@ -1901,7 +2025,7 @@ export function LeadsManagement() {
         </div>
 
         {/* Main Table Container */}
-        <div 
+        <div
           ref={tableContainerRef}
           onScroll={handleTableScroll}
           className="w-full max-w-full min-w-0 rounded-b-lg table-container max-h-[calc(100vh-260px)] overflow-auto relative"
@@ -1946,6 +2070,7 @@ export function LeadsManagement() {
                     handleUpdateStatus,
                     handleUpdateAssignedTo,
                     handleUpdateCallConnected,
+                    handleUpdateRemark,
                     handleOpenHistory,
                     handleOpenEditDialog,
                     handleOpenLeadTimeline
@@ -1974,8 +2099,8 @@ export function LeadsManagement() {
         {sortedFilteredGroupedLeads.length > 0 && (
           <div className="flex justify-center items-center px-4 py-3 bg-gray-50 border-t border-gray-200 rounded-b-lg">
             <div className="text-sm text-gray-500 font-medium">
-              {currentPage < totalPages 
-                ? "Scroll down to load more..." 
+              {currentPage < totalPages
+                ? "Scroll down to load more..."
                 : `Showing all ${sortedFilteredGroupedLeads.length} unique contacts (${leads.length} total entries)`}
             </div>
           </div>
@@ -2113,13 +2238,12 @@ export function LeadsManagement() {
                   value={leadForm.call_connected || "none"}
                   onValueChange={val => setLeadForm(prev => ({ ...prev, call_connected: val === "none" ? null : val }))}
                 >
-                  <SelectTrigger className={`${
-                    leadForm.call_connected === "connected"
+                  <SelectTrigger className={`${leadForm.call_connected === "connected"
                       ? "bg-emerald-50 border-emerald-300 text-emerald-800"
                       : leadForm.call_connected === "not_connected"
-                      ? "bg-red-50 border-red-300 text-red-700"
-                      : "bg-white"
-                  }`}>
+                        ? "bg-red-50 border-red-300 text-red-700"
+                        : "bg-white"
+                    }`}>
                     <SelectValue placeholder="Auto-detect" />
                   </SelectTrigger>
                   <SelectContent>
@@ -2832,11 +2956,10 @@ function scanAndSyncLeads() {
                       <td className="p-2 text-gray-700">
                         <div className="space-y-1">
                           {entry.call_connected && (
-                            <span className={`inline-block text-[10px] font-bold px-2 py-0.5 rounded-full ${
-                              entry.call_connected === "connected"
+                            <span className={`inline-block text-[10px] font-bold px-2 py-0.5 rounded-full ${entry.call_connected === "connected"
                                 ? "bg-emerald-100 text-emerald-800"
                                 : "bg-red-100 text-red-700"
-                            }`}>
+                              }`}>
                               {entry.call_connected === "connected" ? "✅ Connected" : "❌ Not Connected"}
                             </span>
                           )}
