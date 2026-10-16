@@ -31,7 +31,7 @@ interface SidebarProps {
 
 const menuItems = [
     { id: 'followup', label: 'Leads Management', icon: ClipboardList },
-    { id: 'dashboard', label: 'Dashboard', icon: BarChart3 },
+    { id: 'dashboard', label: 'Team Performance Canvas', icon: BarChart3 },
     { id: 'whatsapp-automation', label: 'WhatsApp Automation', icon: Zap },
     { id: 'users', label: 'User Management', icon: Users },
     { id: 'retention', label: 'User Retention', icon: HeartPulse },

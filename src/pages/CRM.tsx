@@ -33,7 +33,7 @@ import { UserDetail } from "./crm/UserDetail";
 import { RetentionDashboard } from "./crm/RetentionDashboard";
 import { WhatsAppChat } from "./crm/WhatsAppChat";
 import { LeadsManagement } from "./crm/LeadsManagement";
-import WeeklyReportDashboard from "./crm/WeeklyReportDashboard";
+import TeamPerformanceCanvas from "./crm/TeamPerformanceCanvas";
 import { formatPhone } from "@/lib/utils";
 import WhatsAppFlowManager from "./crm/flow-builder/WhatsAppFlowManager";
 import { WhatsAppAutomation } from "./crm/whatsapp-automation/WhatsAppAutomation";
@@ -1118,8 +1118,10 @@ const CRM = () => {
                 className="space-y-6"
               >
                 <div>
-                  <h1 className="text-2xl font-bold text-gray-900">Dashboard Overview</h1>
-                  <p className="text-gray-500">Welcome back! Here's what's happening today.</p>
+                  <h1 className="text-2xl font-bold text-gray-900 flex items-center gap-2">
+                    <BarChart3 className="text-[#2e5a44]" /> Team Performance Canvas
+                  </h1>
+                  <p className="text-gray-500">Executive dashboard for tracking team productivity, call connectivity, follow-ups, and conversions.</p>
                 </div>
 
                 {/* Key Metrics Row */}
@@ -1183,7 +1185,7 @@ const CRM = () => {
                 </div>
                 )}
 
-                <WeeklyReportDashboard />
+                <TeamPerformanceCanvas />
 
                 {(sessionStorage.getItem("crm_user_role") !== "staff" || sessionStorage.getItem("crm_username") === "Shreya K") && (
                 <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">

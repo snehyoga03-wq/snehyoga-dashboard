@@ -151,7 +151,7 @@ export function calculateCallTargetLedgers(
       let notConnectedCalls = 0;
 
       userLeads.forEach(lead => {
-        const status = getLeadCallStatus(lead, userHistory);
+        const status = getLeadCallStatus(lead, userHistory, { targetDate: dateKey });
         if (status === 'connected') connectedCalls++;
         else if (status === 'not_connected') notConnectedCalls++;
       });
