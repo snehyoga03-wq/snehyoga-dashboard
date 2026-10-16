@@ -214,13 +214,72 @@ function scanAndSyncLeads() {
       var formattedAdmissionDate = parseSheetDate(rawAdmissionDate);
       var inDateNorm = normalizeDateStr(formattedAdmissionDate);
       var inPlanNorm = normalizePlanStr(cleanPlan);
-      var isDoneInSheet = (crmStatus === "done");
-      if (isDoneInSheet) {
+
+      // Skip already processed rows (Done, Duplicate Contact, Skipped, etc.) so they are never re-scanned or re-sent
+      var isAlreadyProcessed = (
+        crmStatus === "done" ||
+        crmStatus === "duplicate contact" ||
+        crmStatus.indexOf("duplicate") !== -1 ||
+        crmStatus.indexOf("done") !== -1 ||
+        crmStatus.indexOf("skipped") !== -1
+      );
+      if (isAlreadyProcessed) {
         continue;
       }
 
-      // Case A: Contact already exists in database -> Never insert duplicate! Update assignment if needed and mark Done
+      // Case A: Contact already exists in CRM database
       if (candidates.length > 0) {
+        var isNewPlanAndDate = false;
+
+        // A valid renewal / new plan entry requires:
+        // 1. A non-empty plan name
+        // 2. A valid admission date
+        if (cleanPlan && formattedAdmissionDate) {
+          // Check if this exact combination of admission date and plan already exists in CRM
+          var isExactDuplicate = candidates.some(function(cand) {
+            var candDate = normalizeDateStr(cand.admission_date);
+            var candPlan = normalizePlanStr(cand.lead_existing_plan);
+            return (candDate === inDateNorm && candPlan === inPlanNorm);
+          });
+
+          if (!isExactDuplicate) {
+            // Check if admission date is newer than any existing record OR plan is different
+            var isNewerDate = candidates.some(function(cand) {
+              var candDate = normalizeDateStr(cand.admission_date);
+              return !candDate || inDateNorm > candDate;
+            });
+            var isDifferentPlan = candidates.every(function(cand) {
+              var candPlan = normalizePlanStr(cand.lead_existing_plan);
+              return candPlan !== inPlanNorm;
+            });
+
+            if (isNewerDate || isDifferentPlan) {
+              isNewPlanAndDate = true;
+            }
+          }
+        }
+
+        if (isNewPlanAndDate) {
+          // This is a genuine renewal / new plan entry with new admission date -> Insert as new lead into CRM
+          var renewalLeadItem = {
+            client_name: clientName,
+            contact: contact,
+            admission_date: formattedAdmissionDate,
+            lead_existing_plan: cleanPlan,
+            assigned_to: assignedTo,
+            lead_status: "Select Option",
+            created_at: new Date().toISOString(),
+            rowIndex: r + 1,
+            statusLabel: "Done"
+          };
+
+          newLeadsToInsert.push(renewalLeadItem);
+          addToLookup(renewalLeadItem);
+          continue;
+        }
+
+        // Contact already exists in CRM and this row does not represent a new plan + new date:
+        // Update staff assignment in CRM if changed
         var latestCand = candidates[0];
         if (assignedTo && (latestCand.assigned_to || "").toLowerCase() !== assignedTo.toLowerCase()) {
           existingLeadsToUpdate.push({
@@ -232,7 +291,8 @@ function scanAndSyncLeads() {
           latestCand.assigned_to = assignedTo;
         }
 
-        sheet.getRange(r + 1, crmStatusIdx + 1).setValue("Done");
+        // Mark as "Duplicate Contact" in Google Sheet so it is never re-scanned or sent to CRM
+        sheet.getRange(r + 1, crmStatusIdx + 1).setValue("Duplicate Contact");
         continue;
       }
 

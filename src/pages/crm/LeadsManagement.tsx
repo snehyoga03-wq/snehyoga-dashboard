@@ -1640,27 +1640,44 @@ export function LeadsManagement() {
     const result: GroupedLead[] = [];
 
     phoneMap.forEach((entries, key) => {
-      // Sort entries so that the most active / actionable record is primary (index 0)
+      // Sort entries so that the LATEST entry (newest admission_date or created_at) is primary (index 0).
+      // If a user was added again for a new plan and new date, their newest record is displayed in the main table.
       entries.sort((a, b) => {
-        // 1. Status priority
+        // 1. Compare by admission_date (business date of admission / plan start)
+        const admA = a.admission_date ? new Date(a.admission_date).getTime() : 0;
+        const admB = b.admission_date ? new Date(b.admission_date).getTime() : 0;
+
+        // 2. Compare by created_at (database insertion timestamp)
+        const crA = a.created_at ? new Date(a.created_at).getTime() : 0;
+        const crB = b.created_at ? new Date(b.created_at).getTime() : 0;
+
+        // Effective newest timestamp (whichever is newer between admission_date and created_at)
+        const effA = Math.max(admA, crA);
+        const effB = Math.max(admB, crB);
+
+        if (effB !== effA) return effB - effA;
+
+        // If effective dates are equal, prioritize the record that has a plan specified
+        const hasPlanA = (a.lead_existing_plan && a.lead_existing_plan.trim().length > 0) ? 1 : 0;
+        const hasPlanB = (b.lead_existing_plan && b.lead_existing_plan.trim().length > 0) ? 1 : 0;
+        if (hasPlanB !== hasPlanA) return hasPlanB - hasPlanA;
+
+        // Fallback to status priority if dates are identical
         const pA = statusPriority[a.lead_status] || 0;
         const pB = statusPriority[b.lead_status] || 0;
         if (pA !== pB) return pB - pA;
 
-        // 2. Has follow-up date
+        // Has follow-up date
         const fA = a.follow_up_date ? 1 : 0;
         const fB = b.follow_up_date ? 1 : 0;
         if (fA !== fB) return fB - fA;
 
-        // 3. Has remark
+        // Has remark
         const rA = a.remark && a.remark.trim().length > 0 ? 1 : 0;
         const rB = b.remark && b.remark.trim().length > 0 ? 1 : 0;
         if (rA !== rB) return rB - rA;
 
-        // 4. Most recent created_at / calling_date / admission_date
-        const tA = new Date(a.created_at || a.admission_date || 0).getTime();
-        const tB = new Date(b.created_at || b.admission_date || 0).getTime();
-        return tB - tA;
+        return 0;
       });
 
       const primaryLead = entries[0];
