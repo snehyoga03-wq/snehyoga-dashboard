@@ -14,7 +14,7 @@ const corsHeaders = {
 };
 
 const WA_API_VERSION = "v20.0";
-const DEFAULT_PHONE = "919145414083";
+const DEFAULT_PHONES = ["919145414083", "919371575365", "919623762115"];
 const ASSIGNED_USERS = ["Ragini K", "Shreya K", "Tejasswini K"];
 
 const NOT_CONNECTED_PATTERNS = [
@@ -170,46 +170,62 @@ async function sendWhatsAppMessage(
   toPhone: string,
   templateName: string,
   params: string[],
-  fallbackText: string
+  fallbackText: string,
+  preferredLang: string = "en"
 ): Promise<{ success: boolean; messageId?: string; type: "template" | "text_fallback"; error?: string }> {
   const url = `https://graph.facebook.com/${WA_API_VERSION}/${phoneNumberId}/messages`;
 
-  // 1. Attempt sending approved Meta Template
-  try {
-    const templatePayload = {
-      messaging_product: "whatsapp",
-      to: toPhone,
-      type: "template",
-      template: {
-        name: templateName,
-        language: { code: "en" },
-        components: [
-          {
-            type: "body",
-            parameters: params.map((p) => ({ type: "text", text: String(p) })),
-          },
-        ],
-      },
-    };
+  // 1. Attempt sending approved Meta Template with candidates: [preferredLang, "en", "en_US"]
+  const candidateLangs = [preferredLang, "en", "en_US"].filter(
+    (code, idx, arr) => Boolean(code) && arr.indexOf(code) === idx
+  );
 
-    const res = await fetch(url, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "Authorization": `Bearer ${token}`,
-      },
-      body: JSON.stringify(templatePayload),
-    });
+  for (const langCode of candidateLangs) {
+    try {
+      const templatePayload = {
+        messaging_product: "whatsapp",
+        to: toPhone,
+        type: "template",
+        template: {
+          name: templateName,
+          language: { code: langCode },
+          components: [
+            {
+              type: "body",
+              parameters: params.map((p) => ({
+                type: "text",
+                text: String(p ?? "").replace(/[\r\n\t]+/g, " | ").replace(/\s{4,}/g, " ").trim(),
+              })),
+            },
+          ],
+        },
+      };
 
-    const json = await res.json();
-    if (res.ok && json.messages?.[0]?.id) {
-      console.log(`✅ Template '${templateName}' sent successfully to ${toPhone}: ${json.messages[0].id}`);
-      return { success: true, messageId: json.messages[0].id, type: "template" };
+      const res = await fetch(url, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${token}`,
+        },
+        body: JSON.stringify(templatePayload),
+      });
+
+      const json = await res.json();
+      if (res.ok && json.messages?.[0]?.id) {
+        console.log(`✅ Template '${templateName}' (${langCode}) sent successfully to ${toPhone}: ${json.messages[0].id}`);
+        return { success: true, messageId: json.messages[0].id, type: "template" };
+      }
+
+      // If translation not found, continue to next candidate language
+      if (json.error?.code === 132001) {
+        console.log(`ℹ️ Template '${templateName}' not found for language '${langCode}', checking other variants...`);
+        continue;
+      }
+
+      console.warn(`⚠️ Template '${templateName}' (${langCode}) send failed (${res.status}):`, json.error?.message || json);
+    } catch (err: any) {
+      console.warn(`⚠️ Template error for '${templateName}' (${langCode}):`, err.message);
     }
-
-    console.warn(`⚠️ Template '${templateName}' send failed (${res.status}):`, json.error?.message || json);
-  } catch (err: any) {
-    console.warn(`⚠️ Template error for '${templateName}':`, err.message);
   }
 
   // 2. Direct Text Fallback (Ensures report is 100% delivered to user)
@@ -263,25 +279,30 @@ Deno.serve(async (req) => {
       }
     }
 
-    const targetPhone = bodyData.to || DEFAULT_PHONE;
+    const targetPhones: string[] = bodyData.to
+      ? (Array.isArray(bodyData.to)
+          ? bodyData.to
+          : String(bodyData.to).split(",").map((s) => s.trim()).filter(Boolean))
+      : DEFAULT_PHONES;
 
     // Determine targetDate in IST (Indian Standard Time: UTC + 5:30)
     const now = new Date();
     const istTime = new Date(now.getTime() + 5.5 * 60 * 60 * 1000);
     const targetDate = bodyData.date || istTime.toISOString().split("T")[0];
 
-    console.log(`📊 [DailyReport] Generating daily report for ${targetDate} -> Sending to ${targetPhone}...`);
+    console.log(`📊 [DailyReport] Generating daily report for ${targetDate} -> Sending to ${targetPhones.join(", ")}...`);
 
     // Fetch Meta WhatsApp Credentials
     const { data: settings } = await supabase
       .from("session_settings")
-      .select("wa_api_token, wa_phone_number_id")
+      .select("wa_api_token, wa_phone_number_id, wa_language_code")
       .maybeSingle();
 
     const waToken =
       settings?.wa_api_token ||
       "EAAX2HQ7QpvUBSZAK3krfGE7pLN8pW3WoUZCSJZCJsZB4oallIQNagAXwCqENBRZBO3kOGbABFyeI0IqrkZAsuA5lft4kVWrtuoy9MylP9RDz2BV5uEFLjNFBNuU9CJqzFMEMYLZBTn8ZCswZCE8CubZCg0KliOITU9t43FlGZA6HBSyS819nxhAdvTZBOl8IhT5tbV2LHQZDZD";
     const phoneNumberId = settings?.wa_phone_number_id || "1230157110176906";
+    const preferredLang = settings?.wa_language_code || "en";
 
     // Fetch all leads
     let allLeads: any[] = [];
@@ -453,13 +474,11 @@ Deno.serve(async (req) => {
     const telecallerHighlightsText = rankedMembers
       .map(
         (m) =>
-          `• ${m.name} (Rank #${m.rank}): ${m.callsCompleted} calls (${m.connectedCalls} Conn), ${m.leadsConverted} deal(s) — Score: ${m.overallScore}/100`
+          `• ${m.name} (Rank #${m.rank}): ${m.callsCompleted} calls (${m.connectedCalls} Conn, ${m.leadsConverted} deal) [Score: ${m.overallScore}]`
       )
-      .join("\n");
+      .join("  |  ");
 
-    const deliveryResults: any[] = [];
-
-    // 1. Send Team Performance Daily Report
+    // 1. Prepare Team Performance Daily Report Payload
     const teamTemplateParams = [
       targetDate,
       String(ASSIGNED_USERS.length),
@@ -506,39 +525,47 @@ ${rankedMembers
 📝 *TODAY'S TEAM OVERVIEW*
 ${teamOverviewSentence}`;
 
-    const teamSendRes = await sendWhatsAppMessage(
-      phoneNumberId,
-      waToken,
-      targetPhone,
-      "team_performance_daily_report",
-      teamTemplateParams,
-      teamFallbackText
-    );
+    const deliveryResults: any[] = [];
 
-    deliveryResults.push({ report: "team_performance_daily_report", ...teamSendRes });
+    // Send reports to all target recipients
+    for (const targetPhone of targetPhones) {
+      console.log(`📱 Delivering reports to ${targetPhone}...`);
 
-    // 2. Send Individual Telecaller Daily Reports for Each User
-    for (const m of rankedMembers) {
-      const userTemplateParams = [
-        targetDate,
-        m.name,
-        String(m.rank),
-        String(m.overallScore),
-        m.performanceRating,
-        "60",
-        String(m.newAssignedLeads),
-        String(m.callsCompleted),
-        String(m.connectedCalls),
-        String(m.notConnectedCalls),
-        String(m.followUpCallsDone),
-        String(m.pendingFollowUps),
-        String(m.overdueTasks),
-        String(m.leadsConverted),
-        m.conversionRate.toFixed(1),
-        m.dynamicSentence,
-      ];
+      // 1. Send Team Performance Daily Report
+      const teamSendRes = await sendWhatsAppMessage(
+        phoneNumberId,
+        waToken,
+        targetPhone,
+        "team_performance_daily_report",
+        teamTemplateParams,
+        teamFallbackText,
+        preferredLang
+      );
 
-      const userFallbackText = `👤 *SNEH YOGA CRM — TELECALLER DAILY REPORT*
+      deliveryResults.push({ recipient: targetPhone, report: "team_performance_daily_report", ...teamSendRes });
+
+      // 2. Send Individual Telecaller Daily Reports for Each User
+      for (const m of rankedMembers) {
+        const userTemplateParams = [
+          targetDate,
+          m.name,
+          String(m.rank),
+          String(m.overallScore),
+          m.performanceRating,
+          "60",
+          String(m.newAssignedLeads),
+          String(m.callsCompleted),
+          String(m.connectedCalls),
+          String(m.notConnectedCalls),
+          String(m.followUpCallsDone),
+          String(m.pendingFollowUps),
+          String(m.overdueTasks),
+          String(m.leadsConverted),
+          m.conversionRate.toFixed(1),
+          m.dynamicSentence,
+        ];
+
+        const userFallbackText = `👤 *SNEH YOGA CRM — TELECALLER DAILY REPORT*
 📅 *Date*: ${targetDate}
 👤 *Telecaller*: ${m.name}
 🏆 *Team Rank*: #${m.rank} | *Score*: ${m.overallScore}/100 (${m.performanceRating})
@@ -559,23 +586,25 @@ ${teamOverviewSentence}`;
 💬 *TODAY'S REPORT OVERVIEW*
 ${m.dynamicSentence}`;
 
-      const userSendRes = await sendWhatsAppMessage(
-        phoneNumberId,
-        waToken,
-        targetPhone,
-        "telecaller_daily_report",
-        userTemplateParams,
-        userFallbackText
-      );
+        const userSendRes = await sendWhatsAppMessage(
+          phoneNumberId,
+          waToken,
+          targetPhone,
+          "telecaller_daily_report",
+          userTemplateParams,
+          userFallbackText,
+          preferredLang
+        );
 
-      deliveryResults.push({ report: `telecaller_daily_report (${m.name})`, ...userSendRes });
+        deliveryResults.push({ recipient: targetPhone, report: `telecaller_daily_report (${m.name})`, ...userSendRes });
+      }
     }
 
     return new Response(
       JSON.stringify({
         success: true,
         date: targetDate,
-        recipient: targetPhone,
+        recipients: targetPhones,
         teamMetrics: {
           totalCalls: teamCallsDone,
           connectedCalls: teamConnected,

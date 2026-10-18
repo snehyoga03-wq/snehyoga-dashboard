@@ -17,6 +17,10 @@ verify_jwt = false
 
 [functions.retention-notifications]
 verify_jwt = false
+
+[functions.daily-performance-report]
+verify_jwt = false
+
 [functions.whatsapp-webhook]
 enabled = true
 verify_jwt = false
