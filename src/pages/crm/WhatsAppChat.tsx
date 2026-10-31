@@ -2,7 +2,7 @@ import { useState, useRef, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { 
   Search, Send, Paperclip, Smile, Phone, Video, MoreVertical, ArrowLeft, 
-  Check, CheckCheck, MessageCircle, Plus, Filter, Zap, X, Sparkles, RefreshCw, Loader2, MousePointerClick 
+  Check, CheckCheck, MessageCircle, Plus, Filter, Zap, X, Sparkles, RefreshCw, Loader2, MousePointerClick, Bot 
 } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/components/ui/use-toast";
@@ -161,6 +161,94 @@ export function WhatsAppChat() {
   const [isWindowActive, setIsWindowActive] = useState(true);
   const [lastSyncTime, setLastSyncTime] = useState<Date>(new Date());
   const [isSending, setIsSending] = useState(false);
+  const [isGeneratingAi, setIsGeneratingAi] = useState(false);
+
+  // Generate AI Customer Support Executive response
+  const handleGenerateAiReply = async () => {
+    if (!selectedContact || isGeneratingAi) return;
+
+    const lastUserMsg = [...currentChatMessages]
+      .reverse()
+      .find(m => m.sender === "user")?.text || "Namaste, class timing kya hai aur fees kitni hai?";
+
+    setIsGeneratingAi(true);
+    try {
+      const [{ data: settings }, { data: kbData }] = await Promise.all([
+        supabase.from("session_settings").select("google_ai_studio_key, ai_system_prompt").maybeSingle(),
+        supabase.from("ai_knowledge_base").select("category, question, answer").limit(30)
+      ]);
+
+      const apiKey = (settings?.google_ai_studio_key || localStorage.getItem("google_ai_studio_key") || (import.meta.env.VITE_GEMINI_API_KEY as string) || "").trim();
+      const kbContext = (kbData || []).map((k, i) => `${i + 1}. [${k.category}] Q: ${k.question}\nA: ${k.answer}`).join("\n\n");
+      const systemPrompt = settings?.ai_system_prompt || "You are the official Customer Support Executive at Snehyoga (https://snehyoga.com/), founded by Government-Certified Yoga Teacher Snehal Salunkhe. Warmly, politely, and professionally assist students on WhatsApp with batch timings (5 AM, 6 AM, 7:30 AM, 5 PM, 6 PM, 9 PM), plans, diet, and booking a free demo session.";
+
+      const instruction = `${systemPrompt}
+
+Snehyoga Verified Knowledge Base:
+---
+${kbContext}
+---
+
+MANDATORY RULES:
+1. ROLE: You are Snehyoga's helpful and polite Customer Support Executive.
+2. Reply in the EXACT SAME LANGUAGE and script as the student's message (Marathi, Hindi, Hinglish, or English).
+3. Student Name: ${selectedContact.name}
+4. Keep the reply courteous, clear, and under 75 words.
+5. Always begin with 'Namaste 🙏' or 'नमस्कार 🙏' and end with an offering to book a free demo session or assist further.`;
+
+      const models = ["gemini-3.5-flash-lite", "gemini-3.5-flash", "gemini-3.8-flash", "gemini-flash-lite-latest"];
+      let generated = "";
+
+      for (const model of models) {
+        try {
+          const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              contents: [
+                {
+                  role: "user",
+                  parts: [{ text: `${instruction}\n\nStudent's message:\n"${lastUserMsg}"` }]
+                }
+              ]
+            })
+          });
+
+          if (res.ok) {
+            const json = await res.json();
+            const text = json.candidates?.[0]?.content?.parts?.[0]?.text;
+            if (text) {
+              generated = text.trim();
+              break;
+            }
+          }
+        } catch (_) {}
+      }
+
+      if (generated) {
+        setMessageInput(generated);
+        toast({
+          title: "AI Support Draft Ready ✨",
+          description: "Drafted as Snehyoga Support Executive. Review before sending."
+        });
+        inputRef.current?.focus();
+      } else {
+        toast({
+          title: "Could not generate reply",
+          description: "Please check your Gemini API key or connection.",
+          variant: "destructive"
+        });
+      }
+    } catch (err) {
+      toast({
+        title: "AI Assistant Error",
+        description: err?.message || "Failed to generate reply",
+        variant: "destructive"
+      });
+    } finally {
+      setIsGeneratingAi(false);
+    }
+  };
   const chatEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const selectedContactRef = useRef<Contact | null>(null);
@@ -899,7 +987,7 @@ export function WhatsAppChat() {
               <input
                 ref={inputRef}
                 type="text"
-                placeholder={`Type a live WhatsApp reply to ${selectedContact.name}...`}
+                placeholder={`Type a reply or click 🤖 for AI Support Draft...`}
                 value={messageInput}
                 onChange={e => setMessageInput(e.target.value)}
                 onKeyDown={e => e.key === "Enter" && handleSendMessage()}

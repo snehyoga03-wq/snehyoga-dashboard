@@ -400,6 +400,130 @@ Deno.serve(async (req) => {
             });
 
             console.log(`✅ Direct Session Link Fallback logged in chat_messages for ${fromPhone}`);
+            replySent = true;
+          }
+
+          // Step E: Gemini AI Studio Auto-Responder with RAG Knowledge Base
+          if (!replySent && userMsgText.trim().length > 0) {
+            try {
+              const { data: aiSettings } = await supabase
+                .from("session_settings")
+                .select("google_ai_studio_key, ai_system_prompt, ai_enabled, ai_allowed_numbers")
+                .maybeSingle();
+
+              const isAiEnabled = aiSettings?.ai_enabled ?? true;
+              const aiApiKey = (aiSettings?.google_ai_studio_key || Deno.env.get("GEMINI_API_KEY") || "").trim();
+              const allowedNumbers = (aiSettings?.ai_allowed_numbers || "*").trim();
+
+              const isAllowed = !allowedNumbers || allowedNumbers === "*" || allowedNumbers.split(",").map(p => formatWaPhone(p.trim())).includes(fromPhone);
+
+              if (isAiEnabled && isAllowed) {
+                console.log(`🤖 Evaluating AI Auto-Responder for incoming message from ${fromPhone}: "${userMsgText}"`);
+
+                // 1. Fetch Knowledge Base from ai_knowledge_base
+                const { data: kbData } = await supabase
+                  .from("ai_knowledge_base")
+                  .select("category, question, answer");
+
+                const kbItems: Array<{ category: string; question: string; answer: string }> = kbData || [];
+
+                let aiReply = "";
+
+                // 2. Fast-path local exact match if API key isn't provided
+                if (!aiApiKey) {
+                  const qLower = cleanInput.toLowerCase();
+                  for (const kb of kbItems) {
+                    const kbQLower = kb.question.toLowerCase();
+                    if (qLower.includes(kbQLower) || kbQLower.includes(qLower) || (qLower.length > 5 && kbQLower.split(" ").filter(w => w.length > 3).some(w => qLower.includes(w)))) {
+                      aiReply = kb.answer;
+                      break;
+                    }
+                  }
+                  if (!aiReply) {
+                    aiReply = `Namaste ${userName !== 'User' ? userName : ''} 🙏\n\nThank you for messaging Snehyoga! Our live classes run Mon-Fri across 6 batches: 5 AM, 6 AM, 7:30 AM, 5 PM, 6 PM, 9 PM IST.\n\nPersonal Joining Link: ${userSessionLink}\n\nHow may we assist you with our yoga & wellness programs?`;
+                  }
+                } else {
+                  // Call Google Gemini API
+                  const kbContext = kbItems
+                    .map((k, i) => `${i + 1}. [${k.category}]\nQ: ${k.question}\nA: ${k.answer}`)
+                    .join("\n\n");
+
+                  const promptTemplate = aiSettings?.ai_system_prompt || `You are the official Customer Support Executive at Snehyoga (https://snehyoga.com/), founded by Government-Certified Yoga Teacher and Lifestyle Coach Snehal Salunkhe. Warmly, politely, and professionally assist students on WhatsApp with batch timings (5 AM, 6 AM, 7:30 AM, 5 PM, 6 PM, 9 PM), plans, diet, and booking a free demo session.`;
+
+                  const systemInstruction = `${promptTemplate}
+
+Snehyoga Verified Knowledge Base:
+---
+${kbContext}
+---
+
+MANDATORY INSTRUCTIONS FOR WHATSAPP CUSTOMER SUPPORT:
+1. ROLE: You are Snehyoga's helpful and courteous Customer Support Executive.
+2. STRICT LANGUAGE MATCHING: You MUST reply in the EXACT SAME LANGUAGE and script as the user:
+   - If user speaks Marathi (उदा. 'नमस्कार', 'क्लास कधी सुरू होतो?'), reply in polite Marathi.
+   - If user speaks Hindi (उदा. 'नमस्ते', 'टाइमिंग क्या है?'), reply in Hindi.
+   - If user speaks Hinglish (e.g. 'timing kya hai?', 'fees kitna hai?'), reply in clean Hinglish.
+   - If user speaks English, reply in English.
+3. If the user asks for batch timings, plans, trial/demo, diet, or joining link, answer accurately using the Knowledge Base above.
+4. User personal session link: ${userSessionLink}
+5. Student Name: ${userName}
+6. Keep your response concise, polite, uplifting, and helpful (strictly under 75 words for WhatsApp readability).
+7. Always start with 'Namaste 🙏' or 'नमस्कार 🙏' and end with an offering to help or book a free trial demo slot.`;
+
+                  const models = ["gemini-3.5-flash-lite", "gemini-3.5-flash", "gemini-3.8-flash", "gemini-flash-lite-latest"];
+                  for (const model of models) {
+                    try {
+                      const geminiRes = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${aiApiKey}`, {
+                        method: "POST",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({
+                          contents: [
+                            {
+                              role: "user",
+                              parts: [
+                                { text: `${systemInstruction}\n\nIncoming WhatsApp message from student "${userName}" (${fromPhone}):\n"${userMsgText}"` }
+                              ]
+                            }
+                          ]
+                        })
+                      });
+
+                      if (geminiRes.ok) {
+                        const geminiJson = await geminiRes.json();
+                        const candidateText = geminiJson.candidates?.[0]?.content?.parts?.[0]?.text || "";
+                        if (candidateText.trim()) {
+                          aiReply = candidateText.trim();
+                          break;
+                        }
+                      } else {
+                        console.warn(`Gemini model ${model} HTTP status:`, geminiRes.status);
+                      }
+                    } catch (mErr) {
+                      console.warn(`Gemini model ${model} fetch failed:`, mErr);
+                    }
+                  }
+                }
+
+                if (aiReply) {
+                  console.log(`🤖 Sending AI Auto-Reply to ${fromPhone}:\n"${aiReply}"`);
+                  await sendWAMessage(phoneNumberId, waToken, fromPhone, aiReply);
+
+                  await supabase.from("chat_messages").insert({
+                    user_phone: fromPhone,
+                    user_name: userName,
+                    message: aiReply,
+                    sender_type: "bot",
+                    is_read: true,
+                    created_at: new Date().toISOString()
+                  });
+
+                  console.log(`✅ Outgoing AI Auto-Reply logged in chat_messages for ${fromPhone}`);
+                  replySent = true;
+                }
+              }
+            } catch (aiErr) {
+              console.error("AI auto-responder error in webhook:", aiErr);
+            }
           }
 
         } catch (flowErr) {

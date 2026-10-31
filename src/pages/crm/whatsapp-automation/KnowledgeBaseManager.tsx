@@ -4,15 +4,14 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { useToast } from "@/hooks/use-toast";
 import {
-  BookOpen, Plus, Search, Edit2, Trash2, CheckCircle2,
+  BookOpen, Plus, Search, Edit2, Trash2,
   Sparkles, Filter, Code, Eye, RefreshCw
 } from "lucide-react";
 import {
   KnowledgeBaseItem,
   addKnowledgeBaseItem,
   updateKnowledgeBaseItem,
-  deleteKnowledgeBaseItem,
-  fetchKnowledgeBase
+  deleteKnowledgeBaseItem
 } from "@/services/whatsappAutomationService";
 import {
   Dialog,
@@ -29,13 +28,24 @@ interface KnowledgeBaseManagerProps {
 
 const CATEGORIES = [
   "All Categories",
-  "Batches & Timings",
-  "Live Class Link",
-  "Subscription & Fees",
-  "Free Trial / Demo",
-  "Diet Guidelines",
-  "Medical & Therapy",
-  "General"
+  "Batches & Timings (Marathi)",
+  "Batches & Timings (English)",
+  "Batches & Timings (Hinglish)",
+  "Subscription & Fees (Marathi)",
+  "Subscription & Fees (English)",
+  "Subscription & Fees (Hinglish)",
+  "Free Trial & Demo (Marathi)",
+  "Free Trial & Demo (English)",
+  "Free Trial & Demo (Hinglish)",
+  "Class Joining Link (Marathi)",
+  "Class Joining Link (English)",
+  "Diet Guidelines (Marathi)",
+  "Diet Guidelines (English)",
+  "Health & Therapy (Marathi)",
+  "Health & Therapy (English)",
+  "About Coach & Founder (English)",
+  "Face Yoga & Programs (English)",
+  "Human Support (General)"
 ];
 
 export const KnowledgeBaseManager: React.FC<KnowledgeBaseManagerProps> = ({ knowledgeBase, onRefresh }) => {
@@ -47,7 +57,7 @@ export const KnowledgeBaseManager: React.FC<KnowledgeBaseManagerProps> = ({ know
   const [showPromptPreview, setShowPromptPreview] = useState(false);
 
   // Form State
-  const [formCategory, setFormCategory] = useState("Batches & Timings");
+  const [formCategory, setFormCategory] = useState("Batches & Timings (English)");
   const [formQuestion, setFormQuestion] = useState("");
   const [formAnswer, setFormAnswer] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -57,12 +67,13 @@ export const KnowledgeBaseManager: React.FC<KnowledgeBaseManagerProps> = ({ know
     const matchesCat = selectedCategory === "All Categories" || item.category === selectedCategory;
     const matchesSearch =
       item.question.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      item.answer.toLowerCase().includes(searchQuery.toLowerCase());
+      item.answer.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      item.category.toLowerCase().includes(searchQuery.toLowerCase());
     return matchesCat && matchesSearch;
   });
 
   const handleOpenAdd = () => {
-    setFormCategory("Batches & Timings");
+    setFormCategory("Batches & Timings (English)");
     setFormQuestion("");
     setFormAnswer("");
     setShowAddModal(true);
@@ -110,10 +121,10 @@ export const KnowledgeBaseManager: React.FC<KnowledgeBaseManagerProps> = ({ know
   };
 
   const handleDeleteItem = async (id: string) => {
-    if (!window.confirm("Are you sure you want to delete this Knowledge Base entry?")) return;
+    if (!window.confirm("Are you sure you want to delete this FAQ entry from Knowledge Base?")) return;
     const success = await deleteKnowledgeBaseItem(id);
     if (success) {
-      toast({ title: "Deleted", description: "Knowledge Base item removed." });
+      toast({ title: "Deleted", description: "FAQ item removed from AI database." });
       onRefresh();
     } else {
       toast({ title: "Delete Error", description: "Failed to delete item from database.", variant: "destructive" });
@@ -121,21 +132,17 @@ export const KnowledgeBaseManager: React.FC<KnowledgeBaseManagerProps> = ({ know
   };
 
   return (
-    <Card className="border border-slate-200/80 shadow-sm bg-white overflow-hidden">
-      <CardHeader className="bg-slate-50 border-b border-slate-100 p-5">
+    <Card className="border border-slate-200/80 shadow-sm bg-white rounded-2xl overflow-hidden">
+      <CardHeader className="bg-white border-b border-slate-100 p-6">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-xl bg-purple-50 border border-purple-200 flex items-center justify-center text-purple-600">
-              <BookOpen className="w-5 h-5" />
-            </div>
-            <div>
-              <CardTitle className="text-base font-bold text-slate-900">
-                AI Knowledge Base Manager
-              </CardTitle>
-              <p className="text-xs text-slate-500">
-                Verified Q&A pairs dynamically injected into Google Gemini prompt for accurate student guidance
-              </p>
-            </div>
+          <div className="space-y-1">
+            <CardTitle className="text-xl font-bold text-slate-900 flex items-center gap-2">
+              <BookOpen className="w-5 h-5 text-purple-600" />
+              Training Knowledge Base (RAG)
+            </CardTitle>
+            <p className="text-xs sm:text-sm text-slate-500">
+              Add specific FAQs, rules, and diet plans. The AI will search this database to answer users accurately.
+            </p>
           </div>
 
           <div className="flex items-center gap-2">
@@ -143,16 +150,16 @@ export const KnowledgeBaseManager: React.FC<KnowledgeBaseManagerProps> = ({ know
               size="sm"
               variant="outline"
               onClick={() => setShowPromptPreview(true)}
-              className="text-xs font-semibold border-purple-200 text-purple-700 hover:bg-purple-50 h-9"
+              className="text-xs font-semibold border-slate-200 text-slate-700 hover:bg-slate-50 h-10 px-3.5 rounded-xl"
             >
               <Eye className="w-3.5 h-3.5 mr-1.5" /> Prompt Preview
             </Button>
             <Button
               size="sm"
               onClick={handleOpenAdd}
-              className="bg-purple-600 hover:bg-purple-700 text-white font-semibold text-xs h-9 shadow-sm"
+              className="bg-[#e11d48] hover:bg-[#be123c] text-white font-semibold text-xs h-10 px-4 rounded-xl shadow-sm flex items-center gap-1.5"
             >
-              <Plus className="w-4 h-4 mr-1" /> Add New Q&A
+              <Plus className="w-4 h-4" /> Add FAQ
             </Button>
           </div>
         </div>
@@ -162,14 +169,14 @@ export const KnowledgeBaseManager: React.FC<KnowledgeBaseManagerProps> = ({ know
         {/* Category Filters & Search */}
         <div className="flex flex-col sm:flex-row items-center justify-between gap-3">
           <div className="flex items-center gap-1.5 overflow-x-auto pb-1 sm:pb-0 w-full sm:w-auto">
-            {CATEGORIES.slice(0, 5).map((cat) => (
+            {CATEGORIES.slice(0, 6).map((cat) => (
               <button
                 key={cat}
                 type="button"
                 onClick={() => setSelectedCategory(cat)}
                 className={`text-xs font-semibold px-3 py-1.5 rounded-lg border transition-all whitespace-nowrap ${
                   selectedCategory === cat
-                    ? "bg-purple-600 text-white border-purple-600 shadow-sm"
+                    ? "bg-slate-900 text-white border-slate-900 shadow-sm"
                     : "bg-white text-slate-600 border-slate-200 hover:bg-slate-50"
                 }`}
               >
@@ -178,13 +185,13 @@ export const KnowledgeBaseManager: React.FC<KnowledgeBaseManagerProps> = ({ know
             ))}
           </div>
 
-          <div className="relative w-full sm:w-64">
+          <div className="relative w-full sm:w-72">
             <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
             <Input
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              placeholder="Search FAQs & answers..."
-              className="pl-9 h-9 text-xs border-slate-200"
+              placeholder="Search FAQs, topics & answers..."
+              className="pl-9 h-10 text-xs border-slate-200 bg-slate-50/50 rounded-xl"
             />
           </div>
         </div>
@@ -192,43 +199,43 @@ export const KnowledgeBaseManager: React.FC<KnowledgeBaseManagerProps> = ({ know
         {/* Q&A Cards List */}
         <div className="space-y-3">
           {filteredItems.length === 0 ? (
-            <div className="p-8 text-center text-xs text-slate-400 bg-slate-50 rounded-2xl border border-dashed border-slate-200">
-              No knowledge base items matched your query. Click "Add New Q&A" to create one.
+            <div className="p-10 text-center text-xs text-slate-400 bg-slate-50 rounded-2xl border border-dashed border-slate-200">
+              No knowledge base items matched your search filter. Click "+ Add FAQ" to create one.
             </div>
           ) : (
             filteredItems.map((item) => (
               <div
                 key={item.id}
-                className="p-4 rounded-xl border border-slate-200 bg-white hover:border-purple-300 hover:shadow-sm transition-all space-y-2 group"
+                className="p-4 rounded-xl border border-slate-200/80 bg-white hover:border-slate-300 hover:shadow-sm transition-all space-y-2 group"
               >
                 <div className="flex items-start justify-between gap-3">
-                  <div className="space-y-1">
-                    <span className="text-[10px] font-bold uppercase tracking-wider text-purple-700 bg-purple-50 px-2 py-0.5 rounded-full border border-purple-200">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="text-[11px] font-medium text-slate-600 bg-slate-100 px-2.5 py-0.5 rounded-md border border-slate-200">
                       {item.category}
                     </span>
-                    <h4 className="text-sm font-bold text-slate-900 pt-0.5">{item.question}</h4>
+                    <h4 className="text-sm font-bold text-slate-900">{item.question}</h4>
                   </div>
-                  <div className="flex items-center gap-1 opacity-80 group-hover:opacity-100 transition-opacity shrink-0">
+                  <div className="flex items-center gap-1 opacity-70 group-hover:opacity-100 transition-opacity shrink-0">
                     <button
                       type="button"
                       onClick={() => handleOpenEdit(item)}
-                      className="p-1.5 text-slate-500 hover:text-indigo-600 hover:bg-slate-100 rounded-md"
-                      title="Edit"
+                      className="p-1.5 text-slate-400 hover:text-indigo-600 hover:bg-slate-100 rounded-md transition-colors"
+                      title="Edit FAQ"
                     >
-                      <Edit2 className="w-3.5 h-3.5" />
+                      <Edit2 className="w-4 h-4" />
                     </button>
                     <button
                       type="button"
                       onClick={() => handleDeleteItem(item.id)}
-                      className="p-1.5 text-slate-500 hover:text-rose-600 hover:bg-slate-100 rounded-md"
-                      title="Delete"
+                      className="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-slate-100 rounded-md transition-colors"
+                      title="Delete FAQ"
                     >
-                      <Trash2 className="w-3.5 h-3.5" />
+                      <Trash2 className="w-4 h-4" />
                     </button>
                   </div>
                 </div>
 
-                <p className="text-xs text-slate-600 leading-relaxed font-sans pl-2 border-l-2 border-purple-200">
+                <p className="text-xs text-slate-600 leading-relaxed font-sans pl-1">
                   {item.answer}
                 </p>
               </div>
@@ -243,50 +250,48 @@ export const KnowledgeBaseManager: React.FC<KnowledgeBaseManagerProps> = ({ know
             setEditingItem(null);
           }
         }}>
-          <DialogContent className="max-w-lg">
+          <DialogContent className="max-w-lg bg-white rounded-2xl">
             <DialogHeader>
-              <DialogTitle className="text-base font-bold flex items-center gap-2">
+              <DialogTitle className="text-base font-bold flex items-center gap-2 text-slate-900">
                 <BookOpen className="w-5 h-5 text-purple-600" />
-                {editingItem ? "Edit Knowledge Base Entry" : "Add Knowledge Base Entry"}
+                {editingItem ? "Edit Knowledge Base Entry" : "Add Training FAQ Entry"}
               </DialogTitle>
             </DialogHeader>
 
-            <div className="space-y-4 py-3">
+            <div className="space-y-4 py-2">
               <div className="space-y-1.5">
-                <label className="text-xs font-bold uppercase tracking-wider text-slate-700">Category</label>
-                <select
+                <label className="text-xs font-semibold text-slate-700">Category / Topic</label>
+                <Input
                   value={formCategory}
                   onChange={(e) => setFormCategory(e.target.value)}
-                  className="w-full h-10 px-3 rounded-lg border border-slate-200 text-xs font-medium text-slate-800 bg-white"
-                >
-                  {CATEGORIES.filter(c => c !== "All Categories").map(c => (
-                    <option key={c} value={c}>{c}</option>
-                  ))}
-                </select>
-              </div>
-
-              <div className="space-y-1.5">
-                <label className="text-xs font-bold uppercase tracking-wider text-slate-700">Student Question / Topic</label>
-                <Input
-                  value={formQuestion}
-                  onChange={(e) => setFormQuestion(e.target.value)}
-                  placeholder="e.g. Can I attend yoga if I have back pain?"
-                  className="text-xs"
+                  placeholder="e.g. Schedule & Timing (Hinglish), Batches & Timings (Marathi)"
+                  className="text-xs h-10 rounded-xl border-slate-200"
                 />
               </div>
 
               <div className="space-y-1.5">
-                <label className="text-xs font-bold uppercase tracking-wider text-slate-700">Verified Answer</label>
+                <label className="text-xs font-semibold text-slate-700">Student Question / Intent</label>
+                <Input
+                  value={formQuestion}
+                  onChange={(e) => setFormQuestion(e.target.value)}
+                  placeholder="e.g. Webinar kab hoga aur timing kya hai?"
+                  className="text-xs h-10 rounded-xl border-slate-200 font-medium"
+                />
+              </div>
+
+              <div className="space-y-1.5">
+                <label className="text-xs font-semibold text-slate-700">AI Verified Answer</label>
                 <textarea
                   value={formAnswer}
                   onChange={(e) => setFormAnswer(e.target.value)}
-                  placeholder="e.g. Yes, our Mind & Spine Program (MSP) is specifically customized for lumbar and cervical spine therapy..."
-                  className="w-full h-28 p-3 rounded-lg border border-slate-200 text-xs leading-relaxed"
+                  rows={4}
+                  placeholder="Exact factual answer for WhatsApp reply..."
+                  className="w-full p-3 text-xs rounded-xl border border-slate-200 bg-white focus:outline-none focus:ring-2 focus:ring-purple-500 leading-relaxed font-sans"
                 />
               </div>
             </div>
 
-            <DialogFooter>
+            <DialogFooter className="gap-2 sm:gap-0">
               <Button
                 variant="outline"
                 size="sm"
@@ -294,6 +299,7 @@ export const KnowledgeBaseManager: React.FC<KnowledgeBaseManagerProps> = ({ know
                   setShowAddModal(false);
                   setEditingItem(null);
                 }}
+                className="text-xs rounded-xl"
               >
                 Cancel
               </Button>
@@ -301,28 +307,32 @@ export const KnowledgeBaseManager: React.FC<KnowledgeBaseManagerProps> = ({ know
                 size="sm"
                 onClick={handleSaveItem}
                 disabled={isSubmitting}
-                className="bg-purple-600 hover:bg-purple-700 text-white font-bold"
+                className="bg-[#e11d48] hover:bg-[#be123c] text-white text-xs font-semibold rounded-xl"
               >
-                {isSubmitting ? <RefreshCw className="w-3.5 h-3.5 animate-spin mr-1" /> : null}
-                Save Entry
+                {isSubmitting ? <RefreshCw className="w-3.5 h-3.5 animate-spin mr-1.5" /> : null}
+                {editingItem ? "Save Changes" : "Add to Knowledge Base"}
               </Button>
             </DialogFooter>
           </DialogContent>
         </Dialog>
 
-        {/* Prompt Injection Preview Modal */}
+        {/* Prompt Preview Modal */}
         <Dialog open={showPromptPreview} onOpenChange={setShowPromptPreview}>
-          <DialogContent className="max-w-2xl max-h-[80vh] flex flex-col">
+          <DialogContent className="max-w-2xl bg-white rounded-2xl">
             <DialogHeader>
-              <DialogTitle className="flex items-center gap-2 text-base font-bold">
-                <Code className="w-5 h-5 text-purple-600" />
-                Live Prompt Injected Context
+              <DialogTitle className="text-base font-bold flex items-center gap-2 text-slate-900">
+                <Sparkles className="w-5 h-5 text-purple-600" />
+                Live Injected RAG Context Preview
               </DialogTitle>
             </DialogHeader>
-            <div className="flex-1 overflow-y-auto p-4 bg-slate-900 text-slate-200 rounded-xl font-mono text-xs whitespace-pre-wrap leading-relaxed">
-              {`// Injected into Google Gemini system instructions:\n\nVerified Knowledge Base:\n` +
-                knowledgeBase.map((k, i) => `${i + 1}. [${k.category}] Q: ${k.question}\nA: ${k.answer}`).join("\n\n")}
+            <div className="max-h-96 overflow-y-auto p-4 rounded-xl bg-slate-900 text-slate-200 font-mono text-xs space-y-2 whitespace-pre-wrap leading-relaxed">
+              {knowledgeBase.map((k, i) => `${i + 1}. [${k.category}]\nQ: ${k.question}\nA: ${k.answer}`).join("\n\n")}
             </div>
+            <DialogFooter>
+              <Button size="sm" onClick={() => setShowPromptPreview(false)} className="rounded-xl">
+                Close
+              </Button>
+            </DialogFooter>
           </DialogContent>
         </Dialog>
       </CardContent>

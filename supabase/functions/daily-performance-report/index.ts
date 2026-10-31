@@ -14,8 +14,19 @@ const corsHeaders = {
 };
 
 const WA_API_VERSION = "v20.0";
-const DEFAULT_PHONES = ["919145414083", "919371575365", "919623762115"];
+const DEFAULT_PHONES = [
+  "919145414083",
+  "919371575365",
+  "919623762115",
+  "917276115013",
+];
 const ASSIGNED_USERS = ["Ragini K", "Shreya K", "Tejasswini K"];
+
+function formatTargetPhone(phone: string): string {
+  let clean = (phone || "").replace(/\D/g, "");
+  if (clean.length === 10) clean = "91" + clean;
+  return clean;
+}
 
 const NOT_CONNECTED_PATTERNS = [
   "call not received", "call not picked", "not received", "not picked",
@@ -279,11 +290,13 @@ Deno.serve(async (req) => {
       }
     }
 
-    const targetPhones: string[] = bodyData.to
+    const rawPhones: string[] = bodyData.to
       ? (Array.isArray(bodyData.to)
           ? bodyData.to
           : String(bodyData.to).split(",").map((s) => s.trim()).filter(Boolean))
       : DEFAULT_PHONES;
+
+    const targetPhones = rawPhones.map(formatTargetPhone).filter((p, i, a) => p && a.indexOf(p) === i);
 
     // Determine targetDate in IST (Indian Standard Time: UTC + 5:30)
     const now = new Date();

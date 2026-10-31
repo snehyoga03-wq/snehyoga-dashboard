@@ -97,13 +97,13 @@ export interface MessageQueueItem {
 
 // ── Default Fallbacks ──
 export const DEFAULT_CONFIG: WhatsAppConfig = {
-  apiToken: "EAAX2HQ7QpvUBSZAK3krfGE7pLN8pW3WoUZCSJZCJsZB4oallIQNagAXwCqENBRZBO3kOGbABFyeI0IqrkZAsuA5lft4kVWrtuoy9MylP9RDz2BV5uEFLjNFBNuU9CJqzFMEMYLZBTn8ZCswZCE8CubZCg0KliOITU9t43FlGZA6HBSyS819nxhAdvTZBOl8IhT5tbV2LHQZDZD",
-  phoneNumberId: "1230157110176906",
-  wabaId: "1564657775051850",
-  languageCode: "en",
+  apiToken: "EAAPkGZC1jq5YBSk3DxrmHGBbtfrHCWrbFoN1LmMQBi9EbZAnRcbiQtcy72J9abjpQNVURVV7bNdSJGBeG9ZAsZCUhDkFsJc8FYXtTvqhDnaZBFjDVNFuDYOkFZBKFMHZAEhOIrrVaACnKqZCKLhrKnSPmCEZCOAZBER1zS85tKHZCRoyYlcdGBOSQXA4iGjRrpS4AZDZD",
+  phoneNumberId: "1325180137347203",
+  wabaId: "2915036495541013",
+  languageCode: "mr",
   googleAiStudioKey: "",
-  aiSystemPrompt: "You are Snehyoga's official Virtual Yoga Counselor. Assist students warmly with batch timings (6 AM, 11 AM, 4 PM IST), subscription plans, yoga therapy guidelines, and attendance links. Be courteous, uplifting, and concise.",
-  aiEnabled: false,
+  aiSystemPrompt: "You are the official Customer Support Executive at Snehyoga (https://snehyoga.com/), founded by Government-Certified Yoga Teacher and Lifestyle Coach Snehal Salunkhe. Warmly, politely, and professionally assist students on WhatsApp with batch timings (5 AM, 6 AM, 7:30 AM, 5 PM, 6 PM, 9 PM), plans, diet, and booking a free demo session. Always match the exact language and script of the user message. Keep replies under 75 words.",
+  aiEnabled: true,
   aiAllowedNumbers: "*"
 };
 
@@ -885,12 +885,31 @@ export async function askGeminiAutoResponder(
     }
   }
 
+  // Multi-keyword overlap matching
+  const qWords = queryLower.split(/\s+/).filter(w => w.length > 2);
+  let bestMatch: KnowledgeBaseItem | null = null;
+  let maxMatches = 0;
+  for (const kb of knowledgeBase) {
+    const kText = `${kb.category} ${kb.question} ${kb.answer}`.toLowerCase();
+    const count = qWords.filter(w => kText.includes(w)).length;
+    if (count > maxMatches && count >= 2) {
+      maxMatches = count;
+      bestMatch = kb;
+    }
+  }
+
   const apiKey = config.googleAiStudioKey || import.meta.env.VITE_GEMINI_API_KEY || "";
   if (!apiKey) {
-    // Return friendly local reply
+    if (bestMatch) {
+      return {
+        type: "reply",
+        text: bestMatch.answer,
+        source: "local_knowledge"
+      };
+    }
     return {
       type: "reply",
-      text: `Namaste 🙏 Thank you for reaching out to Snehyoga. Our live classes run Mon-Fri at 6:00 AM, 11:00 AM, and 4:00 PM. Please visit https://yoga.snehyoga.com/live or reply "Help" to speak to our yoga teacher.`,
+      text: `Namaste 🙏 Thank you for reaching out to Snehyoga! Our live classes run Mon-Fri across 6 batches: 5 AM, 6 AM, 7:30 AM, 5 PM, 6 PM, 9 PM IST. Please visit https://yoga.snehyoga.com/live or reply "Demo" to reserve your trial session.`,
       source: "fallback"
     };
   }
@@ -912,7 +931,7 @@ INSTRUCTIONS:
 3. If the user explicitly asks to register, pay, or start a trial, you may trigger flow "onboarding_flow" or reply with the live link.
 4. Keep replies friendly, respectful, and concise (under 80 words) for WhatsApp readability.`;
 
-  const models = ["gemini-1.5-flash", "gemini-2.5-flash-lite", "gemini-flash-latest"];
+  const models = ["gemini-3.5-flash-lite", "gemini-3.5-flash", "gemini-3.8-flash", "gemini-flash-lite-latest"];
   for (const model of models) {
     try {
       const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`, {

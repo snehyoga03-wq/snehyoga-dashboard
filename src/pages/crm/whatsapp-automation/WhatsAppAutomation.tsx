@@ -2,7 +2,8 @@ import React, { useState, useEffect, useRef } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   MessageSquare, FileCode, Zap, Radio, ShieldCheck, Sparkles,
-  BarChart3, RefreshCw, Send, CheckCircle2, AlertCircle, PlusCircle
+  BarChart3, RefreshCw, Send, CheckCircle2, AlertCircle, PlusCircle,
+  Clock, Bot, Database
 } from "lucide-react";
 import {
   WhatsAppConfig,
@@ -12,7 +13,9 @@ import {
   DEFAULT_CONFIG,
   loadWhatsAppConfig,
   fetchMetaTemplates,
-  executeBroadcast
+  executeBroadcast,
+  fetchKnowledgeBase,
+  KnowledgeBaseItem
 } from "@/services/whatsappAutomationService";
 import { CredentialsCard } from "./CredentialsCard";
 import { TemplateSettingsCard } from "./TemplateSettingsCard";
@@ -22,14 +25,17 @@ import { LiveBroadcastDashboard } from "./LiveBroadcastDashboard";
 import { CampaignsAnalytics } from "./CampaignsAnalytics";
 import { MetaTemplateCreator } from "./MetaTemplateCreator";
 import { WhatsAppTemplateManager } from "./WhatsAppTemplateManager";
+import { GeminiAiConfigCard } from "./GeminiAiConfigCard";
+import { KnowledgeBaseManager } from "./KnowledgeBaseManager";
+import { MessageQueueTab } from "./MessageQueueTab";
 
 interface WhatsAppAutomationProps {
   users?: any[];
 }
 
 export const WhatsAppAutomation: React.FC<WhatsAppAutomationProps> = ({ users = [] }) => {
-  // Primary Tab: "template_manager" = Enterprise WhatsApp Template Manager, "broadcast" = Core Config & Broadcast, "create_template" = Create Template in Meta
-  const [activeTab, setActiveTab] = useState<"template_manager" | "broadcast" | "create_template">("template_manager");
+  // Tabs: "broadcast" = Core Config & Automation, "ai_agent" = AI Agent Management, "message_queue" = Message Queue, "template_manager" = WhatsApp Template Manager, "create_template" = Quick Meta Creator
+  const [activeTab, setActiveTab] = useState<"broadcast" | "ai_agent" | "message_queue" | "template_manager" | "create_template">("broadcast");
 
   // Configuration State
   const [config, setConfig] = useState<WhatsAppConfig>(DEFAULT_CONFIG);
@@ -38,6 +44,7 @@ export const WhatsAppAutomation: React.FC<WhatsAppAutomationProps> = ({ users = 
   const [dynamicParams, setDynamicParams] = useState("name, batch_time, days_left");
   const [headerImageUrl, setHeaderImageUrl] = useState("");
   const [speedMode, setSpeedMode] = useState<"turbo" | "standard">("turbo");
+  const [knowledgeBase, setKnowledgeBase] = useState<KnowledgeBaseItem[]>([]);
 
   // Live Broadcast Execution State
   const [isBroadcasting, setIsBroadcasting] = useState(false);
@@ -60,6 +67,10 @@ export const WhatsAppAutomation: React.FC<WhatsAppAutomationProps> = ({ users = 
   const refreshAllData = async () => {
     const loadedConfig = await loadWhatsAppConfig();
     setConfig(loadedConfig);
+
+    // Fetch Knowledge Base
+    const kb = await fetchKnowledgeBase();
+    setKnowledgeBase(kb);
 
     // Fetch templates if credentials exist
     if (loadedConfig.apiToken && loadedConfig.wabaId) {
@@ -142,7 +153,7 @@ export const WhatsAppAutomation: React.FC<WhatsAppAutomationProps> = ({ users = 
               WhatsApp Config & Automation
             </h1>
             <p className="text-xs sm:text-sm text-slate-300 max-w-2xl leading-relaxed">
-              Meta Graph API integration, Turbo broadcast engine, AiSensy-style Meta Template Creator with live preview, and CRM audience analytics.
+              Meta Graph API integration, Turbo broadcast engine, Google Gemini AI WhatsApp Auto-Responder with RAG Knowledge Base, and live analytics.
             </p>
           </div>
 
@@ -154,43 +165,26 @@ export const WhatsAppAutomation: React.FC<WhatsAppAutomationProps> = ({ users = 
             </div>
 
             <div className="bg-white/10 backdrop-blur-md rounded-2xl px-4 py-3 border border-white/10 text-center">
+              <span className="text-[11px] text-slate-300 font-medium block">Knowledge Base</span>
+              <span className="inline-flex items-center gap-1 text-xs font-bold text-purple-300">
+                <Database className="w-3.5 h-3.5 text-purple-300" />
+                {knowledgeBase.length} Q&As
+              </span>
+            </div>
+
+            <div className="bg-white/10 backdrop-blur-md rounded-2xl px-4 py-3 border border-white/10 text-center">
               <span className="text-[11px] text-slate-300 font-medium block">Meta Templates</span>
               <span className="inline-flex items-center gap-1 text-xs font-bold text-emerald-400">
                 <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" />
                 {templates.length} Synced
               </span>
             </div>
-
-            <div className="bg-white/10 backdrop-blur-md rounded-2xl px-4 py-3 border border-white/10 text-center">
-              <span className="text-[11px] text-slate-300 font-medium block">Speed Mode</span>
-              <span className="text-xs font-bold text-amber-300">{speedMode === "turbo" ? "⚡ Turbo" : "🐢 1/sec"}</span>
-            </div>
           </div>
         </div>
 
         {/* Primary Tabs Navigation Bar */}
         <div className="mt-8 flex gap-2 border-b border-white/10 pb-0 overflow-x-auto">
-          <button
-            onClick={() => setActiveTab("template_manager")}
-            className={`flex items-center gap-2 px-5 py-3 rounded-t-2xl text-xs sm:text-sm font-bold transition-all whitespace-nowrap relative ${
-              activeTab === "template_manager"
-                ? "bg-white text-slate-900 shadow-lg"
-                : "text-slate-300 hover:text-white hover:bg-white/5"
-            }`}
-          >
-            <FileCode className="w-4 h-4 text-emerald-600" />
-            <span>TAB 1: WhatsApp Template Manager</span>
-            <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 ml-1">
-              Enterprise UI
-            </span>
-            {activeTab === "template_manager" && (
-              <motion.div
-                layoutId="activeTabIndicator"
-                className="absolute -bottom-px left-0 right-0 h-1 bg-emerald-600 rounded-t-full"
-              />
-            )}
-          </button>
-
+          {/* TAB 1: Core Config & Automation */}
           <button
             onClick={() => setActiveTab("broadcast")}
             className={`flex items-center gap-2 px-5 py-3 rounded-t-2xl text-xs sm:text-sm font-bold transition-all whitespace-nowrap relative ${
@@ -200,7 +194,7 @@ export const WhatsAppAutomation: React.FC<WhatsAppAutomationProps> = ({ users = 
             }`}
           >
             <MessageSquare className="w-4 h-4 text-indigo-600" />
-            <span>TAB 2: Core Config & Broadcast</span>
+            <span>Core Config & Automation</span>
             {activeTab === "broadcast" && (
               <motion.div
                 layoutId="activeTabIndicator"
@@ -209,6 +203,67 @@ export const WhatsAppAutomation: React.FC<WhatsAppAutomationProps> = ({ users = 
             )}
           </button>
 
+          {/* TAB 2: AI Agent Management (User Requested) */}
+          <button
+            onClick={() => setActiveTab("ai_agent")}
+            className={`flex items-center gap-2 px-5 py-3 rounded-t-2xl text-xs sm:text-sm font-bold transition-all whitespace-nowrap relative ${
+              activeTab === "ai_agent"
+                ? "bg-white text-slate-900 shadow-lg"
+                : "text-slate-300 hover:text-white hover:bg-white/5"
+            }`}
+          >
+            <Sparkles className="w-4 h-4 text-purple-600 animate-pulse" />
+            <span>AI Agent Management</span>
+            <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-purple-500/20 text-purple-300 border border-purple-500/30 ml-1">
+              Gemini RAG
+            </span>
+            {activeTab === "ai_agent" && (
+              <motion.div
+                layoutId="activeTabIndicator"
+                className="absolute -bottom-px left-0 right-0 h-1 bg-purple-600 rounded-t-full"
+              />
+            )}
+          </button>
+
+          {/* TAB 3: Message Queue */}
+          <button
+            onClick={() => setActiveTab("message_queue")}
+            className={`flex items-center gap-2 px-5 py-3 rounded-t-2xl text-xs sm:text-sm font-bold transition-all whitespace-nowrap relative ${
+              activeTab === "message_queue"
+                ? "bg-white text-slate-900 shadow-lg"
+                : "text-slate-300 hover:text-white hover:bg-white/5"
+            }`}
+          >
+            <Clock className="w-4 h-4 text-amber-500" />
+            <span>Message Queue</span>
+            {activeTab === "message_queue" && (
+              <motion.div
+                layoutId="activeTabIndicator"
+                className="absolute -bottom-px left-0 right-0 h-1 bg-amber-500 rounded-t-full"
+              />
+            )}
+          </button>
+
+          {/* TAB 4: WhatsApp Templates */}
+          <button
+            onClick={() => setActiveTab("template_manager")}
+            className={`flex items-center gap-2 px-5 py-3 rounded-t-2xl text-xs sm:text-sm font-bold transition-all whitespace-nowrap relative ${
+              activeTab === "template_manager"
+                ? "bg-white text-slate-900 shadow-lg"
+                : "text-slate-300 hover:text-white hover:bg-white/5"
+            }`}
+          >
+            <FileCode className="w-4 h-4 text-emerald-600" />
+            <span>WhatsApp Templates</span>
+            {activeTab === "template_manager" && (
+              <motion.div
+                layoutId="activeTabIndicator"
+                className="absolute -bottom-px left-0 right-0 h-1 bg-emerald-600 rounded-t-full"
+              />
+            )}
+          </button>
+
+          {/* TAB 5: Meta Creator */}
           <button
             onClick={() => setActiveTab("create_template")}
             className={`flex items-center gap-2 px-5 py-3 rounded-t-2xl text-xs sm:text-sm font-bold transition-all whitespace-nowrap relative ${
@@ -217,12 +272,12 @@ export const WhatsAppAutomation: React.FC<WhatsAppAutomationProps> = ({ users = 
                 : "text-slate-300 hover:text-white hover:bg-white/5"
             }`}
           >
-            <PlusCircle className="w-4 h-4 text-purple-600" />
-            <span>TAB 3: Quick Meta Direct Creator</span>
+            <PlusCircle className="w-4 h-4 text-pink-600" />
+            <span>Quick Meta Creator</span>
             {activeTab === "create_template" && (
               <motion.div
                 layoutId="activeTabIndicator"
-                className="absolute -bottom-px left-0 right-0 h-1 bg-purple-600 rounded-t-full"
+                className="absolute -bottom-px left-0 right-0 h-1 bg-pink-600 rounded-t-full"
               />
             )}
           </button>
@@ -231,20 +286,7 @@ export const WhatsAppAutomation: React.FC<WhatsAppAutomationProps> = ({ users = 
 
       {/* Main Tab Content */}
       <AnimatePresence mode="wait">
-        {activeTab === "template_manager" ? (
-          <motion.div
-            key="tab-template-manager"
-            initial={{ opacity: 0, y: 10 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: -10 }}
-            className="space-y-6"
-          >
-            <WhatsAppTemplateManager
-              config={config}
-              onCreateNewTemplate={() => setActiveTab("create_template")}
-            />
-          </motion.div>
-        ) : activeTab === "broadcast" ? (
+        {activeTab === "broadcast" ? (
           <motion.div
             key="tab-broadcast"
             initial={{ opacity: 0, y: 10 }}
@@ -290,6 +332,51 @@ export const WhatsAppAutomation: React.FC<WhatsAppAutomationProps> = ({ users = 
 
             {/* 5. Campaigns & Analytics */}
             <CampaignsAnalytics />
+          </motion.div>
+        ) : activeTab === "ai_agent" ? (
+          <motion.div
+            key="tab-ai-agent"
+            initial={{ opacity: 0, y: 10 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -10 }}
+            className="space-y-6"
+          >
+            {/* 1. Google Gemini AI Assistant Card */}
+            <GeminiAiConfigCard
+              config={config}
+              knowledgeBase={knowledgeBase}
+              onChange={setConfig}
+            />
+
+            {/* 2. Training Knowledge Base (RAG) Manager */}
+            <KnowledgeBaseManager
+              knowledgeBase={knowledgeBase}
+              onRefresh={refreshAllData}
+            />
+          </motion.div>
+        ) : activeTab === "message_queue" ? (
+          <motion.div
+            key="tab-message-queue"
+            initial={{ opacity: 0, y: 10 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -10 }}
+            className="space-y-6"
+          >
+            {/* Message Queue Monitor */}
+            <MessageQueueTab />
+          </motion.div>
+        ) : activeTab === "template_manager" ? (
+          <motion.div
+            key="tab-template-manager"
+            initial={{ opacity: 0, y: 10 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -10 }}
+            className="space-y-6"
+          >
+            <WhatsAppTemplateManager
+              config={config}
+              onCreateNewTemplate={() => setActiveTab("create_template")}
+            />
           </motion.div>
         ) : (
           <motion.div
