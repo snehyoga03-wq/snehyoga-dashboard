@@ -1,19 +1,3 @@
-// Supabase Edge Function: session-redirect
-// ==========================================
-// Server-side personal link handler — NO React app download needed!
-//
-// When a user clicks their personal link (e.g., yoga.snehyoga.com/join/abc123),
-// this function runs entirely on the server:
-//   1. Looks up the user by slug (referral_link)
-//   2. Validates subscription (active, not paused, days > 0)
-//   3. Gets today's session link from session_settings
-//   4. Marks attendance (fire-and-forget)
-//   5. Returns an instant HTTP 302 redirect to the session URL
-//
-// Total time: ~200-400ms (server-side DB queries only, no JS download)
-//
-// Deploy:  supabase functions deploy session-redirect
-
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 
 const corsHeaders = {
@@ -73,8 +57,32 @@ Deno.serve(async (req) => {
         const supabaseServiceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
         const supabase = createClient(supabaseUrl, supabaseServiceKey);
 
-        // Run BOTH queries in parallel for speed
-        const [userResult, settingsResult] = await Promise.all([
+        // Calculate IST day and active batch slot
+        const days = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'];
+        const now = new Date();
+        const istOffset = 5.5 * 60 * 60 * 1000;
+        const istDate = new Date(now.getTime() + istOffset);
+        const todayStr = days[istDate.getUTCDay()];
+        const curMin = istDate.getUTCHours() * 60 + istDate.getUTCMinutes();
+
+        const slotDefs = [
+            { slot: '5am', from: 5 * 60 - 20 },
+            { slot: '6am', from: 6 * 60 - 20 },
+            { slot: '8am', from: 8 * 60 - 20 },
+            { slot: '5pm', from: 17 * 60 - 20 },
+            { slot: '6pm', from: 18 * 60 - 20 },
+            { slot: '7pm', from: 19 * 60 - 20 },
+        ];
+        let activeSlot = '7pm';
+        for (let i = slotDefs.length - 1; i >= 0; i--) {
+            if (curMin >= slotDefs[i].from) {
+                activeSlot = slotDefs[i].slot;
+                break;
+            }
+        }
+
+        // Run user, settings, and batch links queries in parallel for ultra-fast redirection
+        const [userResult, settingsResult, batchLinksResult] = await Promise.all([
             supabase
                 .from("main_data_registration")
                 .select("mobile_number, name, days_left, subscription_plan, subscription_paused")
@@ -85,6 +93,10 @@ Deno.serve(async (req) => {
                 .from("session_settings")
                 .select("session_link, premium_session_link")
                 .single(),
+            supabase
+                .from("session_batch_links")
+                .select("week, batch_slot, link")
+                .eq("day", todayStr),
         ]);
 
         console.log(`[session-redirect] DB queries took ${Date.now() - t0}ms`);
@@ -114,36 +126,58 @@ Deno.serve(async (req) => {
 
         // ─── Determine Session Link ─────────────────────────────────────
         const settings = settingsResult.data;
-        if (!settings) {
-            return new Response(errorPage("No Session", "Could not find session settings.", dashboardUrl), {
-                status: 500,
-                headers: { ...corsHeaders, "Content-Type": "text/html; charset=utf-8" },
-            });
+        let activeWeek = 1;
+        try {
+            if (settings?.session_link && settings.session_link.startsWith('{')) {
+                const parsed = JSON.parse(settings.session_link);
+                activeWeek = parsed.active_week || 1;
+            }
+        } catch (_) {}
+
+        let targetLink = "";
+
+        // 1. First priority: Check session_batch_links for today + active week + active slot
+        const batchRows = batchLinksResult.data || [];
+        const weekRows = batchRows.filter((r: any) => r.week === activeWeek);
+        const slotRow = weekRows.find((r: any) => r.batch_slot === activeSlot);
+        if (slotRow?.link?.trim()) {
+            targetLink = slotRow.link.trim();
+        } else {
+            // Fallback: any non-empty slot link for today in the active week
+            const anySlot = weekRows.find((r: any) => r.link?.trim());
+            if (anySlot?.link?.trim()) {
+                targetLink = anySlot.link.trim();
+            }
         }
 
-        let targetLink = settings.session_link;
-        try {
-            if (targetLink && targetLink.startsWith('{')) {
-                const parsed = JSON.parse(targetLink);
-                const days = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'];
-                // Use IST timezone (UTC+5:30)
-                const now = new Date();
-                const istOffset = 5.5 * 60 * 60 * 1000;
-                const istDate = new Date(now.getTime() + istOffset);
-                const todayStr = days[istDate.getUTCDay()];
-                const activeWeek = parsed.active_week || 1;
-                const key = `w${activeWeek}_${todayStr}`;
-                targetLink = parsed[key];
-            } else {
-                // Legacy fallback for premium users
-                if (user.subscription_plan === 'personalized' || user.subscription_plan === 'premium') {
-                    if (settings.premium_session_link) {
-                        targetLink = settings.premium_session_link;
-                    }
+        // 2. Second priority: Fallback to session_settings.session_link
+        if (!targetLink && settings?.session_link) {
+            try {
+                if (settings.session_link.startsWith('{')) {
+                    const parsed = JSON.parse(settings.session_link);
+                    const key = `w${activeWeek}_${todayStr}`;
+                    targetLink = parsed[key];
+                } else {
+                    targetLink = settings.session_link;
                 }
+            } catch (e) {
+                console.error("Failed to parse session link:", e);
             }
-        } catch (e) {
-            console.error("Failed to parse session link:", e);
+        }
+
+        // 3. Fallback for premium users if configured
+        if (!targetLink && (user.subscription_plan === 'personalized' || user.subscription_plan === 'premium')) {
+            if (settings?.premium_session_link) {
+                targetLink = settings.premium_session_link;
+            }
+        }
+
+        // Normalize URL (ensure https://)
+        if (targetLink) {
+            targetLink = targetLink.trim();
+            if (!/^https?:\/\//i.test(targetLink)) {
+                targetLink = `https://${targetLink}`;
+            }
         }
 
         if (!targetLink) {
@@ -160,9 +194,6 @@ Deno.serve(async (req) => {
         );
 
         // ─── Redirect! ─────────────────────────────────────────────────
-        // Simple HTTP 302 redirect — works everywhere including WhatsApp in-app browser.
-        // YouTube/Zoom/Meet URLs automatically open their respective apps via
-        // Android App Links / iOS Universal Links when the app is installed.
         console.log(`[session-redirect] Redirecting ${user.name} -> ${targetLink} (${Date.now() - t0}ms total)`);
 
         return new Response(null, {

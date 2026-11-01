@@ -468,6 +468,14 @@ const CRM = () => {
     }
   }, [currentSection, isAuthenticated]);
 
+  // Fetch batch links when entering session-links section
+  useEffect(() => {
+    if (currentSection === 'session-links' && isAuthenticated) {
+      fetchBatchLinks();
+      fetchSessionLink();
+    }
+  }, [currentSection, isAuthenticated]);
+
 
 
   const handleLogin = (e: React.FormEvent) => {
@@ -486,6 +494,7 @@ const CRM = () => {
       fetchFollowupReports();
       fetchChatConversations();
       fetchSessionLink();
+      fetchBatchLinks();
       toast({ title: "Login Successful", description: "Welcome to CRM Dashboard" });
       return;
     }
@@ -514,6 +523,7 @@ const CRM = () => {
       fetchFollowupReports();
       fetchChatConversations();
       fetchSessionLink();
+      fetchBatchLinks();
       toast({ title: "Login Successful", description: `Welcome ${canonicalStaffName}` });
     } else {
       toast({ title: "Invalid Credentials", description: "Please check your username and password", variant: "destructive" });
@@ -871,7 +881,8 @@ const CRM = () => {
       // Build nested map: { 1: { mon: { '5am': '...', ... }, ... }, 2: { ... } }
       const map: BatchLinksMap = { 1: {}, 2: {} };
       for (const row of (data || [])) {
-        const w = row.week as 1 | 2;
+        const w = (row.week === 2 ? 2 : 1) as 1 | 2;
+        if (!map[w]) map[w] = {};
         if (!map[w][row.day]) map[w][row.day] = {};
         map[w][row.day][row.batch_slot] = row.link || '';
       }
@@ -880,30 +891,112 @@ const CRM = () => {
     } catch (e) { console.error('fetchBatchLinks error:', e); }
   };
 
+  const setActiveWeekForSessions = async (targetWeek: 1 | 2) => {
+    try {
+      const { data: settingsData } = await supabase.from('session_settings').select('id, session_link').maybeSingle();
+      if (!settingsData) return;
+      let parsed: any = {};
+      try {
+        if (settingsData.session_link && settingsData.session_link.startsWith('{')) {
+          parsed = JSON.parse(settingsData.session_link);
+        }
+      } catch (_) {}
+      parsed.active_week = targetWeek;
+      const { error } = await supabase.from('session_settings').update({
+        session_link: JSON.stringify(parsed),
+        updated_at: new Date().toISOString(),
+        updated_by: username || 'admin'
+      }).eq('id', settingsData.id);
+      if (error) throw error;
+      setActiveWeek(targetWeek);
+      setNewActiveWeek(targetWeek);
+      toast({ title: "Active Week Updated! 🎯", description: `Week ${targetWeek} is now active for all student session redirects.` });
+    } catch (e: any) {
+      toast({ title: "Error", description: e.message || "Failed to set active week", variant: "destructive" });
+    }
+  };
+
+  // Helper to ensure valid absolute URL
+  const formatSessionUrl = (raw: string) => {
+    const trimmed = (raw || '').trim();
+    if (!trimmed) return '';
+    return /^https?:\/\//i.test(trimmed) ? trimmed : `https://${trimmed}`;
+  };
+
   // Save batch links for the currently selected week+day
   const saveBatchLinks = async () => {
     setIsSavingBatch(true);
     try {
-      const daySlots = editBatchLinks[batchEditWeek]?.[batchEditDay] || {};
+      const existingDaySlots = batchLinks[batchEditWeek]?.[batchEditDay] || {};
+      const editedDaySlots = editBatchLinks[batchEditWeek]?.[batchEditDay] || {};
+
+      // Merge: keep edited slot if provided, otherwise preserve existing slot in DB
+      const mergedDaySlots: Record<string, string> = {};
+      for (const slot of BATCH_SLOTS) {
+        const val = editedDaySlots[slot] !== undefined ? editedDaySlots[slot] : (existingDaySlots[slot] || '');
+        mergedDaySlots[slot] = formatSessionUrl(val);
+      }
+
       const upserts = BATCH_SLOTS.map(slot => ({
         week: batchEditWeek,
         day: batchEditDay,
         batch_slot: slot,
-        link: daySlots[slot] || '',
+        link: mergedDaySlots[slot] || '',
         updated_at: new Date().toISOString(),
       }));
+
       const { error } = await supabase
         .from('session_batch_links')
         .upsert(upserts, { onConflict: 'week,day,batch_slot' });
       if (error) throw error;
-      // Update local state
+
+      // Update local states
       setBatchLinks(prev => {
         const next = JSON.parse(JSON.stringify(prev));
+        if (!next[batchEditWeek]) next[batchEditWeek] = {};
         if (!next[batchEditWeek][batchEditDay]) next[batchEditWeek][batchEditDay] = {};
-        BATCH_SLOTS.forEach(slot => { next[batchEditWeek][batchEditDay][slot] = daySlots[slot] || ''; });
+        BATCH_SLOTS.forEach(slot => { next[batchEditWeek][batchEditDay][slot] = mergedDaySlots[slot] || ''; });
         return next;
       });
-      toast({ title: "Batch Links Saved! ✅", description: `Week ${batchEditWeek} — ${DAY_LABELS[batchEditDay]} links updated.` });
+      setEditBatchLinks(prev => {
+        const next = JSON.parse(JSON.stringify(prev));
+        if (!next[batchEditWeek]) next[batchEditWeek] = {};
+        if (!next[batchEditWeek][batchEditDay]) next[batchEditWeek][batchEditDay] = {};
+        BATCH_SLOTS.forEach(slot => { next[batchEditWeek][batchEditDay][slot] = mergedDaySlots[slot] || ''; });
+        return next;
+      });
+
+      // SYNC to session_settings.session_link so Edge Functions & WhatsApp bots immediately get the new link!
+      try {
+        const { data: settingsData } = await supabase.from('session_settings').select('id, session_link').maybeSingle();
+        if (settingsData) {
+          let parsed: any = {};
+          try {
+            if (settingsData.session_link && settingsData.session_link.startsWith('{')) {
+              parsed = JSON.parse(settingsData.session_link);
+            }
+          } catch (_) {}
+
+          const activeSlot = getActiveBatchSlot();
+          const activeLink = mergedDaySlots[activeSlot] || BATCH_SLOTS.map(s => mergedDaySlots[s]).find(l => !!l?.trim()) || '';
+          
+          parsed.active_week = activeWeek || batchEditWeek;
+          const key = `w${batchEditWeek}_${batchEditDay}`;
+          if (activeLink) {
+            parsed[key] = activeLink;
+          }
+
+          await supabase.from('session_settings').update({
+            session_link: JSON.stringify(parsed),
+            updated_at: new Date().toISOString(),
+            updated_by: username || 'admin'
+          }).eq('id', settingsData.id);
+        }
+      } catch (syncErr) {
+        console.warn('Could not sync session_settings fallback:', syncErr);
+      }
+
+      toast({ title: "Batch Links Saved! ✅", description: `Week ${batchEditWeek} — ${DAY_LABELS[batchEditDay]} links updated & synced live.` });
     } catch (e: any) {
       toast({ title: "Error", description: e.message || "Failed to save", variant: "destructive" });
     } finally { setIsSavingBatch(false); }
@@ -1693,6 +1786,22 @@ const CRM = () => {
                           ))}
                         </div>
                       </div>
+                      <div className="flex items-center gap-2">
+                        <span className="text-xs text-gray-500 font-medium">Active for students:</span>
+                        <span className="text-xs font-bold px-2 py-0.5 rounded-full bg-blue-100 text-blue-800">
+                          Week {activeWeek}
+                        </span>
+                        {batchEditWeek !== activeWeek && (
+                          <button
+                            type="button"
+                            onClick={() => setActiveWeekForSessions(batchEditWeek)}
+                            className="text-xs px-2.5 py-1 rounded bg-amber-500 hover:bg-amber-600 text-white font-medium transition-colors shadow-sm"
+                            title={`Make Week ${batchEditWeek} active for all students`}
+                          >
+                            Set Week {batchEditWeek} as Active
+                          </button>
+                        )}
+                      </div>
                       <div className="flex items-center gap-2 ml-auto text-xs bg-green-50 border border-green-200 rounded-full px-3 py-1.5">
                         <span className="w-2 h-2 rounded-full bg-green-500 animate-pulse" />
                         <span className="text-green-700 font-medium">Active Now: {BATCH_SLOT_LABELS[getActiveBatchSlot()]}</span>
@@ -1740,8 +1849,44 @@ const CRM = () => {
                                     {isActive && <div className="text-[10px] font-semibold text-green-600 mt-0.5 flex items-center gap-1"><span className="w-1.5 h-1.5 rounded-full bg-green-500 inline-block animate-pulse" /> LIVE</div>}
                                     {isNext && <div className="text-[10px] font-semibold text-blue-500 mt-0.5">NEXT</div>}
                                   </div>
-                                  <Input placeholder={`Paste ${BATCH_SLOT_LABELS[slot]} session link...`} value={val} onChange={e => { setEditBatchLinks(prev => { const next = JSON.parse(JSON.stringify(prev)); if (!next[batchEditWeek]) next[batchEditWeek] = {}; if (!next[batchEditWeek][batchEditDay]) next[batchEditWeek][batchEditDay] = {}; next[batchEditWeek][batchEditDay][slot] = e.target.value; return next; }); }} className={`flex-1 text-sm ${isActive ? 'border-green-300 focus-visible:ring-green-400' : isNext ? 'border-blue-200' : 'border-gray-200'}`} />
-                                  {val && <a href={val} target="_blank" rel="noopener noreferrer" className="text-blue-500 hover:text-blue-700 text-xs whitespace-nowrap flex items-center gap-1"><Eye className="w-3.5 h-3.5" /> Test</a>}
+                                  <Input
+                                    placeholder={`Paste ${BATCH_SLOT_LABELS[slot]} session link...`}
+                                    value={val}
+                                    onChange={e => {
+                                      const nextVal = e.target.value;
+                                      setEditBatchLinks(prev => {
+                                        const next = JSON.parse(JSON.stringify(prev));
+                                        if (!next[batchEditWeek]) next[batchEditWeek] = {};
+                                        if (!next[batchEditWeek][batchEditDay]) next[batchEditWeek][batchEditDay] = {};
+                                        next[batchEditWeek][batchEditDay][slot] = nextVal;
+                                        return next;
+                                      });
+                                    }}
+                                    onBlur={e => {
+                                      const raw = e.target.value.trim();
+                                      if (raw && !/^https?:\/\//i.test(raw)) {
+                                        const formatted = `https://${raw}`;
+                                        setEditBatchLinks(prev => {
+                                          const next = JSON.parse(JSON.stringify(prev));
+                                          if (!next[batchEditWeek]) next[batchEditWeek] = {};
+                                          if (!next[batchEditWeek][batchEditDay]) next[batchEditWeek][batchEditDay] = {};
+                                          next[batchEditWeek][batchEditDay][slot] = formatted;
+                                          return next;
+                                        });
+                                      }
+                                    }}
+                                    className={`flex-1 text-sm ${isActive ? 'border-green-300 focus-visible:ring-green-400' : isNext ? 'border-blue-200' : 'border-gray-200'}`}
+                                  />
+                                  {val && (
+                                    <a
+                                      href={formatSessionUrl(val)}
+                                      target="_blank"
+                                      rel="noopener noreferrer"
+                                      className="text-blue-500 hover:text-blue-700 text-xs whitespace-nowrap flex items-center gap-1 font-medium"
+                                    >
+                                      <Eye className="w-3.5 h-3.5" /> Test
+                                    </a>
+                                  )}
                                 </div>
                               );
                             })}
