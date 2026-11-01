@@ -427,9 +427,38 @@ Deno.serve(async (req) => {
 
                 const kbItems: Array<{ category: string; question: string; answer: string }> = kbData || [];
 
+                // 2. Fetch Recent Conversation History for this user from chat_messages
+                // Note: The incoming message was already inserted into chat_messages earlier in the function.
+                const { data: rawHistory } = await supabase
+                  .from("chat_messages")
+                  .select("sender_type, message, created_at")
+                  .eq("user_phone", fromPhone)
+                  .order("created_at", { ascending: false })
+                  .limit(12);
+
+                let historyContext = "";
+                let hasPriorHistory = false;
+                if (rawHistory && rawHistory.length > 0) {
+                  // rawHistory[0] is the current incoming message just saved.
+                  // All subsequent messages (index 1+) are prior messages in the conversation thread.
+                  const priorMessages = rawHistory
+                    .slice(1)
+                    .filter(m => m.message && !m.message.startsWith("[Daily Reminder:"))
+                    .reverse(); // Chronological order: oldest to newest
+
+                  if (priorMessages.length > 0) {
+                    hasPriorHistory = true;
+                    historyContext = priorMessages.map(m => {
+                      const senderLabel = m.sender_type === "user" ? `Student (${userName})` : "Snehyoga Support";
+                      const cleanMsg = m.message.replace(/^\[Button Clicked:\s*(.*?)\]$/, 'Clicked button: "$1"');
+                      return `${senderLabel}: ${cleanMsg}`;
+                    }).join("\n");
+                  }
+                }
+
                 let aiReply = "";
 
-                // 2. Fast-path local exact match if API key isn't provided
+                // 3. Fast-path local exact match if API key isn't provided
                 if (!aiApiKey) {
                   const qLower = cleanInput.toLowerCase();
                   for (const kb of kbItems) {
@@ -443,32 +472,64 @@ Deno.serve(async (req) => {
                     aiReply = `Namaste ${userName !== 'User' ? userName : ''} 🙏\n\nThank you for messaging Snehyoga! Our live classes run Mon-Fri across 6 batches: 5 AM, 6 AM, 7:30 AM, 5 PM, 6 PM, 9 PM IST.\n\nPersonal Joining Link: ${userSessionLink}\n\nHow may we assist you with our yoga & wellness programs?`;
                   }
                 } else {
-                  // Call Google Gemini API
+                  // Call Google Gemini API with Conversational Memory & Language Continuity
                   const kbContext = kbItems
                     .map((k, i) => `${i + 1}. [${k.category}]\nQ: ${k.question}\nA: ${k.answer}`)
                     .join("\n\n");
 
-                  const promptTemplate = aiSettings?.ai_system_prompt || `You are the official Customer Support Executive at Snehyoga (https://snehyoga.com/), founded by Government-Certified Yoga Teacher and Lifestyle Coach Snehal Salunkhe. Warmly, politely, and professionally assist students on WhatsApp with batch timings (5 AM, 6 AM, 7:30 AM, 5 PM, 6 PM, 9 PM), plans, diet, and booking a free demo session.`;
-
-                  const systemInstruction = `${promptTemplate}
+                  const systemInstruction = `You are the official Customer Support Executive at Snehyoga (https://snehyoga.com/), founded by Government-Certified Yoga Teacher and Lifestyle Coach Snehal Salunkhe. Warmly, politely, and professionally assist students on WhatsApp with batch timings (5 AM, 6 AM, 7:30 AM, 5 PM, 6 PM, 9 PM IST, Mon-Fri), plans (1 Month: ₹399/-, 6 Months: ₹1,800/-, 1 Year: ₹2,400/- with Free Diet Plan), free demo sessions, and diet guidance.
 
 Snehyoga Verified Knowledge Base:
 ---
 ${kbContext}
 ---
 
+Student Information:
+- Student Name: ${userName}
+- Student Phone: ${fromPhone}
+- Personal Student Portal Link: ${userSessionLink}
+
 MANDATORY INSTRUCTIONS FOR WHATSAPP CUSTOMER SUPPORT:
-1. ROLE: You are Snehyoga's helpful and courteous Customer Support Executive.
-2. STRICT LANGUAGE MATCHING: You MUST reply in the EXACT SAME LANGUAGE and script as the user:
-   - If user speaks Marathi (उदा. 'नमस्कार', 'क्लास कधी सुरू होतो?'), reply in polite Marathi.
-   - If user speaks Hindi (उदा. 'नमस्ते', 'टाइमिंग क्या है?'), reply in Hindi.
-   - If user speaks Hinglish (e.g. 'timing kya hai?', 'fees kitna hai?'), reply in clean Hinglish.
-   - If user speaks English, reply in English.
-3. If the user asks for batch timings, plans, trial/demo, diet, or joining link, answer accurately using the Knowledge Base above.
-4. User personal session link: ${userSessionLink}
-5. Student Name: ${userName}
-6. Keep your response concise, polite, uplifting, and helpful (strictly under 75 words for WhatsApp readability).
-7. Always start with 'Namaste 🙏' or 'नमस्कार 🙏' and end with an offering to help or book a free trial demo slot.`;
+1. MULTI-TURN CONVERSATION MEMORY & NATURAL CONTINUATION:
+   - Carefully read the RECENT CONVERSATION HISTORY below to understand the dialogue so far.
+   ${hasPriorHistory ? `- THIS IS AN ONGOING CONVERSATION THREAD.
+   - DO NOT RE-GREET (do NOT repeat "Namaste", "नमस्कार", "Snehyoga mein aapka swagat hai", etc.) because you have already greeted the student previously!
+   - Directly answer the student's question or follow-up like a natural, helpful human assistant continuing a conversation.
+   - Treat short answers or fragments (e.g. "1 year", "morning", "saturday nasto ka?", "demo", "ok", "fees") as answers or follow-ups to the preceding discussion topic.` : `- THIS IS THE FIRST MESSAGE of a new conversation.
+   - Greet warmly once: "Namaste ${userName !== 'User' ? userName : ''} 🙏" or "नमस्कार 🙏".`}
+
+2. STRICT LANGUAGE CONTINUITY & SCRIPT MATCHING:
+   - Detect the student's language by looking at their messages across the ENTIRE conversation history and current message:
+     * MARATHI (मराठी):
+       - If the student communicates in Marathi in Devanagari script (उदा. 'नमस्कार', 'क्लास कधी सुरू होतो?', 'फीस किती आहे?'): Reply in polite Marathi (Devanagari script).
+       - If the student communicates in Marathi using Latin/English alphabets (e.g. 'Saturday nasto ka?', 'kas karayach', 'kay timing ahe', 'kiti fees ahe', 'mala join karaycha ahe', 'shiku shakto ka'): Reply in friendly Latin Marathi (e.g. 'Nahi, Saturday ani Sunday class nastat (holiday aste). Classes fakta Monday te Friday astat...').
+       - CRITICAL RULE FOR MARATHI: When the student gives short answers (e.g. '1 year', 'ok', 'morning', 'demo', 'fees', 'yes', 'ho'), NEVER SWITCH TO HINDI OR ENGLISH! RETAIN MARATHI.
+     * HINDI / HINGLISH:
+       - If the student communicates in Hindi or Hinglish (e.g. 'kya timing hai', 'kab shuru hota hai', 'kaise join kare', 'fees kitni hai', 'theek hai'): Reply in Hindi or Hinglish. Retain Hindi on short follow-ups.
+     * ENGLISH:
+       - If the student communicates in English: Reply in polite, clear English.
+   - NEVER SWITCH LANGUAGES mid-conversation unless the student explicitly asks to switch.
+
+3. ACCURACY & POLICIES:
+   - Batch Timings: Mon-Fri across 6 batches: Morning 5:00 AM, 6:00 AM, 7:30 AM & Evening 5:00 PM, 6:00 PM, 9:00 PM IST (55 mins each). Saturday & Sunday are holidays. Students can flexibly switch batches any day.
+   - Plans & Fees: 1 Month: ₹399/-, 6 Months: ₹1,800/-, 1 Year Best Value: ₹2,400/- (includes 1-Year Free Home Diet Plan).
+   - Free Demo Session: Free live demo session available for any batch slot.
+   - Portal Link: ${userSessionLink}
+
+4. BREVITY & WHATSAPP FORMAT:
+   - Keep answers clear, polite, warm, and concise (strictly under 65 words for WhatsApp readability).
+   - Use clean line breaks and relevant emojis (🙏, 🧘, 🌿, ✨).`;
+
+                  const userContentText = `${systemInstruction}
+
+=== RECENT CONVERSATION HISTORY ===
+${historyContext || "(No previous messages. Start of conversation.)"}
+===================================
+
+CURRENT INCOMING MESSAGE:
+Student (${userName}): "${userMsgText}"
+
+Reply directly to the student as Snehyoga Support:`;
 
                   const models = ["gemini-3.5-flash-lite", "gemini-3.5-flash", "gemini-3.8-flash", "gemini-flash-lite-latest"];
                   for (const model of models) {
@@ -481,7 +542,7 @@ MANDATORY INSTRUCTIONS FOR WHATSAPP CUSTOMER SUPPORT:
                             {
                               role: "user",
                               parts: [
-                                { text: `${systemInstruction}\n\nIncoming WhatsApp message from student "${userName}" (${fromPhone}):\n"${userMsgText}"` }
+                                { text: userContentText }
                               ]
                             }
                           ]

@@ -854,7 +854,8 @@ export async function askGeminiAutoResponder(
   userQuery: string,
   config: WhatsAppConfig,
   knowledgeBase: KnowledgeBaseItem[],
-  senderPhone?: string
+  senderPhone?: string,
+  chatHistory?: Array<{ sender: string; text: string }>
 ): Promise<GeminiRouterResponse> {
   const query = userQuery.trim();
 
@@ -873,19 +874,22 @@ export async function askGeminiAutoResponder(
     }
   }
 
-  // Local knowledge base exact match instant fast-path
-  const queryLower = query.toLowerCase();
-  for (const kb of knowledgeBase) {
-    if (queryLower.includes(kb.question.toLowerCase()) || kb.question.toLowerCase().includes(queryLower)) {
-      return {
-        type: "reply",
-        text: kb.answer,
-        source: "local_knowledge"
-      };
+  // Local knowledge base exact match instant fast-path (only if standalone query)
+  if (!chatHistory || chatHistory.length <= 1) {
+    const queryLower = query.toLowerCase();
+    for (const kb of knowledgeBase) {
+      if (queryLower.includes(kb.question.toLowerCase()) || kb.question.toLowerCase().includes(queryLower)) {
+        return {
+          type: "reply",
+          text: kb.answer,
+          source: "local_knowledge"
+        };
+      }
     }
   }
 
   // Multi-keyword overlap matching
+  const queryLower = query.toLowerCase();
   const qWords = queryLower.split(/\s+/).filter(w => w.length > 2);
   let bestMatch: KnowledgeBaseItem | null = null;
   let maxMatches = 0;
@@ -909,7 +913,7 @@ export async function askGeminiAutoResponder(
     }
     return {
       type: "reply",
-      text: `Namaste 🙏 Thank you for reaching out to Snehyoga! Our live classes run Mon-Fri across 6 batches: 5 AM, 6 AM, 7:30 AM, 5 PM, 6 PM, 9 PM IST. Please visit https://yoga.snehyoga.com/live or reply "Demo" to reserve your trial session.`,
+      text: `Namaste 🙏 Thank you for reaching out to Snehyoga! Our live classes run Mon-Fri across 6 batches: 5 AM, 6 AM, 7:30 AM, 5 PM, 6 PM, 9 PM IST. Please visit https://yoga.snehyoga.com or reply "Demo" to reserve your trial session.`,
       source: "fallback"
     };
   }
@@ -917,19 +921,47 @@ export async function askGeminiAutoResponder(
   // Build injected Knowledge Base string
   const kbContext = knowledgeBase.map((k, i) => `${i + 1}. [${k.category}] Q: ${k.question}\nA: ${k.answer}`).join("\n\n");
 
-  const systemInstruction = `${config.aiSystemPrompt || "You are the Snehyoga AI Counselor."}
+  const hasPriorHistory = chatHistory && chatHistory.length > 1;
+  const historyText = (chatHistory || [])
+    .filter(m => m.text && !m.text.startsWith("[Daily Reminder:"))
+    .map(m => `${m.sender}: ${m.text.replace(/^\[Button Clicked:\s*(.*?)\]$/, 'Clicked: "$1"')}`)
+    .join("\n");
 
-You have access to the verified Snehyoga Knowledge Base below:
+  const systemInstruction = `You are the official Customer Support Executive at Snehyoga (https://snehyoga.com/), founded by Government-Certified Yoga Teacher Snehal Salunkhe. Warmly, politely, and professionally assist students on WhatsApp with batch timings (5 AM, 6 AM, 7:30 AM, 5 PM, 6 PM, 9 PM IST, Mon-Fri), plans (1 Month: ₹399/-, 6 Months: ₹1,800/-, 1 Year: ₹2,400/- with Free Diet Plan), free demo sessions, and diet guidance.
+
+Verified Snehyoga Knowledge Base:
 ---
 ${kbContext}
 ---
 
-INSTRUCTIONS:
-1. Always reply in JSON format strictly matching this schema:
-   {"type": "trigger_flow", "flowId": "<flow_id>"} OR {"type": "reply", "text": "<your answer>"}
-2. If the user asks about live classes, scheduling, pricing, diet, or demo session, answer accurately using the Knowledge Base.
-3. If the user explicitly asks to register, pay, or start a trial, you may trigger flow "onboarding_flow" or reply with the live link.
-4. Keep replies friendly, respectful, and concise (under 80 words) for WhatsApp readability.`;
+MANDATORY RULES:
+1. MULTI-TURN MEMORY:
+   ${hasPriorHistory ? `- THIS IS AN ONGOING CONVERSATION THREAD.
+   - DO NOT RE-GREET (do not repeat "Namaste", "नमस्कार", "Welcome to Snehyoga", etc.).
+   - Directly answer the student's question/follow-up in natural continuation.
+   - Connect short answers or numbers (e.g. "1 year", "morning", "saturday nasto ka?", "demo", "ok") to the preceding conversation topic.` : `- THIS IS THE FIRST MESSAGE of a new conversation.
+   - Begin with a warm greeting: "Namaste 🙏" or "नमस्कार 🙏".`}
+2. STRICT LANGUAGE CONTINUITY & SCRIPT MATCHING:
+   - Check the student's language across the RECENT CONVERSATION HISTORY and latest message:
+     * MARATHI: If the student speaks Marathi (in Devanagari or in Latin/Roman English alphabet like 'Saturday nasto ka?', 'kas karayach', 'kiti ahe', 'mala join karaycha ahe'), reply in MARATHI!
+       - If typed in Latin script, reply in clear Latin Marathi. If typed in Devanagari, reply in Devanagari.
+       - NEVER SWITCH TO HINDI OR ENGLISH on short answers like '1 year', 'ok', 'demo', 'morning'! RETAIN MARATHI.
+     * HINDI / HINGLISH: If the student speaks Hindi or Hinglish, reply in Hindi/Hinglish. Retain Hindi on short follow-ups.
+     * ENGLISH: If the student speaks English, reply in English.
+   - NEVER switch languages mid-conversation unless requested.
+3. OUTPUT FORMAT:
+   - Always reply in JSON format strictly matching this schema:
+     {"type": "trigger_flow", "flowId": "<flow_id>"} OR {"type": "reply", "text": "<your answer>"}
+4. Keep replies friendly, respectful, and concise (strictly under 65 words) for WhatsApp readability.`;
+
+  const promptPayload = `${systemInstruction}
+
+=== RECENT CONVERSATION HISTORY ===
+${historyText || "(No previous messages.)"}
+===================================
+
+CURRENT INCOMING MESSAGE:
+Student: "${query}"`;
 
   const models = ["gemini-3.5-flash-lite", "gemini-3.5-flash", "gemini-3.8-flash", "gemini-flash-lite-latest"];
   for (const model of models) {
@@ -941,7 +973,7 @@ INSTRUCTIONS:
           contents: [
             {
               role: "user",
-              parts: [{ text: `${systemInstruction}\n\nStudent message: "${query}"` }]
+              parts: [{ text: promptPayload }]
             }
           ]
         })

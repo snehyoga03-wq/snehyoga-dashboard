@@ -171,6 +171,17 @@ export function WhatsAppChat() {
       .reverse()
       .find(m => m.sender === "user")?.text || "Namaste, class timing kya hai aur fees kitni hai?";
 
+    const validChatHistory = currentChatMessages
+      .filter(m => m.text && !m.text.startsWith("[Daily Reminder:"))
+      .slice(-10);
+
+    const hasPriorHistory = validChatHistory.length > 1;
+    const historyText = validChatHistory.map(m => {
+      const label = m.sender === "user" ? (selectedContact.name || "Student") : "Snehyoga Support";
+      const cleanText = m.text.replace(/^\[Button Clicked:\s*(.*?)\]$/, 'Clicked button: "$1"');
+      return `${label}: ${cleanText}`;
+    }).join("\n");
+
     setIsGeneratingAi(true);
     try {
       const [{ data: settings }, { data: kbData }] = await Promise.all([
@@ -180,7 +191,7 @@ export function WhatsAppChat() {
 
       const apiKey = (settings?.google_ai_studio_key || localStorage.getItem("google_ai_studio_key") || (import.meta.env.VITE_GEMINI_API_KEY as string) || "").trim();
       const kbContext = (kbData || []).map((k, i) => `${i + 1}. [${k.category}] Q: ${k.question}\nA: ${k.answer}`).join("\n\n");
-      const systemPrompt = settings?.ai_system_prompt || "You are the official Customer Support Executive at Snehyoga (https://snehyoga.com/), founded by Government-Certified Yoga Teacher Snehal Salunkhe. Warmly, politely, and professionally assist students on WhatsApp with batch timings (5 AM, 6 AM, 7:30 AM, 5 PM, 6 PM, 9 PM), plans, diet, and booking a free demo session.";
+      const systemPrompt = `You are the official Customer Support Executive at Snehyoga (https://snehyoga.com/), founded by Government-Certified Yoga Teacher Snehal Salunkhe. Warmly, politely, and professionally assist students on WhatsApp with batch timings (5 AM, 6 AM, 7:30 AM, 5 PM, 6 PM, 9 PM IST, Mon-Fri), plans (1 Month: ₹399/-, 6 Months: ₹1,800/-, 1 Year: ₹2,400/- with Free Diet Plan), free demo sessions, and diet guidance.`;
 
       const instruction = `${systemPrompt}
 
@@ -189,12 +200,40 @@ Snehyoga Verified Knowledge Base:
 ${kbContext}
 ---
 
+Student Information:
+- Student Name: ${selectedContact.name}
+- Student Phone: ${selectedContact.phone}
+- Student Portal Link: https://yoga.snehyoga.com
+
 MANDATORY RULES:
-1. ROLE: You are Snehyoga's helpful and polite Customer Support Executive.
-2. Reply in the EXACT SAME LANGUAGE and script as the student's message (Marathi, Hindi, Hinglish, or English).
-3. Student Name: ${selectedContact.name}
-4. Keep the reply courteous, clear, and under 75 words.
-5. Always begin with 'Namaste 🙏' or 'नमस्कार 🙏' and end with an offering to book a free demo session or assist further.`;
+1. MULTI-TURN CONVERSATION MEMORY:
+   ${hasPriorHistory ? `- THIS IS AN ONGOING CONVERSATION THREAD.
+   - DO NOT RE-GREET (do not repeat "Namaste", "नमस्कार", "Welcome to Snehyoga", etc.) because a conversation is already underway.
+   - Directly answer the student's question/follow-up in natural continuation.
+   - Connect short answers or numbers (e.g. "1 year", "morning", "saturday nasto ka?", "demo", "ok") to the preceding conversation topic.` : `- THIS IS THE FIRST MESSAGE of a new conversation.
+   - Begin with a warm greeting: "Namaste ${selectedContact.name ? selectedContact.name : ''} 🙏" or "नमस्कार 🙏".`}
+
+2. STRICT LANGUAGE CONTINUITY & SCRIPT MATCHING:
+   - Check the student's language across the RECENT CONVERSATION HISTORY and latest message:
+     * MARATHI: If the student speaks Marathi (in Devanagari or in Latin/Roman English alphabet like 'Saturday nasto ka?', 'kas karayach', 'kiti ahe', 'mala join karaycha ahe'), reply in MARATHI!
+       - If typed in Latin script, reply in clear Latin Marathi. If typed in Devanagari, reply in Devanagari.
+       - NEVER SWITCH TO HINDI OR ENGLISH on short answers like '1 year', 'ok', 'demo', 'morning'! RETAIN MARATHI.
+     * HINDI / HINGLISH: If the student speaks Hindi or Hinglish, reply in Hindi/Hinglish. Retain Hindi on short follow-ups.
+     * ENGLISH: If the student speaks English, reply in English.
+   - NEVER switch languages mid-conversation unless requested.
+
+3. BREVITY: Keep reply polite, warm, clear, and under 65 words for WhatsApp readability.`;
+
+      const promptPayload = `${instruction}
+
+=== RECENT CONVERSATION HISTORY ===
+${historyText || "(No previous messages.)"}
+===================================
+
+CURRENT MESSAGE TO RESPOND TO:
+Student (${selectedContact.name}): "${lastUserMsg}"
+
+Reply directly to the student as Snehyoga Support:`;
 
       const models = ["gemini-3.5-flash-lite", "gemini-3.5-flash", "gemini-3.8-flash", "gemini-flash-lite-latest"];
       let generated = "";
@@ -208,7 +247,7 @@ MANDATORY RULES:
               contents: [
                 {
                   role: "user",
-                  parts: [{ text: `${instruction}\n\nStudent's message:\n"${lastUserMsg}"` }]
+                  parts: [{ text: promptPayload }]
                 }
               ]
             })
