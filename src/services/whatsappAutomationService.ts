@@ -913,7 +913,7 @@ export async function askGeminiAutoResponder(
     }
     return {
       type: "reply",
-      text: `Namaste 🙏 Thank you for reaching out to Snehyoga! Our live classes run Mon-Fri across 6 batches: 5 AM, 6 AM, 7:30 AM, 5 PM, 6 PM, 9 PM IST. Please visit https://yoga.snehyoga.com or reply "Demo" to reserve your trial session.`,
+      text: `Namaste 🙏 Thank you for reaching out to Snehyoga! Our live classes run 7 Days a Week across 6 batches: Morning 5, 6, 8 AM & Evening 5, 6, 7 PM IST. Please visit https://www.snehyoga.com or reply "Demo" to reserve your trial session.`,
       source: "fallback"
     };
   }
@@ -927,7 +927,7 @@ export async function askGeminiAutoResponder(
     .map(m => `${m.sender}: ${m.text.replace(/^\[Button Clicked:\s*(.*?)\]$/, 'Clicked: "$1"')}`)
     .join("\n");
 
-  const systemInstruction = `You are the official Customer Support Executive at Snehyoga (https://snehyoga.com/), founded by Government-Certified Yoga Teacher Snehal Salunkhe. Warmly, politely, and professionally assist students on WhatsApp with batch timings (5 AM, 6 AM, 7:30 AM, 5 PM, 6 PM, 9 PM IST, Mon-Fri), plans (1 Month: ₹399/-, 6 Months: ₹1,800/-, 1 Year: ₹2,400/- with Free Diet Plan), free demo sessions, and diet guidance.
+  const systemInstruction = `You are the official Customer Support Executive at Snehyoga (https://snehyoga.com/), founded by Government-Certified Yoga Teacher Snehal Salunkhe. Warmly, politely, and professionally assist students on WhatsApp with batch timings (5 AM, 6 AM, 8 AM & 5 PM, 6 PM, 7 PM IST - 7 Days a Week), plans (Monthly ₹399/-, Yearly ₹2,400/- with ₹32,882 bonus pack free), free demo sessions, and diet guidance. Payment website: https://www.snehyoga.com/
 
 Verified Snehyoga Knowledge Base:
 ---
@@ -949,10 +949,15 @@ MANDATORY RULES:
      * HINDI / HINGLISH: If the student speaks Hindi or Hinglish, reply in Hindi/Hinglish. Retain Hindi on short follow-ups.
      * ENGLISH: If the student speaks English, reply in English.
    - NEVER switch languages mid-conversation unless requested.
-3. OUTPUT FORMAT:
+3. 7-DAY SCHEDULE & OFFICIAL POLICIES:
+   - Daily Yoga runs 7 DAYS A WEEK (365 days a year).
+   - 6 Batches: Morning 5, 6, 8 AM & Evening 5, 6, 7 PM IST.
+   - Weekend special sessions (Face Yoga, Sharirshuddhi, Trataka, Yoga Nidra, etc.).
+   - Payment Website: https://www.snehyoga.com/
+4. OUTPUT FORMAT:
    - Always reply in JSON format strictly matching this schema:
      {"type": "trigger_flow", "flowId": "<flow_id>"} OR {"type": "reply", "text": "<your answer>"}
-4. Keep replies friendly, respectful, and concise (strictly under 65 words) for WhatsApp readability.`;
+5. Keep replies friendly, respectful, and concise (strictly under 65 words) for WhatsApp readability.`;
 
   const promptPayload = `${systemInstruction}
 

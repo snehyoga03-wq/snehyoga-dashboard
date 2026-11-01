@@ -221,20 +221,33 @@ Deno.serve(async (req) => {
           }
         } catch (_) {}
 
-        // Look up target user's personal joining link from main_data_registration
+        // Look up target user's personal joining link and membership status from main_data_registration
         let userSessionLink = "https://yoga.snehyoga.com/join/default";
+        let matchedStudent: any = null;
+        let isPaidUser = false;
+        let userPlan = "Free";
+        let daysLeft = 0;
+
         try {
           const last10 = fromPhone.slice(-10);
-          const { data: matchedUser } = await supabase
+          const { data: matched } = await supabase
             .from("main_data_registration")
-            .select("name, referral_link, mobile_number")
+            .select("name, referral_link, mobile_number, days_left, subscription_plan, batch_timing, subscription_paused")
             .ilike("mobile_number", `%${last10}%`)
             .maybeSingle();
 
-          if (matchedUser?.referral_link?.trim()) {
-            const slug = getSlug(matchedUser.referral_link.trim());
+          matchedStudent = matched;
+          if (matched?.name && (!userName || userName === "User")) {
+            userName = matched.name;
+          }
+          if (matched?.referral_link?.trim()) {
+            const slug = getSlug(matched.referral_link.trim());
             userSessionLink = `https://yoga.snehyoga.com/join/${slug}`;
           }
+          daysLeft = Number(matched?.days_left ?? 0);
+          userPlan = (matched?.subscription_plan || "").trim();
+          const planLower = userPlan.toLowerCase();
+          isPaidUser = !!matched && daysLeft > 0 && !planLower.includes("free") && !planLower.includes("trial") && !planLower.includes("demo");
         } catch (_) {}
 
         // 3. Smart Flow Graph & Keyword Traversal Engine
@@ -379,13 +392,13 @@ Deno.serve(async (req) => {
             }
           }
 
-          // Step D: General Fallback for Session Link requests
-          if (!replySent && (cleanInput.includes("morning") || cleanInput.includes("evening") || cleanInput.includes("join") || cleanInput.includes("session") || cleanInput.includes("link"))) {
+          // Step D: General Fallback for Explicit Session Link requests (e.g. "link", "session link", "zoom link")
+          if (!replySent && (cleanInput === "link" || cleanInput === "session link" || cleanInput === "send link" || cleanInput === "zoom link" || cleanInput === "class link")) {
             const isInvalidGreeting = !userName || ["user", "na", "n/a", "null"].includes(userName.trim().toLowerCase()) || /^\+?\d+$/.test(userName.trim());
             const nameGreeting = isInvalidGreeting ? "" : userName.trim();
             const greetingHeader = nameGreeting ? `Namaste ${nameGreeting} 🙏` : `Namaste 🙏`;
 
-            const fallbackText = `${greetingHeader}\n\nYour Yoga Session link is ready! 🧘✨\n\nPersonal Joining Link: ${userSessionLink}\n\nPlease join 5 minutes early with your yoga mat ready. Let's start with positive energy!\n\nSneha Yoga Studio 🌸`;
+            const fallbackText = `${greetingHeader}\n\nYour Yoga Session link is ready! 🧘✨\n\nPersonal Joining Link: ${userSessionLink}\n\nPlease join 5 minutes early with your yoga mat ready. Let's start with positive energy!\n\nSnehyoga Studio 🌸`;
             
             console.log(`🚀 Sending Direct Session Link Fallback to ${fromPhone}`);
             await sendWAMessage(phoneNumberId, waToken, fromPhone, fallbackText);
@@ -418,7 +431,7 @@ Deno.serve(async (req) => {
               const isAllowed = !allowedNumbers || allowedNumbers === "*" || allowedNumbers.split(",").map(p => formatWaPhone(p.trim())).includes(fromPhone);
 
               if (isAiEnabled && isAllowed) {
-                console.log(`🤖 Evaluating AI Auto-Responder for incoming message from ${fromPhone}: "${userMsgText}"`);
+                console.log(`🤖 Evaluating AI Auto-Responder for incoming message from ${fromPhone}: "${userMsgText}" (Paid User: ${isPaidUser})`);
 
                 // 1. Fetch Knowledge Base from ai_knowledge_base
                 const { data: kbData } = await supabase
@@ -469,28 +482,48 @@ Deno.serve(async (req) => {
                     }
                   }
                   if (!aiReply) {
-                    aiReply = `Namaste ${userName !== 'User' ? userName : ''} 🙏\n\nThank you for messaging Snehyoga! Our live classes run Mon-Fri across 6 batches: 5 AM, 6 AM, 7:30 AM, 5 PM, 6 PM, 9 PM IST.\n\nPersonal Joining Link: ${userSessionLink}\n\nHow may we assist you with our yoga & wellness programs?`;
+                    aiReply = `Namaste ${userName !== 'User' ? userName : ''} 🙏\n\nThank you for messaging Snehyoga! Our live classes run 7 Days a Week across 6 batches: Morning 5, 6, 8 AM & Evening 5, 6, 7 PM IST.\n\nWebsite & Details: https://www.snehyoga.com/\nPersonal Link: ${userSessionLink}\n\nHow may we assist you today?`;
                   }
                 } else {
-                  // Call Google Gemini API with Conversational Memory & Language Continuity
+                  // Call Google Gemini API with Conversational Memory, Paid/Free Logic & Language Continuity
                   const kbContext = kbItems
                     .map((k, i) => `${i + 1}. [${k.category}]\nQ: ${k.question}\nA: ${k.answer}`)
                     .join("\n\n");
 
-                  const systemInstruction = `You are the official Customer Support Executive at Snehyoga (https://snehyoga.com/), founded by Government-Certified Yoga Teacher and Lifestyle Coach Snehal Salunkhe. Warmly, politely, and professionally assist students on WhatsApp with batch timings (5 AM, 6 AM, 7:30 AM, 5 PM, 6 PM, 9 PM IST, Mon-Fri), plans (1 Month: ₹399/-, 6 Months: ₹1,800/-, 1 Year: ₹2,400/- with Free Diet Plan), free demo sessions, and diet guidance.
+                  const systemInstruction = `You are the official Customer Support Executive at Snehyoga (https://snehyoga.com/), founded by Government-Certified Yoga Teacher and Lifestyle Coach Snehal Salunkhe. Warmly, politely, and professionally assist students on WhatsApp with batch timings (5 AM, 6 AM, 8 AM & 5 PM, 6 PM, 7 PM IST - 7 Days a Week), plans (Monthly ₹399/-, Yearly ₹2,400/- with ₹32,882 bonus pack free), free demo sessions, and diet guidance.
 
 Snehyoga Verified Knowledge Base:
 ---
 ${kbContext}
 ---
 
-Student Information:
+Student Information & Membership Status:
 - Student Name: ${userName}
 - Student Phone: ${fromPhone}
-- Personal Student Portal Link: ${userSessionLink}
+- Membership Category: ${isPaidUser ? "ACTIVE PAID SNEHYOGA MEMBER" : "FREE PROSPECTIVE STUDENT / LEAD"}
+- Subscription Plan: ${userPlan || "None (Not subscribed)"}
+- Days Remaining on Plan: ${daysLeft} days
+- Assigned Batch: ${matchedStudent?.batch_timing || "Flexible"}
+- Personal Student Portal / Session Link: ${userSessionLink}
 
 MANDATORY INSTRUCTIONS FOR WHATSAPP CUSTOMER SUPPORT:
-1. MULTI-TURN CONVERSATION MEMORY & NATURAL CONTINUATION:
+1. USER MEMBERSHIP STATUS LOGIC (PAID vs FREE):
+   ${isPaidUser ? `A) THE USER IS AN ACTIVE PAID MEMBER:
+   - Greet and assist them warmly as a valued active member of Snehyoga.
+   - Assist them with class joining, their personal session link (${userSessionLink}), batch timings (5, 6, 8 AM & 5, 6, 7 PM IST, 7 days a week), replay access (available whole day), or weekend special sessions (Face Yoga, Sharirshuddhi, Trataka, Yoga Nidra).
+   - CRITICAL: DO NOT pitch them to buy or pay for the basic Snehyoga 365 plan again! They have ALREADY paid and have ${daysLeft} days left.
+   - If they ask about other separate programs (e.g. 1:1 Consultation with Snehal, Manifestation TTC, etc.), you can guide them.` : `B) THE USER IS A FREE PROSPECTIVE STUDENT / LEAD:
+   - Warmly welcome them to Snehyoga.
+   - Explain how Snehyoga 365 works: 7 Days a week, 55 mins daily reset, 6 batches (5, 6, 8 AM & 5, 6, 7 PM IST), 100% beginner-friendly, replay access for missed sessions.
+   - If they ask about fees or joining:
+     * Monthly Flexible Plan: ₹399/month
+     * Yearly Best Value Plan: ₹2,400/year (Just ₹200/month, saves 91%, includes ₹32,882 bonus pack 100% FREE!)
+   - FOR PAYMENT & JOINING: Direct them to our official website:
+     👉 https://www.snehyoga.com/
+     where they can explore details and make secure payment via Razorpay.
+   - You can also offer to arrange a free live demo session!`}
+
+2. MULTI-TURN CONVERSATION MEMORY & NATURAL CONTINUATION:
    - Carefully read the RECENT CONVERSATION HISTORY below to understand the dialogue so far.
    ${hasPriorHistory ? `- THIS IS AN ONGOING CONVERSATION THREAD.
    - DO NOT RE-GREET (do NOT repeat "Namaste", "नमस्कार", "Snehyoga mein aapka swagat hai", etc.) because you have already greeted the student previously!
@@ -498,11 +531,11 @@ MANDATORY INSTRUCTIONS FOR WHATSAPP CUSTOMER SUPPORT:
    - Treat short answers or fragments (e.g. "1 year", "morning", "saturday nasto ka?", "demo", "ok", "fees") as answers or follow-ups to the preceding discussion topic.` : `- THIS IS THE FIRST MESSAGE of a new conversation.
    - Greet warmly once: "Namaste ${userName !== 'User' ? userName : ''} 🙏" or "नमस्कार 🙏".`}
 
-2. STRICT LANGUAGE CONTINUITY & SCRIPT MATCHING:
+3. STRICT LANGUAGE CONTINUITY & SCRIPT MATCHING:
    - Detect the student's language by looking at their messages across the ENTIRE conversation history and current message:
      * MARATHI (मराठी):
        - If the student communicates in Marathi in Devanagari script (उदा. 'नमस्कार', 'क्लास कधी सुरू होतो?', 'फीस किती आहे?'): Reply in polite Marathi (Devanagari script).
-       - If the student communicates in Marathi using Latin/English alphabets (e.g. 'Saturday nasto ka?', 'kas karayach', 'kay timing ahe', 'kiti fees ahe', 'mala join karaycha ahe', 'shiku shakto ka'): Reply in friendly Latin Marathi (e.g. 'Nahi, Saturday ani Sunday class nastat (holiday aste). Classes fakta Monday te Friday astat...').
+       - If the student communicates in Marathi using Latin/English alphabets (e.g. 'Saturday nasto ka?', 'kas karayach', 'kay timing ahe', 'kiti fees ahe', 'mala join karaycha ahe', 'shiku shakto ka'): Reply in friendly Latin Marathi (e.g. 'Snehyoga madhe hafte che 7 divas classes astat. Saturday ani Sunday special sessions astat...').
        - CRITICAL RULE FOR MARATHI: When the student gives short answers (e.g. '1 year', 'ok', 'morning', 'demo', 'fees', 'yes', 'ho'), NEVER SWITCH TO HINDI OR ENGLISH! RETAIN MARATHI.
      * HINDI / HINGLISH:
        - If the student communicates in Hindi or Hinglish (e.g. 'kya timing hai', 'kab shuru hota hai', 'kaise join kare', 'fees kitni hai', 'theek hai'): Reply in Hindi or Hinglish. Retain Hindi on short follow-ups.
@@ -510,13 +543,20 @@ MANDATORY INSTRUCTIONS FOR WHATSAPP CUSTOMER SUPPORT:
        - If the student communicates in English: Reply in polite, clear English.
    - NEVER SWITCH LANGUAGES mid-conversation unless the student explicitly asks to switch.
 
-3. ACCURACY & POLICIES:
-   - Batch Timings: Mon-Fri across 6 batches: Morning 5:00 AM, 6:00 AM, 7:30 AM & Evening 5:00 PM, 6:00 PM, 9:00 PM IST (55 mins each). Saturday & Sunday are holidays. Students can flexibly switch batches any day.
-   - Plans & Fees: 1 Month: ₹399/-, 6 Months: ₹1,800/-, 1 Year Best Value: ₹2,400/- (includes 1-Year Free Home Diet Plan).
-   - Free Demo Session: Free live demo session available for any batch slot.
-   - Portal Link: ${userSessionLink}
+4. SNEHYOGA POLICIES & 7-DAY SCHEDULE:
+   - Daily Yoga 7 DAYS A WEEK (365 days a year). No weekend holidays!
+   - 6 Daily Batches (55 mins each):
+     * Morning: 5:00 AM, 6:00 AM, 8:00 AM IST
+     * Evening: 5:00 PM, 6:00 PM, 7:00 PM IST
+   - Weekly Structure:
+     * Mon-Fri: Core Yogasana, Pranayama, and Meditation.
+     * Sat-Sun: Special Weekend Sessions (Face Yoga, Sharirshuddhi, Trataka Dhyan, Yoga Nidra, Head Massage, Bindu Sadhana, Vaman Kriya, Shankhaprakshalan, Manifestation Meditation, Antarmaun).
+   - Replay Access: Full-day replay access is always available if a live session is missed.
+   - Equipment: No special equipment needed, just a yoga mat and comfortable clothes.
+   - Beginner Friendly: 100% yes, gentle daily reset.
+   - Payment Website: https://www.snehyoga.com/
 
-4. BREVITY & WHATSAPP FORMAT:
+5. BREVITY & WHATSAPP FORMAT:
    - Keep answers clear, polite, warm, and concise (strictly under 65 words for WhatsApp readability).
    - Use clean line breaks and relevant emojis (🙏, 🧘, 🌿, ✨).`;
 

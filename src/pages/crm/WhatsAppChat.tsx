@@ -184,14 +184,25 @@ export function WhatsAppChat() {
 
     setIsGeneratingAi(true);
     try {
-      const [{ data: settings }, { data: kbData }] = await Promise.all([
+      const cleanPhone = selectedContact.phone.replace(/\D/g, "");
+      const last10 = cleanPhone.slice(-10);
+
+      const [{ data: settings }, { data: kbData }, { data: matchedMember }] = await Promise.all([
         supabase.from("session_settings").select("google_ai_studio_key, ai_system_prompt").maybeSingle(),
-        supabase.from("ai_knowledge_base").select("category, question, answer").limit(30)
+        supabase.from("ai_knowledge_base").select("category, question, answer").limit(35),
+        supabase.from("main_data_registration")
+          .select("name, days_left, subscription_plan, batch_timing, referral_link")
+          .ilike("mobile_number", `%${last10}%`)
+          .maybeSingle()
       ]);
+
+      const daysLeft = Number(matchedMember?.days_left ?? 0);
+      const planName = (matchedMember?.subscription_plan || "").toLowerCase();
+      const isPaidUser = !!matchedMember && daysLeft > 0 && !planName.includes("free") && !planName.includes("trial") && !planName.includes("demo");
 
       const apiKey = (settings?.google_ai_studio_key || localStorage.getItem("google_ai_studio_key") || (import.meta.env.VITE_GEMINI_API_KEY as string) || "").trim();
       const kbContext = (kbData || []).map((k, i) => `${i + 1}. [${k.category}] Q: ${k.question}\nA: ${k.answer}`).join("\n\n");
-      const systemPrompt = `You are the official Customer Support Executive at Snehyoga (https://snehyoga.com/), founded by Government-Certified Yoga Teacher Snehal Salunkhe. Warmly, politely, and professionally assist students on WhatsApp with batch timings (5 AM, 6 AM, 7:30 AM, 5 PM, 6 PM, 9 PM IST, Mon-Fri), plans (1 Month: ₹399/-, 6 Months: ₹1,800/-, 1 Year: ₹2,400/- with Free Diet Plan), free demo sessions, and diet guidance.`;
+      const systemPrompt = `You are the official Customer Support Executive at Snehyoga (https://snehyoga.com/), founded by Government-Certified Yoga Teacher and Lifestyle Coach Snehal Salunkhe. Warmly, politely, and professionally assist students on WhatsApp with batch timings (5 AM, 6 AM, 8 AM & 5 PM, 6 PM, 7 PM IST - 7 Days a Week), plans (Monthly ₹399/-, Yearly ₹2,400/- with ₹32,882 bonus pack free), free demo sessions, and diet guidance.`;
 
       const instruction = `${systemPrompt}
 
@@ -200,20 +211,40 @@ Snehyoga Verified Knowledge Base:
 ${kbContext}
 ---
 
-Student Information:
+Student Information & Membership Status:
 - Student Name: ${selectedContact.name}
 - Student Phone: ${selectedContact.phone}
+- Membership Category: ${isPaidUser ? "ACTIVE PAID SNEHYOGA MEMBER" : "FREE PROSPECTIVE STUDENT / LEAD"}
+- Subscription Plan: ${matchedMember?.subscription_plan || "None (Not subscribed)"}
+- Days Remaining: ${daysLeft} days
+- Assigned Batch: ${matchedMember?.batch_timing || "Flexible"}
 - Student Portal Link: https://yoga.snehyoga.com
 
 MANDATORY RULES:
-1. MULTI-TURN CONVERSATION MEMORY:
+1. USER MEMBERSHIP LOGIC (PAID vs FREE):
+   ${isPaidUser ? `A) THE USER IS AN ACTIVE PAID MEMBER:
+   - Greet and assist them warmly as an active registered Snehyoga member.
+   - Assist them with class joining, batch schedule (5, 6, 8 AM & 5, 6, 7 PM IST, 7 days a week), replay access (available whole day), or weekend special sessions (Face Yoga, Sharirshuddhi, Trataka, Yoga Nidra).
+   - CRITICAL: DO NOT pitch them to buy or pay for the basic Snehyoga 365 subscription again, because they have ALREADY paid and have ${daysLeft} days active!
+   - If they ask about other programs (1:1 Consultation, Manifestation TTC, etc.), guide them.` : `B) THE USER IS A FREE PROSPECTIVE STUDENT / LEAD:
+   - Warmly welcome them to Snehyoga.
+   - Explain Snehyoga 365: 7 Days a week, 55 mins daily reset, 6 batches (5, 6, 8 AM & 5, 6, 7 PM IST), beginner-friendly, replay access for missed sessions.
+   - If they ask about fees or joining:
+     * Monthly Flexible Plan: ₹399/month
+     * Yearly Best Value Plan: ₹2,400/year (Just ₹200/month, saves 91%, includes ₹32,882 bonus pack 100% FREE!)
+   - FOR PAYMENT & JOINING: Direct them to our official website:
+     👉 https://www.snehyoga.com/
+     where they can explore details and make secure payment via Razorpay.
+   - You can also offer to arrange a free live demo session!`}
+
+2. MULTI-TURN CONVERSATION MEMORY:
    ${hasPriorHistory ? `- THIS IS AN ONGOING CONVERSATION THREAD.
    - DO NOT RE-GREET (do not repeat "Namaste", "नमस्कार", "Welcome to Snehyoga", etc.) because a conversation is already underway.
    - Directly answer the student's question/follow-up in natural continuation.
    - Connect short answers or numbers (e.g. "1 year", "morning", "saturday nasto ka?", "demo", "ok") to the preceding conversation topic.` : `- THIS IS THE FIRST MESSAGE of a new conversation.
    - Begin with a warm greeting: "Namaste ${selectedContact.name ? selectedContact.name : ''} 🙏" or "नमस्कार 🙏".`}
 
-2. STRICT LANGUAGE CONTINUITY & SCRIPT MATCHING:
+3. STRICT LANGUAGE CONTINUITY & SCRIPT MATCHING:
    - Check the student's language across the RECENT CONVERSATION HISTORY and latest message:
      * MARATHI: If the student speaks Marathi (in Devanagari or in Latin/Roman English alphabet like 'Saturday nasto ka?', 'kas karayach', 'kiti ahe', 'mala join karaycha ahe'), reply in MARATHI!
        - If typed in Latin script, reply in clear Latin Marathi. If typed in Devanagari, reply in Devanagari.
@@ -222,7 +253,14 @@ MANDATORY RULES:
      * ENGLISH: If the student speaks English, reply in English.
    - NEVER switch languages mid-conversation unless requested.
 
-3. BREVITY: Keep reply polite, warm, clear, and under 65 words for WhatsApp readability.`;
+4. 7-DAY SCHEDULE & POLICIES:
+   - Daily Yoga runs 7 DAYS A WEEK (365 days a year).
+   - 6 Batches: Morning 5:00, 6:00, 8:00 AM & Evening 5:00, 6:00, 7:00 PM IST (55 mins).
+   - Mon-Fri: Yogasana, Pranayama, Meditation.
+   - Sat-Sun: Weekend Special Sessions (Face Yoga, Sharirshuddhi, Trataka, Yoga Nidra, etc.).
+   - Payment Website: https://www.snehyoga.com/
+
+5. BREVITY: Keep reply polite, warm, clear, and under 65 words for WhatsApp readability.`;
 
       const promptPayload = `${instruction}
 
